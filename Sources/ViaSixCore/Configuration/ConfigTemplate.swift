@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 public enum ConfigTemplateError: LocalizedError, Equatable, Sendable {
@@ -15,7 +16,7 @@ public enum ConfigTemplateError: LocalizedError, Equatable, Sendable {
         case .missingProxyOutbound: "Xray 模板缺少 tag 为 proxy 的出站配置"
         case .missingVnext: "proxy 出站缺少 settings.vnext"
         case .invalidLocalInbound:
-            "Xray 模板必须仅监听本机回环地址，并包含 127.0.0.1:11451 的 mixed 入站"
+            "Xray 模板必须仅监听本机回环地址，并包含端口有效的 mixed 入站"
         case .connectionNotConfigured: "代理连接尚未配置，请在“设置”中导入或编辑你自己的 Xray 模板"
         }
     }
@@ -48,14 +49,17 @@ public enum ConfigTemplate {
         return try JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted, .sortedKeys])
     }
 
-    public static func validateTemplate(_ template: Data) throws {
-        try validateLocalInbounds(in: configurationObject(in: template))
+    @discardableResult
+    public static func validateTemplate(_ template: Data) throws -> ProxyEndpoint {
+        let endpoint = try validateLocalInbounds(in: configurationObject(in: template))
         _ = try replacingAddress(in: template, with: "2001:db8::1")
+        return endpoint
     }
 
-    public static func validateForLaunch(_ config: Data) throws {
+    @discardableResult
+    public static func validateForLaunch(_ config: Data) throws -> ProxyEndpoint {
         let object = try configurationObject(in: config)
-        try validateLocalInbounds(in: object)
+        let endpoint = try validateLocalInbounds(in: object)
         let outbounds = try outboundList(in: object)
         guard let proxy = outbounds.first(where: { $0["tag"] as? String == "proxy" }) else {
             throw ConfigTemplateError.missingProxyOutbound
@@ -71,6 +75,7 @@ public enum ConfigTemplate {
         guard !containsPlaceholder(in: proxy) else {
             throw ConfigTemplateError.connectionNotConfigured
         }
+        return endpoint
     }
 
     public static func write(
@@ -101,6 +106,10 @@ public enum ConfigTemplate {
         return address
     }
 
+    public static func proxyEndpoint(in config: Data) throws -> ProxyEndpoint {
+        try validateLocalInbounds(in: configurationObject(in: config))
+    }
+
     private static func configurationObject(in data: Data) throws -> [String: Any] {
         guard let object = try? JSONSerialization.jsonObject(with: data),
             let config = object as? [String: Any]
@@ -117,36 +126,50 @@ public enum ConfigTemplate {
         return outbounds
     }
 
-    private static func validateLocalInbounds(in config: [String: Any]) throws {
+    private static func validateLocalInbounds(in config: [String: Any]) throws -> ProxyEndpoint {
         guard let inbounds = config["inbounds"] as? [[String: Any]], !inbounds.isEmpty else {
             throw ConfigTemplateError.invalidLocalInbound
         }
 
-        let allowedLoopbackAddresses = Set(["127.0.0.1", "::1", "localhost"])
         guard
             inbounds.allSatisfy({ inbound in
                 guard let listen = inbound["listen"] as? String else { return false }
-                return allowedLoopbackAddresses.contains(
-                    listen.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                )
+                return isLoopbackHost(listen)
             })
         else {
             throw ConfigTemplateError.invalidLocalInbound
         }
 
-        let hasManagedInbound = inbounds.contains { inbound in
+        guard let managedInbound = inbounds.first(where: { inbound in
             let listen = (inbound["listen"] as? String)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .lowercased()
             let protocolName = (inbound["protocol"] as? String)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .lowercased()
-            let port = (inbound["port"] as? NSNumber)?.intValue
-            return listen == "127.0.0.1" && protocolName == "mixed" && port == 11_451
-        }
-        guard hasManagedInbound else {
+            let port = inbound["port"] as? Int
+            return listen.map(isLoopbackHost) == true
+                && protocolName == "mixed"
+                && port.map({ (1...65_535).contains($0) }) == true
+        }),
+            let host = (managedInbound["listen"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased(),
+            let port = managedInbound["port"] as? Int
+        else {
             throw ConfigTemplateError.invalidLocalInbound
         }
+        return ProxyEndpoint(host: host, port: port)
+    }
+
+    private static func isLoopbackHost(_ value: String) -> Bool {
+        let host = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if host == "localhost" || host == "::1" { return true }
+
+        var address = in_addr()
+        let isIPv4 = host.withCString { inet_pton(AF_INET, $0, &address) == 1 }
+        guard isIPv4 else { return false }
+        return (UInt32(bigEndian: address.s_addr) >> 24) == 127
     }
 
     private static func containsPlaceholder(in value: Any) -> Bool {

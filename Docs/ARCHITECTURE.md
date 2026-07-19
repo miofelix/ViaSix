@@ -105,7 +105,7 @@ template.json
 ViaSix 只修改 `tag == "proxy"` 的第一个 `settings.vnext.address`。导入模板时会校验：
 
 - 所有入站只监听回环地址。
-- 存在 `127.0.0.1:11451` 的 `mixed` 入站。
+- 存在端口有效的回环 `mixed` 入站；应用从该入站读取实际主机和端口，并将其用于就绪探测和出口检测。
 - 存在非空 `outbounds`、`proxy` 出站和 `vnext`。
 - 启动时不再包含中性 UUID 或示例域名占位符。
 

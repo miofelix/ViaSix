@@ -118,6 +118,15 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            HStack(spacing: 8) {
+                Text("本地端点")
+                    .font(.caption.weight(.medium))
+                Text(model.state.proxyEndpoint.displayAddress)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+
             HStack {
                 Button("导入 Xray JSON…", systemImage: "square.and.arrow.down") {
                     importXrayTemplate()
@@ -138,7 +147,7 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                Text("导入前会检查 JSON 结构；当前配置文件保存在 ViaSix 应用数据目录中。")
+                Text("本地端点从配置中的回环 mixed 入站自动读取；配置文件保存在 ViaSix 应用数据目录中。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

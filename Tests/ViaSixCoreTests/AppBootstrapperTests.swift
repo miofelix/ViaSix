@@ -187,7 +187,8 @@ final class AppBootstrapperTests: XCTestCase {
             path: "/first"
         )
         try await bootstrapper.replaceTemplate(with: firstTemplate)
-        try await bootstrapper.prepareConfigForLaunch(ip: "2606::8")
+        let endpoint = try await bootstrapper.prepareConfigForLaunch(ip: "2606::8")
+        XCTAssertEqual(endpoint, ProxyEndpoint())
 
         let secondTemplate = try TestConfigFixtures.connectionTemplate(
             userID: "22de5d8d-17f7-40e8-a83f-567ae87c865a",

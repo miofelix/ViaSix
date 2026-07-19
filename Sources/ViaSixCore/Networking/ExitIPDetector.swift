@@ -1,13 +1,17 @@
 import Foundation
 import Network
 
-public struct ProxyEndpoint: Equatable, Sendable {
+public struct ProxyEndpoint: Codable, Equatable, Sendable {
     public let host: String
     public let port: Int
 
     public init(host: String = AppMetadata.proxyHost, port: Int = AppMetadata.proxyPort) {
         self.host = host
         self.port = port
+    }
+
+    public var displayAddress: String {
+        host.contains(":") ? "[\(host)]:\(port)" : "\(host):\(port)"
     }
 }
 

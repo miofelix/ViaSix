@@ -26,16 +26,19 @@ public actor AppBootstrapper {
         )
     }
 
-    public func prepareConfigForLaunch(ip: String) throws {
+    @discardableResult
+    public func prepareConfigForLaunch(ip: String) throws -> ProxyEndpoint {
         let template = try Data(contentsOf: paths.templateConfig)
         let config = try ConfigTemplate.replacingAddress(in: template, with: ip)
-        try ConfigTemplate.validateForLaunch(config)
+        let endpoint = try ConfigTemplate.validateForLaunch(config)
         try config.write(to: paths.generatedConfig, options: .atomic)
         try FilePermissions.restrictFile(paths.generatedConfig)
+        return endpoint
     }
 
-    public func replaceTemplate(with data: Data, selectedIP: String? = nil) throws {
-        try ConfigTemplate.validateTemplate(data)
+    @discardableResult
+    public func replaceTemplate(with data: Data, selectedIP: String? = nil) throws -> ProxyEndpoint {
+        let endpoint = try ConfigTemplate.validateTemplate(data)
         let normalizedIP = selectedIP?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let validationIP = normalizedIP.isEmpty ? "2001:db8::2" : normalizedIP
         let generatedConfig = try ConfigTemplate.replacingAddress(in: data, with: validationIP)
@@ -51,9 +54,11 @@ public actor AppBootstrapper {
             try generatedConfig.write(to: paths.generatedConfig, options: .atomic)
             try FilePermissions.restrictFile(paths.generatedConfig)
         }
+        return endpoint
     }
 
-    public func importTemplate(from sourceURL: URL, selectedIP: String? = nil) throws {
+    @discardableResult
+    public func importTemplate(from sourceURL: URL, selectedIP: String? = nil) throws -> ProxyEndpoint {
         try replaceTemplate(with: Data(contentsOf: sourceURL), selectedIP: selectedIP)
     }
 
@@ -71,6 +76,10 @@ public actor AppBootstrapper {
             return nil
         }
         return ConfigTemplate.address(in: try Data(contentsOf: paths.generatedConfig))
+    }
+
+    public func currentProxyEndpoint() throws -> ProxyEndpoint {
+        try ConfigTemplate.proxyEndpoint(in: Data(contentsOf: paths.templateConfig))
     }
 
     public func resultForSelectedIP(_ selectedIP: String? = nil) throws -> SpeedTestResult? {

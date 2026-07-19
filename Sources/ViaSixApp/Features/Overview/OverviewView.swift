@@ -225,7 +225,7 @@ struct OverviewView: View {
     }
 
     private var proxyEndpoint: String {
-        "\(AppMetadata.proxyHost):\(AppMetadata.proxyPort)"
+        model.state.proxyEndpoint.displayAddress
     }
 
     private var proxyEnabledBinding: Binding<Bool> {

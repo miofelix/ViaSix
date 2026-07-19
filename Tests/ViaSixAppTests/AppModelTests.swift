@@ -97,6 +97,24 @@ final class AppModelTests: XCTestCase {
         await model.shutdown()
     }
 
+    func testBootstrapUsesProxyEndpointFromTemplate() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let bootstrapper = AppBootstrapper(paths: paths)
+        try await bootstrapper.prepareDefaults()
+        let template = Data(
+            #"{"inbounds":[{"listen":"127.0.0.2","port":18080,"protocol":"mixed"}],"outbounds":[{"tag":"proxy","settings":{"vnext":[{"address":"2606::5","users":[{"id":"7b602ceb-cc3f-4274-a79d-c1a38f0fb0da"}]}]},"streamSettings":{"tlsSettings":{"serverName":"proxy.example.net"},"wsSettings":{"host":"proxy.example.net","path":"/viasix"}}}]}"#.utf8
+        )
+        try await bootstrapper.replaceTemplate(with: template)
+
+        let model = makeModel(paths: paths, bootstrapper: bootstrapper)
+        model.start()
+        try await waitUntilReady(model)
+
+        XCTAssertEqual(model.state.proxyEndpoint, ProxyEndpoint(host: "127.0.0.2", port: 18_080))
+        await model.shutdown()
+    }
+
     private func waitUntilReady(_ model: AppModel) async throws {
         for _ in 0..<100 {
             if model.state.launchPhase == .ready { return }

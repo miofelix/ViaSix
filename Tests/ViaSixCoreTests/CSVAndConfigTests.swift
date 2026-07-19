@@ -102,7 +102,34 @@ final class CSVAndConfigTests: XCTestCase {
         nonLoopbackObject["inbounds"] = inbounds
         let wrongPortTemplate = try JSONSerialization.data(withJSONObject: nonLoopbackObject)
 
-        XCTAssertThrowsError(try ConfigTemplate.validateForLaunch(wrongPortTemplate)) { error in
+        let endpoint = try XCTUnwrap(try? ConfigTemplate.validateForLaunch(wrongPortTemplate))
+        XCTAssertEqual(endpoint, ProxyEndpoint(host: "127.0.0.1", port: 10_080))
+    }
+
+    func testConfigExtractsCustomLoopbackEndpoint() throws {
+        let template = try TestConfigFixtures.connectionTemplate(
+            userID: "ad41c72c-3f38-440e-a84d-37056d5ac649",
+            serverName: "proxy.example.net",
+            path: "/viasix",
+            listen: "127.0.0.2",
+            port: 18_080
+        )
+
+        XCTAssertEqual(
+            try ConfigTemplate.validateTemplate(template),
+            ProxyEndpoint(host: "127.0.0.2", port: 18_080)
+        )
+    }
+
+    func testConfigRejectsInvalidManagedPort() throws {
+        let template = try TestConfigFixtures.connectionTemplate(
+            userID: "ad41c72c-3f38-440e-a84d-37056d5ac649",
+            serverName: "proxy.example.net",
+            path: "/viasix",
+            port: 65_536
+        )
+
+        XCTAssertThrowsError(try ConfigTemplate.validateTemplate(template)) { error in
             XCTAssertEqual(error as? ConfigTemplateError, .invalidLocalInbound)
         }
     }

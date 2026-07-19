@@ -8,14 +8,16 @@ enum TestConfigFixtures {
         address: String = "2001:db8::1",
         userID: String,
         serverName: String,
-        path: String
+        path: String,
+        listen: String = "127.0.0.1",
+        port: Int = 11_451
     ) throws -> Data {
         let object: [String: Any] = [
             "inbounds": [
                 [
                     "tag": "mixed-in",
-                    "listen": "127.0.0.1",
-                    "port": 11_451,
+                    "listen": listen,
+                    "port": port,
                     "protocol": "mixed",
                     "settings": ["auth": "noauth", "udp": true],
                 ]

@@ -144,7 +144,7 @@ struct MenuBarView: View {
     }
 
     private var xrayStatusTitle: String {
-        let endpoint = "\(AppMetadata.proxyHost):\(AppMetadata.proxyPort)"
+        let endpoint = model.state.proxyEndpoint.displayAddress
         return switch model.state.xrayPhase {
         case .stopped: "本地代理已停止 · \(endpoint)"
         case .validating: "正在检查代理配置"
@@ -165,7 +165,7 @@ struct MenuBarView: View {
     }
 
     private var proxyEndpoint: String {
-        "\(AppMetadata.proxyHost):\(AppMetadata.proxyPort)"
+        model.state.proxyEndpoint.displayAddress
     }
 
     private var parameterValidationMessage: String? {

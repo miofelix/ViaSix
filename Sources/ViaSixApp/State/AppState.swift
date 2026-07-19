@@ -60,6 +60,7 @@ struct AppState: Equatable, Sendable {
     var runtimeStatus: RuntimeInstallationStatus?
     var speedTest = SpeedTestState()
     var xrayPhase: XrayPhase = .stopped
+    var proxyEndpoint = ProxyEndpoint()
     var exit = ExitState()
     var logs: [AppLogEntry] = []
     var notice: AppNotice?

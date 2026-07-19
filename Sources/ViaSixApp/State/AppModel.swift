@@ -170,7 +170,10 @@ final class AppModel {
                 }
             }
             do {
-                try await bootstrapper.importTemplate(from: url, selectedIP: selectedIP)
+                state.proxyEndpoint = try await bootstrapper.importTemplate(
+                    from: url,
+                    selectedIP: selectedIP
+                )
                 appendLog(source: .app, level: .success, message: "已导入代理连接模板")
                 showNotice("代理配置已导入", style: .success)
             } catch {
@@ -362,7 +365,8 @@ final class AppModel {
                 guard !selectedIP.isEmpty else {
                     throw AppModelError.missingSelectedIP
                 }
-                try await bootstrapper.prepareConfigForLaunch(ip: selectedIP)
+                let proxyEndpoint = try await bootstrapper.prepareConfigForLaunch(ip: selectedIP)
+                state.proxyEndpoint = proxyEndpoint
                 appendLog(source: .app, message: "已应用当前节点与代理连接配置")
 
                 var environment: [String: String] = [:]
@@ -376,7 +380,9 @@ final class AppModel {
                     executableURL: executableURL,
                     configURL: paths.generatedConfig,
                     workingDirectoryURL: executableURL.deletingLastPathComponent(),
-                    environment: environment
+                    environment: environment,
+                    host: proxyEndpoint.host,
+                    port: UInt16(proxyEndpoint.port)
                 )
                 let controllerID = UUID()
                 activeXray = controller
@@ -387,7 +393,11 @@ final class AppModel {
                     await self?.receiveXrayEvent(event, controllerID: controllerID)
                 }
                 guard activeXrayID == controllerID else { return }
-                appendLog(source: .xray, level: .success, message: "本地代理已启动，监听 127.0.0.1:11451")
+                appendLog(
+                    source: .xray,
+                    level: .success,
+                    message: "本地代理已启动，监听 \(proxyEndpoint.displayAddress)"
+                )
                 showNotice("本地代理已启动", style: .success)
             } catch XrayControllerError.cancelled where xrayStopRequested {
                 state.xrayPhase = .stopped
@@ -456,7 +466,7 @@ final class AppModel {
         detectTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let proxy = state.isXrayRunning ? ProxyEndpoint() : nil
+                let proxy = state.isXrayRunning ? state.proxyEndpoint : nil
                 state.exit.info = try await exitDetector.detect(proxy: proxy)
                 appendLog(source: .app, level: .success, message: "出口 IP：\(state.exit.info?.ip ?? "")")
             } catch {
@@ -528,7 +538,9 @@ final class AppModel {
             }
 
             var configurationWarning: String?
+            var proxyEndpoint = ProxyEndpoint()
             do {
+                proxyEndpoint = try await bootstrapper.currentProxyEndpoint()
                 if let configuredIP = try await bootstrapper.currentConfigIP()?
                     .trimmingCharacters(in: .whitespacesAndNewlines),
                     !configuredIP.isEmpty
@@ -546,6 +558,7 @@ final class AppModel {
             state.preferences = preferences
             state.results = loadedResults
             state.runtimeStatus = await installedStatus
+            state.proxyEndpoint = proxyEndpoint
             refreshRuntimePhase()
             state.launchPhase = .ready
             if preferences != loadedPreferences {
