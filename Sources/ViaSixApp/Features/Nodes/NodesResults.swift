@@ -22,7 +22,7 @@ extension NodesView {
                         rank: index + 1,
                         result: result,
                         isSelected: result.ip == model.state.preferences.selectedIP,
-                        isSwitching: switchingIP == result.ip
+                        isSwitching: model.switchingIP == result.ip
                     ) {
                         selectIP(result.ip)
                     }
@@ -49,7 +49,7 @@ extension NodesView {
                     .font(.caption.monospacedDigit().weight(.semibold))
                     .foregroundStyle(.secondary)
 
-                if switchingIP != nil {
+                if model.switchingIP != nil {
                     ProgressView()
                         .controlSize(.small)
                         .accessibilityLabel("正在切换节点")

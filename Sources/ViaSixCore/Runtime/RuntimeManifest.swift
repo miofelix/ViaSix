@@ -3,15 +3,15 @@ import Foundation
 
 public enum RuntimeArchitecture: String, CaseIterable, Codable, Hashable, Sendable {
     case arm64
-    case x86_64
+    case x8664 = "x86_64"
 
     public static var current: Self {
         #if arch(arm64)
-        .arm64
+            .arm64
         #elseif arch(x86_64)
-        .x86_64
+            .x8664
         #else
-        #error("ViaSix runtime components only support arm64 and x86_64 on macOS")
+            #error("ViaSix runtime components only support arm64 and x86_64 on macOS")
         #endif
     }
 }
@@ -115,7 +115,7 @@ public struct RuntimeManifest: Equatable, Sendable {
             RuntimeAsset(
                 component: .cfst,
                 version: cfstVersion,
-                architecture: .x86_64,
+                architecture: .x8664,
                 archiveName: "cfst_darwin_amd64.zip",
                 downloadURL: URL(
                     string: "https://github.com/XIU2/CloudflareSpeedTest/releases/download/v2.3.5/cfst_darwin_amd64.zip"
@@ -137,14 +137,14 @@ public struct RuntimeManifest: Equatable, Sendable {
             RuntimeAsset(
                 component: .xray,
                 version: xrayVersion,
-                architecture: .x86_64,
+                architecture: .x8664,
                 archiveName: "Xray-macos-64.zip",
                 downloadURL: URL(
                     string: "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-macos-64.zip"
                 )!,
                 sha256: "f5b0471d3459eff1b82e48af0aeac186abcc3298210070afbbbd8437a4e8b203",
                 payloadFiles: [.xray, .geoIP, .geoSite]
-            )
+            ),
         ]
     )
 }

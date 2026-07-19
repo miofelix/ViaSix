@@ -71,9 +71,12 @@ public actor CfstRunner {
     ) {
         let executableURL = executableURL.standardizedFileURL
         self.executableURL = executableURL
-        self.resultURL = (resultURL ?? executableURL.deletingLastPathComponent()
+        self.resultURL =
+            (resultURL
+            ?? executableURL.deletingLastPathComponent()
             .appendingPathComponent("result.csv")).standardizedFileURL
-        self.workingDirectoryURL = (workingDirectoryURL ?? executableURL.deletingLastPathComponent())
+        self.workingDirectoryURL =
+            (workingDirectoryURL ?? executableURL.deletingLastPathComponent())
             .standardizedFileURL
     }
 
@@ -89,10 +92,12 @@ public actor CfstRunner {
         onEvent: @escaping CfstEventHandler = { _ in }
     ) async throws -> [SpeedTestResult] {
         guard activeRun == nil else { throw CfstRunnerError.alreadyRunning }
+        guard !Task.isCancelled else { throw CfstRunnerError.userCancelled }
 
         let arguments = try parameters.commandLineArguments(resultURL: resultURL)
         try validateExecutable()
         try removePreviousResult()
+        guard !Task.isCancelled else { throw CfstRunnerError.userCancelled }
 
         let process: SpawnedCfstProcess
         do {
@@ -121,6 +126,7 @@ public actor CfstRunner {
 
         return try await withTaskCancellationHandler {
             let termination = await waitTask.value
+            Self.killRemainingGroupIfNeeded(process.processGroup)
             let outputResult: Result<String, Error>
             do {
                 outputResult = .success(try await outputTask.value)
@@ -168,6 +174,17 @@ public actor CfstRunner {
         // The child is its process-group leader. A negative PID signals the
         // whole group, preventing helper subprocesses from being orphaned.
         _ = Darwin.kill(-run.processGroup, SIGKILL)
+    }
+
+    private nonisolated static func killRemainingGroupIfNeeded(_ processGroup: pid_t) {
+        if processGroupExists(processGroup) {
+            _ = Darwin.kill(-processGroup, SIGKILL)
+        }
+    }
+
+    private nonisolated static func processGroupExists(_ processGroup: pid_t) -> Bool {
+        if Darwin.kill(-processGroup, 0) == 0 { return true }
+        return errno == EPERM
     }
 
     private func validateExecutable() throws {

@@ -67,7 +67,8 @@ extension NodesView {
 
                 ParameterDisclosure(
                     title: "筛选条件",
-                    subtitle: "延迟 \(model.parameters.latencyLowerBound)–\(model.parameters.latencyUpperBound) ms · 丢包 ≤ \(model.parameters.lossRateUpperBound.formatted(.number.precision(.fractionLength(0...2))))",
+                    subtitle:
+                        "延迟 \(model.parameters.latencyLowerBound)–\(model.parameters.latencyUpperBound) ms · 丢包 ≤ \(model.parameters.lossRateUpperBound.formatted(.number.precision(.fractionLength(0...2))))",
                     systemImage: "line.3.horizontal.decrease.circle",
                     isExpanded: expansionBinding(for: .filter)
                 ) {
@@ -76,7 +77,8 @@ extension NodesView {
 
                 ParameterDisclosure(
                     title: "性能调优",
-                    subtitle: "\(model.parameters.threads) 线程 · Ping \(model.parameters.pingCount) 次 · 下载 \(model.parameters.downloadCount) 个",
+                    subtitle:
+                        "\(model.parameters.threads) 线程 · Ping \(model.parameters.pingCount) 次 · 下载 \(model.parameters.downloadCount) 个",
                     systemImage: "cpu",
                     isExpanded: expansionBinding(for: .performance)
                 ) {

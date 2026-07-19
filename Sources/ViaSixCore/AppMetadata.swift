@@ -5,4 +5,3 @@ public enum AppMetadata {
     public static let proxyHost = "127.0.0.1"
     public static let proxyPort = 11_451
 }
-

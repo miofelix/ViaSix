@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import ViaSixCore
 
 final class ExitIPResponseParserTests: XCTestCase {
@@ -19,5 +20,18 @@ final class ExitIPResponseParserTests: XCTestCase {
 
     func testRejectsWhitespaceOnlyResponse() {
         XCTAssertThrowsError(try ExitIPResponseParser.parse(Data(" \n".utf8)))
+    }
+
+    func testRejectsNonIPAddressTokens() {
+        XCTAssertThrowsError(try ExitIPResponseParser.parse(Data("service-unavailable".utf8)))
+        XCTAssertThrowsError(try ExitIPResponseParser.parse(Data(#"{"ip":"error"}"#.utf8)))
+    }
+
+    func testAcceptsPartialLocationPayload() throws {
+        let data = Data(#"{"ip":"1.1.1.1","location":{"country_name":"澳大利亚"}}"#.utf8)
+        XCTAssertEqual(
+            try ExitIPResponseParser.parse(data),
+            ExitIPInfo(ip: "1.1.1.1", location: "澳大利亚")
+        )
     }
 }

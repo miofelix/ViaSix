@@ -10,7 +10,7 @@ let package = Package(
     ],
     products: [
         .library(name: "ViaSixCore", targets: ["ViaSixCore"]),
-        .executable(name: "ViaSix", targets: ["ViaSixApp"])
+        .executable(name: "ViaSix", targets: ["ViaSixApp"]),
     ],
     targets: [
         .target(
@@ -30,6 +30,6 @@ let package = Package(
         .testTarget(
             name: "ViaSixAppTests",
             dependencies: ["ViaSixApp", "ViaSixCore"]
-        )
+        ),
     ]
 )

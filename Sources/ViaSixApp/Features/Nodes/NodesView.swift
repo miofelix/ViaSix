@@ -6,7 +6,6 @@ struct NodesView: View {
     @Environment(AppModel.self) var model
 
     @State var expandedGroups: Set<ParameterGroup> = [.source]
-    @State var switchingIP: String?
 
     var body: some View {
         ScrollView {

@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import ViaSixCore
 
 final class AppBootstrapperTests: XCTestCase {
@@ -31,12 +32,10 @@ final class AppBootstrapperTests: XCTestCase {
 
         let template = try Data(contentsOf: paths.templateConfig)
         let templateText = String(decoding: template, as: UTF8.self)
-        let legacyValues = try TestConfigFixtures.legacyConnectionValues()
-        XCTAssertFalse(templateText.contains(legacyValues.userID))
-        XCTAssertFalse(templateText.contains(legacyValues.serverName))
         XCTAssertTrue(templateText.contains(ConfigTemplate.placeholderUserID))
         XCTAssertTrue(templateText.contains(ConfigTemplate.placeholderServerName))
         XCTAssertEqual(ConfigTemplate.address(in: template), "2001:db8::1")
+        XCTAssertNoThrow(try ConfigTemplate.validateTemplate(template))
     }
 
     func testPrepareDefaultsMigratesOnlyThePreviouslyShippedIPv4List() async throws {
@@ -45,19 +44,19 @@ final class AppBootstrapperTests: XCTestCase {
         let bootstrapper = AppBootstrapper(paths: paths)
         try paths.prepare()
         let legacyIPv4List = """
-        173.245.48.0/20
-        103.21.244.0/22
-        103.22.200.0/22
-        103.31.4.0/22
-        141.101.64.0/18
-        108.162.192.0/18
-        190.93.240.0/20
-        188.114.96.0/20
-        197.234.240.0/22
-        198.41.128.0/17
-        162.158.0.0/15
-        104.16.0.0/12
-        """ + "\n\n"
+            173.245.48.0/20
+            103.21.244.0/22
+            103.22.200.0/22
+            103.31.4.0/22
+            141.101.64.0/18
+            108.162.192.0/18
+            190.93.240.0/20
+            188.114.96.0/20
+            197.234.240.0/22
+            198.41.128.0/17
+            162.158.0.0/15
+            104.16.0.0/12
+            """ + "\n\n"
         try Data(legacyIPv4List.utf8).write(to: paths.ipv4List)
 
         try await bootstrapper.prepareDefaults()
@@ -101,10 +100,10 @@ final class AppBootstrapperTests: XCTestCase {
         let bootstrapper = AppBootstrapper(paths: paths)
         try paths.prepare()
         let csv = """
-        IP,Sent,Recv,Loss,Latency,Speed,Region
-        2606::1,4,4,0.00,18.2,10.5,SJC
-        2606::2,4,4,0.00,22.8,8.1,LAX
-        """
+            IP,Sent,Recv,Loss,Latency,Speed,Region
+            2606::1,4,4,0.00,18.2,10.5,SJC
+            2606::2,4,4,0.00,22.8,8.1,LAX
+            """
         try Data(csv.utf8).write(to: paths.resultCSV, options: .atomic)
 
         let results = try await bootstrapper.loadResults()
@@ -119,10 +118,10 @@ final class AppBootstrapperTests: XCTestCase {
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
         let csv = """
-        IP,Sent,Recv,Loss,Latency,Speed,Region
-        2606::1,4,4,0.00,18.2,10.5,SJC
-        2606::2,4,4,0.00,22.8,8.1,LAX
-        """
+            IP,Sent,Recv,Loss,Latency,Speed,Region
+            2606::1,4,4,0.00,18.2,10.5,SJC
+            2606::2,4,4,0.00,22.8,8.1,LAX
+            """
         try Data(csv.utf8).write(to: paths.resultCSV, options: .atomic)
 
         let explicitSelection = try await bootstrapper.resultForSelectedIP(" 2606::2 ")

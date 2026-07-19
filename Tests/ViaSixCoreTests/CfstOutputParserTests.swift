@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import ViaSixCore
 
 final class CfstOutputParserTests: XCTestCase {
@@ -10,10 +11,11 @@ final class CfstOutputParserTests: XCTestCase {
 
         XCTAssertTrue(events.contains(.progress(current: 12, total: 100)))
         XCTAssertTrue(events.contains(.line("ready")))
-        XCTAssertTrue(events.contains { event in
-            if case .heartbeat(let bytes) = event { return bytes > 0 }
-            return false
-        })
+        XCTAssertTrue(
+            events.contains { event in
+                if case .heartbeat(let bytes) = event { return bytes > 0 }
+                return false
+            })
     }
 
     func testProgressIsFoundBeforeLineTerminationAndHeartbeatIsThrottled() {

@@ -14,7 +14,8 @@ public actor PreferencesStore {
 
     public func load(defaults: UserPreferences) -> UserPreferences {
         guard let data = try? Data(contentsOf: fileURL),
-              let value = try? decoder.decode(UserPreferences.self, from: data) else {
+            let value = try? decoder.decode(UserPreferences.self, from: data)
+        else {
             return defaults
         }
         return value
@@ -22,8 +23,9 @@ public actor PreferencesStore {
 
     public func save(_ preferences: UserPreferences) throws {
         let data = try encoder.encode(preferences)
-        try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: fileURL, options: .atomic)
+        try FilePermissions.restrictFile(fileURL)
     }
 }
-

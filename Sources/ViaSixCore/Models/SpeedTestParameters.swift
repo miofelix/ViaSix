@@ -65,8 +65,10 @@ public struct SpeedTestParameters: Codable, Equatable, Sendable {
     }
 
     public func validated() throws -> Self {
-        guard !ipFile.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-            !ipRange.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        guard
+            !ipFile.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || !ipRange.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
             throw ValidationError.missingIPSource
         }
         guard (1...1_000).contains(threads) else {
@@ -82,7 +84,8 @@ public struct SpeedTestParameters: Codable, Equatable, Sendable {
             throw ValidationError.outOfRange("单 IP 下载时长应在 1 到 3600 秒之间")
         }
         guard (0...999_999).contains(latencyLowerBound), (1...999_999).contains(latencyUpperBound),
-              latencyLowerBound <= latencyUpperBound else {
+            latencyLowerBound <= latencyUpperBound
+        else {
             throw ValidationError.outOfRange("延迟上下限不合法")
         }
         guard (0...1).contains(lossRateUpperBound) else {
@@ -113,7 +116,7 @@ public struct SpeedTestParameters: Codable, Equatable, Sendable {
             "-tll", String(parameters.latencyLowerBound),
             "-tlr", parameters.lossRateUpperBound.cliString,
             "-sl", parameters.speedLowerBound.cliString,
-            "-p", "0"
+            "-p", "0",
         ]
 
         if !parameters.ipRange.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -189,4 +192,3 @@ private extension Double {
 }
 
 public typealias ValidationError = SpeedTestParameterError
-

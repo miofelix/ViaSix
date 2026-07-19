@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+
 @testable import ViaSixCore
 
 final class RuntimeManifestTests: XCTestCase {
@@ -7,49 +8,50 @@ final class RuntimeManifestTests: XCTestCase {
         XCTAssertEqual(RuntimeManifest.cfstVersion, "2.3.5")
         XCTAssertEqual(RuntimeManifest.xrayVersion, "26.3.27")
         XCTAssertEqual(RuntimeManifest.current.assets.count, 4)
-        XCTAssertEqual(Set(RuntimeArchitecture.allCases), [.arm64, .x86_64])
+        XCTAssertEqual(Set(RuntimeArchitecture.allCases), [.arm64, .x8664])
 
-        let cases: [(
-            component: RuntimeComponent,
-            architecture: RuntimeArchitecture,
-            archiveName: String,
-            url: String,
-            sha256: String,
-            payloadFiles: [RuntimePayloadFile]
-        )] = [
-            (
-                .cfst,
-                .arm64,
-                "cfst_darwin_arm64.zip",
-                "https://github.com/XIU2/CloudflareSpeedTest/releases/download/v2.3.5/cfst_darwin_arm64.zip",
-                "0623f6d24c939e3d3716f556f4d39c7b8781cf6600ee838a1b64e6b2fe4609dc",
-                [.cfst]
-            ),
-            (
-                .cfst,
-                .x86_64,
-                "cfst_darwin_amd64.zip",
-                "https://github.com/XIU2/CloudflareSpeedTest/releases/download/v2.3.5/cfst_darwin_amd64.zip",
-                "66ce3ae89430e851cab9710d54b6d91324e0aae255f0c92a91072d57724561d5",
-                [.cfst]
-            ),
-            (
-                .xray,
-                .arm64,
-                "Xray-macos-arm64-v8a.zip",
-                "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-macos-arm64-v8a.zip",
-                "2e93a67e8aa1936ecefb307e120830fcbd4c643ab9b1c46a2d0838d5f8409eaf",
-                [.xray, .geoIP, .geoSite]
-            ),
-            (
-                .xray,
-                .x86_64,
-                "Xray-macos-64.zip",
-                "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-macos-64.zip",
-                "f5b0471d3459eff1b82e48af0aeac186abcc3298210070afbbbd8437a4e8b203",
-                [.xray, .geoIP, .geoSite]
-            )
-        ]
+        let cases:
+            [(
+                component: RuntimeComponent,
+                architecture: RuntimeArchitecture,
+                archiveName: String,
+                url: String,
+                sha256: String,
+                payloadFiles: [RuntimePayloadFile]
+            )] = [
+                (
+                    .cfst,
+                    .arm64,
+                    "cfst_darwin_arm64.zip",
+                    "https://github.com/XIU2/CloudflareSpeedTest/releases/download/v2.3.5/cfst_darwin_arm64.zip",
+                    "0623f6d24c939e3d3716f556f4d39c7b8781cf6600ee838a1b64e6b2fe4609dc",
+                    [.cfst]
+                ),
+                (
+                    .cfst,
+                    .x8664,
+                    "cfst_darwin_amd64.zip",
+                    "https://github.com/XIU2/CloudflareSpeedTest/releases/download/v2.3.5/cfst_darwin_amd64.zip",
+                    "66ce3ae89430e851cab9710d54b6d91324e0aae255f0c92a91072d57724561d5",
+                    [.cfst]
+                ),
+                (
+                    .xray,
+                    .arm64,
+                    "Xray-macos-arm64-v8a.zip",
+                    "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-macos-arm64-v8a.zip",
+                    "2e93a67e8aa1936ecefb307e120830fcbd4c643ab9b1c46a2d0838d5f8409eaf",
+                    [.xray, .geoIP, .geoSite]
+                ),
+                (
+                    .xray,
+                    .x8664,
+                    "Xray-macos-64.zip",
+                    "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-macos-64.zip",
+                    "f5b0471d3459eff1b82e48af0aeac186abcc3298210070afbbbd8437a4e8b203",
+                    [.xray, .geoIP, .geoSite]
+                ),
+            ]
 
         for expected in cases {
             let asset = try XCTUnwrap(

@@ -49,7 +49,7 @@ struct SettingsView: View {
             )
 
             HStack {
-                Button("安装官方组件", systemImage: "arrow.down.circle") {
+                Button("安装上游组件", systemImage: "arrow.down.circle") {
                     model.installRuntime()
                 }
                 .buttonStyle(.borderedProminent)
@@ -68,7 +68,7 @@ struct SettingsView: View {
                 }
             }
 
-            Text("组件分别来自 CloudflareSpeedTest 与 Xray-core 的官方发布，并在安装前校验文件完整性。")
+            Text("组件来自各自上游项目的 GitHub Releases，并在安装前校验文件完整性；CloudflareSpeedTest 是独立第三方项目。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -190,13 +190,14 @@ struct SettingsView: View {
     }
 
     private var runtimeBadge: some View {
-        let (label, color): (String, Color) = switch model.state.runtimePhase {
-        case .checking: ("检查中", .secondary)
-        case .missing: ("未就绪", .orange)
-        case .installing: ("安装中", VisualStyle.accent)
-        case .ready: ("已就绪", .green)
-        case .failed: ("异常", .red)
-        }
+        let (label, color): (String, Color) =
+            switch model.state.runtimePhase {
+            case .checking: ("检查中", .secondary)
+            case .missing: ("未就绪", .orange)
+            case .installing: ("安装中", VisualStyle.accent)
+            case .ready: ("已就绪", .green)
+            case .failed: ("异常", .red)
+            }
         return Text(label)
             .font(.caption.weight(.semibold))
             .foregroundStyle(color)
@@ -240,15 +241,18 @@ struct SettingsView: View {
             Text(title)
                 .font(.caption.weight(.medium))
             HStack {
-                TextField("自动查找", text: Binding(
-                    get: { value },
-                    set: { newValue in
-                        model.setCustomExecutable(
-                            component,
-                            url: newValue.isEmpty ? nil : URL(fileURLWithPath: newValue)
-                        )
-                    }
-                ))
+                TextField(
+                    "自动查找",
+                    text: Binding(
+                        get: { value },
+                        set: { newValue in
+                            model.setCustomExecutable(
+                                component,
+                                url: newValue.isEmpty ? nil : URL(fileURLWithPath: newValue)
+                            )
+                        }
+                    )
+                )
                 .textFieldStyle(.roundedBorder)
                 .accessibilityLabel(title)
 
@@ -272,18 +276,19 @@ struct SettingsView: View {
     }
 
     private func resolvedDisplayURL(for component: RuntimeComponent) -> URL? {
-        let (preferredPath, managedURL, commandName): (String, URL?, String) = switch component {
-        case .cfst:
-            (model.state.preferences.cfstPath, model.state.runtimeStatus?.cfstURL, "cfst")
-        case .xray:
-            (
-                model.state.preferences.xrayPath,
-                model.state.runtimeStatus?.xrayIsReady == true
-                    ? model.state.runtimeStatus?.xrayURL
-                    : nil,
-                "xray"
-            )
-        }
+        let (preferredPath, managedURL, commandName): (String, URL?, String) =
+            switch component {
+            case .cfst:
+                (model.state.preferences.cfstPath, model.state.runtimeStatus?.cfstURL, "cfst")
+            case .xray:
+                (
+                    model.state.preferences.xrayPath,
+                    model.state.runtimeStatus?.xrayIsReady == true
+                        ? model.state.runtimeStatus?.xrayURL
+                        : nil,
+                    "xray"
+                )
+            }
 
         var candidates: [URL] = []
         if !preferredPath.isEmpty {
@@ -295,9 +300,10 @@ struct SettingsView: View {
         candidates.append(URL(fileURLWithPath: "/opt/homebrew/bin/\(commandName)"))
         candidates.append(URL(fileURLWithPath: "/usr/local/bin/\(commandName)"))
         if let path = ProcessInfo.processInfo.environment["PATH"] {
-            candidates.append(contentsOf: path.split(separator: ":").map {
-                URL(fileURLWithPath: String($0)).appendingPathComponent(commandName)
-            })
+            candidates.append(
+                contentsOf: path.split(separator: ":").map {
+                    URL(fileURLWithPath: String($0)).appendingPathComponent(commandName)
+                })
         }
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0.path) }
     }

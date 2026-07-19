@@ -52,7 +52,8 @@ public struct CfstOutputParser: Sendable {
 
     private mutating func parseLine(_ data: Data) -> [CfstOutputEvent] {
         let raw = String(decoding: data, as: UTF8.self)
-        let clean = raw
+        let clean =
+            raw
             .replacingOccurrences(of: "\u{001B}\\[[0-9;]*[a-zA-Z]", with: "", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return [] }
@@ -67,7 +68,8 @@ public struct CfstOutputParser: Sendable {
 
     private mutating func parseProgress(in text: String) -> CfstOutputEvent? {
         guard let match = text.matches(of: /(?<current>\d+)\s*\/\s*(?<total>\d+)\s*\[/).last,
-              let current = Int(match.current), let total = Int(match.total), total > 0 else {
+            let current = Int(match.current), let total = Int(match.total), total > 0
+        else {
             return nil
         }
         if lastProgress?.0 != current || lastProgress?.1 != total {

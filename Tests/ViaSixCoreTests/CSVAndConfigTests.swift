@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import ViaSixCore
 
 final class CSVAndConfigTests: XCTestCase {
@@ -18,7 +19,9 @@ final class CSVAndConfigTests: XCTestCase {
     }
 
     func testConfigWriterOnlyChangesProxyAddress() throws {
-        let template = Data(#"{"outbounds":[{"settings":{"vnext":[{"address":"old","port":443}]},"tag":"proxy"}],"log":{"loglevel":"warning"}}"#.utf8)
+        let template = Data(
+            #"{"outbounds":[{"settings":{"vnext":[{"address":"old","port":443}]},"tag":"proxy"}],"log":{"loglevel":"warning"}}"#
+                .utf8)
         let output = try ConfigTemplate.replacingAddress(in: template, with: "2606::2")
         XCTAssertEqual(ConfigTemplate.address(in: output), "2606::2")
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: output) as? [String: Any])
@@ -26,7 +29,9 @@ final class CSVAndConfigTests: XCTestCase {
     }
 
     func testConfigWriterFindsProxyByTag() throws {
-        let template = Data(#"{"outbounds":[{"tag":"direct","settings":{}},{"tag":"proxy","settings":{"vnext":[{"address":"old"}]}}]}"#.utf8)
+        let template = Data(
+            #"{"outbounds":[{"tag":"direct","settings":{}},{"tag":"proxy","settings":{"vnext":[{"address":"old"}]}}]}"#
+                .utf8)
         let output = try ConfigTemplate.replacingAddress(in: template, with: "2606::3")
         XCTAssertEqual(ConfigTemplate.address(in: output), "2606::3")
 
@@ -104,7 +109,8 @@ final class CSVAndConfigTests: XCTestCase {
 
     private func connectionTemplate(userID: String, serverName: String, path: String) -> Data {
         Data(
-            #"{"inbounds":[{"listen":"127.0.0.1","port":11451,"protocol":"mixed"}],"outbounds":[{"tag":"proxy","settings":{"vnext":[{"address":"2606::5","users":[{"id":"\#(userID)"}]}]},"streamSettings":{"tlsSettings":{"serverName":"\#(serverName)"},"wsSettings":{"host":"\#(serverName)","path":"\#(path)"}}}]}"#.utf8
+            #"{"inbounds":[{"listen":"127.0.0.1","port":11451,"protocol":"mixed"}],"outbounds":[{"tag":"proxy","settings":{"vnext":[{"address":"2606::5","users":[{"id":"\#(userID)"}]}]},"streamSettings":{"tlsSettings":{"serverName":"\#(serverName)"},"wsSettings":{"host":"\#(serverName)","path":"\#(path)"}}}]}"#
+                .utf8
         )
     }
 }

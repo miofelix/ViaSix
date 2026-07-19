@@ -14,7 +14,7 @@ enum VisualStyle {
                 colors: [
                     accent.opacity(0.10),
                     secondaryAccent.opacity(0.06),
-                    .clear
+                    .clear,
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing

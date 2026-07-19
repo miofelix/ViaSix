@@ -1,28 +1,31 @@
-# Third-party notices
+# 第三方声明
 
-ViaSix can download and execute the following independent command-line programs. They are not stored in this source repository and retain their own licenses.
+ViaSix 可以下载并执行以下独立命令行程序。第三方二进制不存放在本源码仓库中，并继续受各自许可证约束。固定上游版本的许可证原文保存在 [`ThirdPartyLicenses/`](ThirdPartyLicenses/) 中，并随应用包提供离线副本。
 
 ## CloudflareSpeedTest
 
-- Project: XIU2/CloudflareSpeedTest
-- Version used by ViaSix: v2.3.5
-- Source: https://github.com/XIU2/CloudflareSpeedTest/tree/v2.3.5
-- License: GNU General Public License v3.0
-- License text: https://github.com/XIU2/CloudflareSpeedTest/blob/v2.3.5/LICENSE
+- 项目：XIU2/CloudflareSpeedTest
+- ViaSix 使用版本：v2.3.5
+- 源码：https://github.com/XIU2/CloudflareSpeedTest/tree/v2.3.5
+- 固定提交：`65b43aa58c5f9c7ab8ab83d2d27e35fc00d9cec4`
+- 许可证：GNU General Public License v3.0
+- 上游许可证：https://github.com/XIU2/CloudflareSpeedTest/blob/v2.3.5/LICENSE
+- 离线原文：[CloudflareSpeedTest-GPL-3.0.txt](ThirdPartyLicenses/CloudflareSpeedTest-GPL-3.0.txt)
 
-ViaSix downloads an unmodified official macOS release archive. If ViaSix is redistributed together with that binary, the distributor is responsible for satisfying the GPLv3 source and notice requirements.
+CloudflareSpeedTest 是 XIU2 维护的独立第三方项目，并非 Cloudflare 官方产品。ViaSix 下载其未修改的 macOS 正式发布压缩包。若发布者把 ViaSix 与该二进制一同分发，发布者有责任满足 GPLv3 的源码和声明义务。
 
 ## Xray-core
 
-- Project: XTLS/Xray-core
-- Version used by ViaSix: v26.3.27
-- Source: https://github.com/XTLS/Xray-core/tree/v26.3.27
-- License: Mozilla Public License 2.0
-- License text: https://github.com/XTLS/Xray-core/blob/v26.3.27/LICENSE
+- 项目：XTLS/Xray-core
+- ViaSix 使用版本：v26.3.27
+- 源码：https://github.com/XTLS/Xray-core/tree/v26.3.27
+- 固定提交：`d2758a023cd7f4174a5a5fa4ff66e487d4342ba0`
+- 许可证：Mozilla Public License 2.0
+- 上游许可证：https://github.com/XTLS/Xray-core/blob/v26.3.27/LICENSE
+- 离线原文：[Xray-core-MPL-2.0.txt](ThirdPartyLicenses/Xray-core-MPL-2.0.txt)
 
-ViaSix downloads an unmodified official macOS release archive. Xray data files such as `geoip.dat` and `geosite.dat` remain part of the Xray release.
+ViaSix 下载其未修改的 macOS 正式发布压缩包。`geoip.dat`、`geosite.dat` 等数据文件随 Xray 发布包提供；发布前仍应核对这些数据文件的具体来源和许可证义务。
 
-## Network services
+## 第三方网络服务
 
-CloudflareSpeedTest may use its upstream default test URL when no custom URL is configured. Exit IP detection uses `https://api.myip.la/cn?json`. These are third-party network services with their own availability and privacy policies.
-
+未设置自定义测速 URL 时，CloudflareSpeedTest 可能使用其上游默认测速地址。出口 IP 检测使用 `https://api.myip.la/cn?json`。这些服务受各自可用性、日志和隐私政策约束。

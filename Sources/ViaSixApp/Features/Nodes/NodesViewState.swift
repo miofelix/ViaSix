@@ -15,7 +15,7 @@ extension NodesView {
         var parts = [
             model.parameters.httping ? "HTTPing" : "TCPing",
             "端口 \(model.parameters.port)",
-            "线程 \(model.parameters.threads)"
+            "线程 \(model.parameters.threads)",
         ]
         if !model.parameters.colo.isEmpty {
             parts.append("区域 \(model.parameters.colo)")
@@ -107,7 +107,7 @@ extension NodesView {
     }
 
     var nodeSelectionDisabled: Bool {
-        if switchingIP != nil { return true }
+        if model.switchingIP != nil { return true }
         switch model.state.xrayPhase {
         case .validating, .starting, .stopping:
             return true
@@ -192,13 +192,7 @@ extension NodesView {
 
     func selectIP(_ ip: String) {
         guard !nodeSelectionDisabled else { return }
-        switchingIP = ip
-        Task {
-            await model.selectIP(ip)
-            if switchingIP == ip {
-                switchingIP = nil
-            }
-        }
+        model.selectIP(ip)
     }
 
     func metric(_ value: String) -> String {

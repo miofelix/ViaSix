@@ -32,4 +32,3 @@ public struct SpeedTestResult: Codable, Equatable, Identifiable, Sendable {
     public var speedValue: Double? { Double(speed.trimmingCharacters(in: .whitespacesAndNewlines)) }
     public var lossValue: Double? { Double(loss.trimmingCharacters(in: .whitespacesAndNewlines)) }
 }
-

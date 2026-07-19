@@ -2,16 +2,31 @@ import CryptoKit
 import Foundation
 
 public enum DefaultResourceInstaller {
-    static let legacyIPv4SHA256 = "449ea35cc7c80700cf647d39f5061545758bc7564eeeb5e7caa3cbba933f7da4"
-    static let legacyTemplateSHA256 = "0641c1251d6f0521a5d56fbe8438fef3b297aace27a9e321ad33ea5b8d04812a"
+    struct LegacyResourceDigests: Equatable, Sendable {
+        let ipv4: String
+        let template: String
+
+        fileprivate static let shipped = Self(
+            ipv4: "449ea35cc7c80700cf647d39f5061545758bc7564eeeb5e7caa3cbba933f7da4",
+            template: "0641c1251d6f0521a5d56fbe8438fef3b297aace27a9e321ad33ea5b8d04812a"
+        )
+    }
 
     public static func install(into paths: AppPaths, using fileManager: FileManager = .default) throws {
+        try install(into: paths, legacyDigests: .shipped, using: fileManager)
+    }
+
+    static func install(
+        into paths: AppPaths,
+        legacyDigests: LegacyResourceDigests,
+        using fileManager: FileManager = .default
+    ) throws {
         try paths.prepare(using: fileManager)
         try installBundledResource(
             resource: "ip",
             extension: "txt",
             to: paths.ipv4List,
-            legacySHA256: legacyIPv4SHA256,
+            legacySHA256: legacyDigests.ipv4,
             using: fileManager
         )
         try copyIfMissing(resource: "ipv6", extension: "txt", to: paths.ipv6List, using: fileManager)
@@ -19,7 +34,7 @@ public enum DefaultResourceInstaller {
             resource: "template",
             extension: "json",
             to: paths.templateConfig,
-            legacySHA256: legacyTemplateSHA256,
+            legacySHA256: legacyDigests.template,
             removingDerivedFiles: [paths.generatedConfig],
             using: fileManager
         )
@@ -59,10 +74,14 @@ public enum DefaultResourceInstaller {
     ) throws -> Bool {
         let installedData = try Data(contentsOf: destination)
         guard sha256(installedData) == expectedSHA256.lowercased() else { return false }
-        try replacement.write(to: destination, options: .atomic)
+
+        // Derived files are safe to regenerate. Removing them first keeps the
+        // migration retryable if replacing the source resource later fails.
         for fileURL in removingDerivedFiles where fileManager.fileExists(atPath: fileURL.path) {
             try fileManager.removeItem(at: fileURL)
         }
+        try replacement.write(to: destination, options: .atomic)
+        try FilePermissions.restrictFile(destination, using: fileManager)
         return true
     }
 
@@ -77,13 +96,19 @@ public enum DefaultResourceInstaller {
             throw ResourceError.missing(resource + "." + `extension`)
         }
         try fileManager.copyItem(at: source, to: destination)
+        try FilePermissions.restrictFile(destination, using: fileManager)
     }
 
     private static func resourceURL(named resource: String, extension: String) -> URL? {
         if let packaged = Bundle.main.url(forResource: resource, withExtension: `extension`) {
             return packaged
         }
-        return Bundle.module.url(forResource: resource, withExtension: `extension`)
+
+        #if VIASIX_PACKAGED_APP
+            return nil
+        #else
+            return Bundle.module.url(forResource: resource, withExtension: `extension`)
+        #endif
     }
 
     private static func sha256(_ data: Data) -> String {

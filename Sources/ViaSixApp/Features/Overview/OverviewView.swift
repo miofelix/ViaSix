@@ -292,13 +292,14 @@ struct OverviewView: View {
     }
 
     private var runtimeStatusBadge: some View {
-        let (text, color): (String, Color) = switch model.state.runtimePhase {
-        case .ready: ("组件就绪", .green)
-        case .installing: ("安装中", .orange)
-        case .checking: ("检查中", .secondary)
-        case .missing: ("缺少组件", .orange)
-        case .failed: ("组件异常", .red)
-        }
+        let (text, color): (String, Color) =
+            switch model.state.runtimePhase {
+            case .ready: ("组件就绪", .green)
+            case .installing: ("安装中", .orange)
+            case .checking: ("检查中", .secondary)
+            case .missing: ("缺少组件", .orange)
+            case .failed: ("组件异常", .red)
+            }
         return Text(text)
             .font(.caption2.weight(.semibold))
             .foregroundStyle(color)

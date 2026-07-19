@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import XCTest
+
 @testable import ViaSixCore
 
 final class XrayControllerTests: XCTestCase {
@@ -30,7 +31,8 @@ final class XrayControllerTests: XCTestCase {
         for _ in 0..<100 {
             let recordedEvents = await recorder.events
             if recordedEvents.contains(.log("runtime stdout")),
-               recordedEvents.contains(.log("runtime stderr")) {
+                recordedEvents.contains(.log("runtime stderr"))
+            {
                 break
             }
             try await Task.sleep(for: .milliseconds(10))
@@ -125,12 +127,13 @@ final class XrayControllerTests: XCTestCase {
         }
 
         let events = await recorder.events
-        XCTAssertTrue(events.contains(where: { event in
-            if case .unexpectedExit(status: 7, output: let output) = event {
-                return output.contains("runtime failed")
-            }
-            return false
-        }))
+        XCTAssertTrue(
+            events.contains(where: { event in
+                if case .unexpectedExit(status: 7, output: let output) = event {
+                    return output.contains("runtime failed")
+                }
+                return false
+            }))
         let stoppedState = await controller.state
         let isRunning = await controller.isRunning
         XCTAssertEqual(stoppedState, .stopped)
@@ -279,8 +282,9 @@ private actor XrayFixturePortProbe {
         guard FileManager.default.fileExists(atPath: readyFileURL.path) else { return false }
         guard let processIDsURL else { return true }
         guard let contents = try? String(contentsOf: processIDsURL, encoding: .utf8),
-              let firstPIDText = contents.split(whereSeparator: \.isWhitespace).first,
-              let firstPID = pid_t(firstPIDText) else {
+            let firstPIDText = contents.split(whereSeparator: \.isWhitespace).first,
+            let firstPID = pid_t(firstPIDText)
+        else {
             return false
         }
         return Darwin.kill(firstPID, 0) == 0 || errno == EPERM
@@ -338,42 +342,42 @@ private final class XrayControllerFixture: @unchecked Sendable {
     }
 
     private static let script = #"""
-    #!/bin/sh
-    behavior=$(cat behavior.txt)
-    printf '%s\n' "$*" >> invocations.txt
-    printf '%s\n' "$PWD" > working-directory.txt
-    printf '%s\n' "$XRAY_LOCATION_ASSET" > environment.txt
+        #!/bin/sh
+        behavior=$(cat behavior.txt)
+        printf '%s\n' "$*" >> invocations.txt
+        printf '%s\n' "$PWD" > working-directory.txt
+        printf '%s\n' "$XRAY_LOCATION_ASSET" > environment.txt
 
-    if [ "$2" = "-test" ]; then
-      if [ "$behavior" = "validation-failure" ]; then
-        printf 'invalid stdout\n'
-        printf 'invalid stderr\n' >&2
-        exit 9
-      fi
-      printf 'validation stdout\n'
-      printf 'validation stderr\n' >&2
-      exit 0
-    fi
+        if [ "$2" = "-test" ]; then
+          if [ "$behavior" = "validation-failure" ]; then
+            printf 'invalid stdout\n'
+            printf 'invalid stderr\n' >&2
+            exit 9
+          fi
+          printf 'validation stdout\n'
+          printf 'validation stderr\n' >&2
+          exit 0
+        fi
 
-    printf 'runtime stdout\n'
-    printf 'runtime stderr\n' >&2
-    : > ready
+        printf 'runtime stdout\n'
+        printf 'runtime stderr\n' >&2
+        : > ready
 
-    if [ "$behavior" = "unexpected-exit" ]; then
-      sleep 0.2
-      printf 'runtime failed\n' >&2
-      exit 7
-    fi
+        if [ "$behavior" = "unexpected-exit" ]; then
+          sleep 0.2
+          printf 'runtime failed\n' >&2
+          exit 7
+        fi
 
-    if [ "$behavior" = "ignore-term" ]; then
-      trap '' TERM
-    else
-      trap 'rm -f ready; exit 0' TERM
-    fi
-    sleep 30 &
-    child=$!
-    printf '%s %s\n' "$$" "$child" > pids.txt
-    wait "$child"
-    rm -f ready
-    """#
+        if [ "$behavior" = "ignore-term" ]; then
+          trap '' TERM
+        else
+          trap 'rm -f ready; exit 0' TERM
+        fi
+        sleep 30 &
+        child=$!
+        printf '%s %s\n' "$$" "$child" > pids.txt
+        wait "$child"
+        rm -f ready
+        """#
 }

@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import ViaSixCore
 
 final class PersistenceTests: XCTestCase {
@@ -38,6 +39,24 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(loaded, changed)
     }
 
+    func testApplicationDataUsesOwnerOnlyPermissions() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ViaSixTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = AppPaths(root: root)
+
+        try DefaultResourceInstaller.install(into: paths)
+        let store = PreferencesStore(fileURL: paths.preferences)
+        try await store.save(UserPreferences(parameters: .defaults(ipv6File: paths.ipv6List)))
+
+        for directory in [paths.root, paths.data, paths.runtime, paths.logs] {
+            XCTAssertEqual(try permissions(of: directory), 0o700)
+        }
+        for file in [paths.preferences, paths.ipv4List, paths.ipv6List, paths.templateConfig] {
+            XCTAssertEqual(try permissions(of: file), 0o600)
+        }
+    }
+
     func testPreferencesDecodeOlderPayloadWithNewFieldsMissing() throws {
         let parameters = SpeedTestParameters(ipFile: "/tmp/ipv6.txt")
         let encodedParameters = try JSONEncoder().encode(parameters)
@@ -49,5 +68,10 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(decoded.selectedIP, "")
         XCTAssertEqual(decoded.cfstPath, "")
         XCTAssertEqual(decoded.xrayPath, "")
+    }
+
+    private func permissions(of url: URL) throws -> Int {
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        return try XCTUnwrap(attributes[.posixPermissions] as? NSNumber).intValue & 0o777
     }
 }

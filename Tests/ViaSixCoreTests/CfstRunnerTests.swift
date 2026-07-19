@@ -1,21 +1,23 @@
 import Darwin
 import Foundation
 import XCTest
+
 @testable import ViaSixCore
 
 final class CfstRunnerTests: XCTestCase {
     func testSuccessfulRunStreamsMergedOutputAndLoadsResults() async throws {
-        let fixture = try CfstRunnerFixture(script: #"""
-        #!/bin/sh
-        output=""
-        while [ "$#" -gt 0 ]; do
-          if [ "$1" = "-o" ]; then output="$2"; shift 2; else shift; fi
-        done
-        printf 'starting\n'
-        printf '1 / 2 [==\r' >&2
-        printf '\nfinished\n'
-        printf 'IP,Sent,Recv,Loss,Latency,Speed,Region\n2606:4700::1,4,4,0.00,18.5,12.3,SJC\n' > "$output"
-        """#)
+        let fixture = try CfstRunnerFixture(
+            script: #"""
+                #!/bin/sh
+                output=""
+                while [ "$#" -gt 0 ]; do
+                  if [ "$1" = "-o" ]; then output="$2"; shift 2; else shift; fi
+                done
+                printf 'starting\n'
+                printf '1 / 2 [==\r' >&2
+                printf '\nfinished\n'
+                printf 'IP,Sent,Recv,Loss,Latency,Speed,Region\n2606:4700::1,4,4,0.00,18.5,12.3,SJC\n' > "$output"
+                """#)
         defer { fixture.remove() }
 
         let recorder = CfstEventRecorder()
@@ -30,21 +32,23 @@ final class CfstRunnerTests: XCTestCase {
         XCTAssertTrue(events.contains(.line("starting")))
         XCTAssertTrue(events.contains(.line("finished")))
         XCTAssertTrue(events.contains(.progress(current: 1, total: 2)))
-        XCTAssertTrue(events.contains { event in
-            if case .heartbeat(let bytes) = event { return bytes > 0 }
-            return false
-        })
+        XCTAssertTrue(
+            events.contains { event in
+                if case .heartbeat(let bytes) = event { return bytes > 0 }
+                return false
+            })
         let isRunning = await runner.isRunning
         XCTAssertFalse(isRunning)
     }
 
     func testNonZeroExitIncludesMergedDiagnosticOutput() async throws {
-        let fixture = try CfstRunnerFixture(script: #"""
-        #!/bin/sh
-        printf 'stdout detail\n'
-        printf 'stderr detail\n' >&2
-        exit 7
-        """#)
+        let fixture = try CfstRunnerFixture(
+            script: #"""
+                #!/bin/sh
+                printf 'stdout detail\n'
+                printf 'stderr detail\n' >&2
+                exit 7
+                """#)
         defer { fixture.remove() }
 
         let runner = CfstRunner(executableURL: fixture.executableURL)
@@ -62,14 +66,15 @@ final class CfstRunnerTests: XCTestCase {
     }
 
     func testCancelKillsProcessGroupAndMapsToUserCancelled() async throws {
-        let fixture = try CfstRunnerFixture(script: #"""
-        #!/bin/sh
-        sleep 30 &
-        child=$!
-        printf '%s %s\n' "$$" "$child" > pids.txt
-        printf 'ready\n'
-        wait "$child"
-        """#)
+        let fixture = try CfstRunnerFixture(
+            script: #"""
+                #!/bin/sh
+                sleep 30 &
+                child=$!
+                printf '%s %s\n' "$$" "$child" > pids.txt
+                printf 'ready\n'
+                wait "$child"
+                """#)
         defer { fixture.remove() }
 
         let recorder = CfstEventRecorder()
@@ -102,12 +107,48 @@ final class CfstRunnerTests: XCTestCase {
         XCTAssertFalse(isRunning)
     }
 
+    func testLeaderExitCleansUpBackgroundChildrenBeforeReadingEOF() async throws {
+        let fixture = try CfstRunnerFixture(
+            script: #"""
+                #!/bin/sh
+                sleep 30 &
+                child=$!
+                printf '%s\n' "$child" > child-pid.txt
+                printf 'leader exiting\n'
+                exit 7
+                """#)
+        defer { fixture.remove() }
+
+        let runner = CfstRunner(executableURL: fixture.executableURL)
+        let clock = ContinuousClock()
+        let startedAt = clock.now
+        do {
+            _ = try await runner.run(parameters: .init(ipRange: "2606:4700::/32"))
+            XCTFail("Expected non-zero exit")
+        } catch let error as CfstRunnerError {
+            guard case .nonZeroExit(let status, let output) = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+            XCTAssertEqual(status, 7)
+            XCTAssertTrue(output.contains("leader exiting"))
+        }
+
+        XCTAssertLessThan(startedAt.duration(to: clock.now), .seconds(3))
+        let childPIDText = try String(
+            contentsOf: fixture.directoryURL.appendingPathComponent("child-pid.txt"),
+            encoding: .utf8
+        )
+        let childPID = try XCTUnwrap(pid_t(childPIDText.trimmingCharacters(in: .whitespacesAndNewlines)))
+        try await waitUntilProcessIsGone(childPID)
+    }
+
     func testOldResultIsDeletedAndNeverReused() async throws {
-        let fixture = try CfstRunnerFixture(script: #"""
-        #!/bin/sh
-        printf 'completed without csv\n'
-        exit 0
-        """#)
+        let fixture = try CfstRunnerFixture(
+            script: #"""
+                #!/bin/sh
+                printf 'completed without csv\n'
+                exit 0
+                """#)
         defer { fixture.remove() }
 
         let staleCSV = "IP,Sent,Recv,Loss,Latency,Speed,Region\nold-ip,4,4,0,1,99,OLD\n"
@@ -124,14 +165,15 @@ final class CfstRunnerTests: XCTestCase {
     }
 
     func testHeaderOnlyCSVReportsNoResults() async throws {
-        let fixture = try CfstRunnerFixture(script: #"""
-        #!/bin/sh
-        output=""
-        while [ "$#" -gt 0 ]; do
-          if [ "$1" = "-o" ]; then output="$2"; shift 2; else shift; fi
-        done
-        printf 'IP,Sent,Recv,Loss,Latency,Speed,Region\n' > "$output"
-        """#)
+        let fixture = try CfstRunnerFixture(
+            script: #"""
+                #!/bin/sh
+                output=""
+                while [ "$#" -gt 0 ]; do
+                  if [ "$1" = "-o" ]; then output="$2"; shift 2; else shift; fi
+                done
+                printf 'IP,Sent,Recv,Loss,Latency,Speed,Region\n' > "$output"
+                """#)
         defer { fixture.remove() }
 
         let runner = CfstRunner(executableURL: fixture.executableURL)

@@ -32,7 +32,8 @@ public enum ConfigTemplate {
             throw ConfigTemplateError.missingProxyOutbound
         }
         guard var settings = outbounds[proxyIndex]["settings"] as? [String: Any],
-              var vnext = settings["vnext"] as? [[String: Any]], !vnext.isEmpty else {
+            var vnext = settings["vnext"] as? [[String: Any]], !vnext.isEmpty
+        else {
             throw ConfigTemplateError.missingVnext
         }
 
@@ -60,10 +61,11 @@ public enum ConfigTemplate {
             throw ConfigTemplateError.missingProxyOutbound
         }
         guard let settings = proxy["settings"] as? [String: Any],
-              let vnext = settings["vnext"] as? [[String: Any]],
-              let server = vnext.first,
-              let address = server["address"] as? String,
-              !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            let vnext = settings["vnext"] as? [[String: Any]],
+            let server = vnext.first,
+            let address = server["address"] as? String,
+            !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
             throw ConfigTemplateError.missingVnext
         }
         guard !containsPlaceholder(in: proxy) else {
@@ -79,18 +81,21 @@ public enum ConfigTemplate {
     ) throws {
         let template = try Data(contentsOf: templateURL)
         let output = try replacingAddress(in: template, with: ip)
-        try fileManager.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fileManager.createDirectory(
+            at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try output.write(to: destinationURL, options: .atomic)
+        try FilePermissions.restrictFile(destinationURL, using: fileManager)
     }
 
     public static func address(in config: Data) -> String? {
         guard let object = try? JSONSerialization.jsonObject(with: config),
-              let dictionary = object as? [String: Any],
-              let outbounds = dictionary["outbounds"] as? [[String: Any]],
-              let proxy = outbounds.first(where: { $0["tag"] as? String == "proxy" }),
-              let settings = proxy["settings"] as? [String: Any],
-              let vnext = settings["vnext"] as? [[String: Any]],
-              let address = vnext.first?["address"] as? String else {
+            let dictionary = object as? [String: Any],
+            let outbounds = dictionary["outbounds"] as? [[String: Any]],
+            let proxy = outbounds.first(where: { $0["tag"] as? String == "proxy" }),
+            let settings = proxy["settings"] as? [String: Any],
+            let vnext = settings["vnext"] as? [[String: Any]],
+            let address = vnext.first?["address"] as? String
+        else {
             return nil
         }
         return address
@@ -98,7 +103,8 @@ public enum ConfigTemplate {
 
     private static func configurationObject(in data: Data) throws -> [String: Any] {
         guard let object = try? JSONSerialization.jsonObject(with: data),
-              let config = object as? [String: Any] else {
+            let config = object as? [String: Any]
+        else {
             throw ConfigTemplateError.invalidJSON
         }
         return config
@@ -117,12 +123,14 @@ public enum ConfigTemplate {
         }
 
         let allowedLoopbackAddresses = Set(["127.0.0.1", "::1", "localhost"])
-        guard inbounds.allSatisfy({ inbound in
-            guard let listen = inbound["listen"] as? String else { return false }
-            return allowedLoopbackAddresses.contains(
-                listen.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            )
-        }) else {
+        guard
+            inbounds.allSatisfy({ inbound in
+                guard let listen = inbound["listen"] as? String else { return false }
+                return allowedLoopbackAddresses.contains(
+                    listen.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                )
+            })
+        else {
             throw ConfigTemplateError.invalidLocalInbound
         }
 

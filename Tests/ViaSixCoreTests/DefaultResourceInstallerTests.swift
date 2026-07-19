@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import ViaSixCore
 
 final class DefaultResourceInstallerTests: XCTestCase {
@@ -6,17 +7,23 @@ final class DefaultResourceInstallerTests: XCTestCase {
         let paths = makePaths()
         defer { try? FileManager.default.removeItem(at: paths.root) }
         try paths.prepare()
-        try TestConfigFixtures.legacyBundledTemplate.write(to: paths.templateConfig)
+        let legacyTemplate = try TestConfigFixtures.syntheticLegacyTemplate()
+        try legacyTemplate.write(to: paths.templateConfig)
         try Data("stale generated config".utf8).write(to: paths.generatedConfig)
 
-        try DefaultResourceInstaller.install(into: paths)
+        try DefaultResourceInstaller.install(
+            into: paths,
+            legacyDigests: .init(
+                ipv4: "unused-for-this-test",
+                template: RuntimeSHA256.hexDigest(of: legacyTemplate)
+            )
+        )
 
         let installed = try Data(contentsOf: paths.templateConfig)
         let installedText = String(decoding: installed, as: UTF8.self)
-        let legacyValues = try TestConfigFixtures.legacyConnectionValues()
-        XCTAssertNotEqual(installed, TestConfigFixtures.legacyBundledTemplate)
-        XCTAssertFalse(installedText.contains(legacyValues.userID))
-        XCTAssertFalse(installedText.contains(legacyValues.serverName))
+        XCTAssertNotEqual(installed, legacyTemplate)
+        XCTAssertFalse(installedText.contains(TestConfigFixtures.syntheticLegacyUserID))
+        XCTAssertFalse(installedText.contains(TestConfigFixtures.syntheticLegacyServerName))
         XCTAssertTrue(installedText.contains(ConfigTemplate.placeholderUserID))
         XCTAssertTrue(installedText.contains(ConfigTemplate.placeholderServerName))
         XCTAssertFalse(FileManager.default.fileExists(atPath: paths.generatedConfig.path))
@@ -46,12 +53,13 @@ final class DefaultResourceInstallerTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: paths.root) }
         try paths.prepare()
         let replacement = Data("replacement".utf8)
-        try TestConfigFixtures.legacyBundledTemplate.write(to: paths.templateConfig)
+        let legacyTemplate = try TestConfigFixtures.syntheticLegacyTemplate()
+        try legacyTemplate.write(to: paths.templateConfig)
         try Data("derived".utf8).write(to: paths.generatedConfig)
 
         let replaced = try DefaultResourceInstaller.replaceIfMatchingLegacy(
             at: paths.templateConfig,
-            expectedSHA256: DefaultResourceInstaller.legacyTemplateSHA256,
+            expectedSHA256: RuntimeSHA256.hexDigest(of: legacyTemplate),
             replacement: replacement,
             removingDerivedFiles: [paths.generatedConfig]
         )
@@ -72,7 +80,7 @@ final class DefaultResourceInstallerTests: XCTestCase {
 
         let replaced = try DefaultResourceInstaller.replaceIfMatchingLegacy(
             at: paths.templateConfig,
-            expectedSHA256: DefaultResourceInstaller.legacyTemplateSHA256,
+            expectedSHA256: RuntimeSHA256.hexDigest(of: Data("different legacy value".utf8)),
             replacement: Data("replacement".utf8),
             removingDerivedFiles: [paths.generatedConfig]
         )

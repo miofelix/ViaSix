@@ -1,4 +1,5 @@
 import Foundation
+import Network
 
 public struct ProxyEndpoint: Equatable, Sendable {
     public let host: String
@@ -75,19 +76,28 @@ public actor ExitIPDetector {
 public enum ExitIPResponseParser {
     public static func parse(_ data: Data) throws -> ExitIPInfo {
         if let response = try? JSONDecoder().decode(APIResponse.self, from: data) {
-            let ip = response.ip.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !ip.isEmpty else { throw ExitIPDetectionError.invalidResponse }
-            let country = response.location?.countryName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let city = response.location?.city.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard let ip = normalizedIPAddress(response.ip) else {
+                throw ExitIPDetectionError.invalidResponse
+            }
+            let country = response.location?.countryName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let city = response.location?.city?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let location = [city, country].filter { !$0.isEmpty }.joined(separator: " ")
             return ExitIPInfo(ip: ip, location: location)
         }
 
-        let raw = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty, !raw.contains(where: { $0.isWhitespace }) else {
+        let raw = String(decoding: data, as: UTF8.self)
+        guard let ip = normalizedIPAddress(raw) else {
             throw ExitIPDetectionError.invalidResponse
         }
-        return ExitIPInfo(ip: raw)
+        return ExitIPInfo(ip: ip)
+    }
+
+    private static func normalizedIPAddress(_ value: String) -> String? {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard IPv4Address(normalized) != nil || IPv6Address(normalized) != nil else {
+            return nil
+        }
+        return normalized
     }
 
     private struct APIResponse: Decodable {
@@ -95,8 +105,8 @@ public enum ExitIPResponseParser {
         let location: Location?
 
         struct Location: Decodable {
-            let countryName: String
-            let city: String
+            let countryName: String?
+            let city: String?
 
             private enum CodingKeys: String, CodingKey {
                 case countryName = "country_name"
@@ -105,4 +115,3 @@ public enum ExitIPResponseParser {
         }
     }
 }
-

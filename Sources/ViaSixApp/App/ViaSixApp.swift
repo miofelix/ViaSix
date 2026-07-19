@@ -104,7 +104,8 @@ enum AppDocumentOpener {
         let candidates = bundledCandidates(for: document) + developmentCandidates(for: document)
 
         if let url = candidates.first(where: { fileManager.fileExists(atPath: $0.path) }),
-           NSWorkspace.shared.open(url) {
+            NSWorkspace.shared.open(url)
+        {
             return
         }
 

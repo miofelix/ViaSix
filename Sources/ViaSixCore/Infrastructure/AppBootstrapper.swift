@@ -31,6 +31,7 @@ public actor AppBootstrapper {
         let config = try ConfigTemplate.replacingAddress(in: template, with: ip)
         try ConfigTemplate.validateForLaunch(config)
         try config.write(to: paths.generatedConfig, options: .atomic)
+        try FilePermissions.restrictFile(paths.generatedConfig)
     }
 
     public func replaceTemplate(with data: Data, selectedIP: String? = nil) throws {
@@ -41,12 +42,14 @@ public actor AppBootstrapper {
         try ConfigTemplate.validateForLaunch(generatedConfig)
 
         try data.write(to: paths.templateConfig, options: .atomic)
+        try FilePermissions.restrictFile(paths.templateConfig)
         if normalizedIP.isEmpty {
             if FileManager.default.fileExists(atPath: paths.generatedConfig.path) {
                 try FileManager.default.removeItem(at: paths.generatedConfig)
             }
         } else {
             try generatedConfig.write(to: paths.generatedConfig, options: .atomic)
+            try FilePermissions.restrictFile(paths.generatedConfig)
         }
     }
 

@@ -164,12 +164,14 @@ public actor RuntimeComponentManager {
             let fileURL = runtimeDirectory.appendingPathComponent(payload.rawValue)
             var isDirectory: ObjCBool = false
             guard fileManager.fileExists(atPath: fileURL.path, isDirectory: &isDirectory),
-                  !isDirectory.boolValue else {
+                !isDirectory.boolValue
+            else {
                 continue
             }
             files[payload] = fileURL
             if payload.requiresExecutablePermission,
-               fileManager.isExecutableFile(atPath: fileURL.path) {
+                fileManager.isExecutableFile(atPath: fileURL.path)
+            {
                 executableFiles.insert(payload)
             }
         }
@@ -225,7 +227,8 @@ public actor RuntimeComponentManager {
         var payloadFiles: [RuntimePayloadFile: URL] = [:]
         for asset in assets {
             let archiveURL = try await download(asset, to: downloadsDirectory)
-            let componentDirectory = extractedDirectory
+            let componentDirectory =
+                extractedDirectory
                 .appendingPathComponent(asset.component.rawValue, isDirectory: true)
             try fileManager.createDirectory(at: componentDirectory, withIntermediateDirectories: true)
             try archiveExtractor(archiveURL, componentDirectory)
@@ -361,7 +364,7 @@ public actor RuntimeComponentManager {
         let resourceKeys: Set<URLResourceKey> = [
             .isDirectoryKey,
             .isRegularFileKey,
-            .isSymbolicLinkKey
+            .isSymbolicLinkKey,
         ]
 
         for sourcePath in sourcePaths {
@@ -371,11 +374,13 @@ public actor RuntimeComponentManager {
             }
 
             if isDirectory.boolValue {
-                guard let enumerator = fileManager.enumerator(
-                    at: sourcePath,
-                    includingPropertiesForKeys: Array(resourceKeys),
-                    options: [.skipsHiddenFiles, .skipsPackageDescendants]
-                ) else {
+                guard
+                    let enumerator = fileManager.enumerator(
+                        at: sourcePath,
+                        includingPropertiesForKeys: Array(resourceKeys),
+                        options: [.skipsHiddenFiles, .skipsPackageDescendants]
+                    )
+                else {
                     throw RuntimeComponentError.sourceIsNotFileOrDirectory(sourcePath)
                 }
                 for case let fileURL as URL in enumerator {

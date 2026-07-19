@@ -6,6 +6,7 @@ import ViaSixCore
 @Observable
 final class AppModel {
     private(set) var state: AppState
+    private(set) var switchingIP: String?
 
     var parameters: SpeedTestParameters {
         get { state.preferences.parameters }
@@ -30,6 +31,7 @@ final class AppModel {
     @ObservationIgnored private var runtimeTask: Task<Void, Never>?
     @ObservationIgnored private var templateTask: Task<Void, Never>?
     @ObservationIgnored private var speedTestTask: Task<Void, Never>?
+    @ObservationIgnored private var selectionTask: Task<Void, Never>?
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var detectTask: Task<Void, Never>?
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
@@ -157,15 +159,6 @@ final class AppModel {
         }
     }
 
-    func refreshRuntimeStatus() {
-        Task { [weak self] in
-            guard let self else { return }
-            state.runtimePhase = .checking
-            state.runtimeStatus = await runtimeManager.installedStatus()
-            refreshRuntimePhase()
-        }
-    }
-
     func selectIPSource(_ mode: IPSourceMode) {
         state.preferences.ipSourceMode = mode
         switch mode {
@@ -217,11 +210,13 @@ final class AppModel {
             showNotice(error.localizedDescription, style: .error)
             return
         }
-        guard let executableURL = resolvedExecutable(
-            preferredPath: state.preferences.cfstPath,
-            managedURL: state.runtimeStatus?.cfstURL,
-            commandName: "cfst"
-        ) else {
+        guard
+            let executableURL = resolvedExecutable(
+                preferredPath: state.preferences.cfstPath,
+                managedURL: state.runtimeStatus?.cfstURL,
+                commandName: "cfst"
+            )
+        else {
             showNotice("请先安装 CFST 运行组件", style: .error)
             return
         }
@@ -272,14 +267,35 @@ final class AppModel {
     func stopSpeedTest() {
         guard let runner = activeRunner else { return }
         state.speedTest.phase = .stopping
+        speedTestTask?.cancel()
         Task { await runner.cancel() }
     }
 
-    func selectIP(_ ip: String) async {
+    func selectIP(_ ip: String) {
+        guard selectionTask == nil, !isShuttingDown else { return }
+        switchingIP = ip
+        selectionTask = Task { [weak self] in
+            await self?.performIPSelection(ip)
+        }
+    }
+
+    private func performIPSelection(_ ip: String) async {
+        defer {
+            if switchingIP == ip {
+                switchingIP = nil
+            }
+            selectionTask = nil
+        }
+
         let shouldRestartXray = state.isXrayRunning
         do {
+            try Task.checkCancellation()
             try await applySelection(ip)
+            try Task.checkCancellation()
+        } catch is CancellationError {
+            return
         } catch {
+            if isShuttingDown || Task.isCancelled { return }
             appendLog(source: .app, level: .error, message: error.localizedDescription)
             showNotice("切换失败：\(error.localizedDescription)", style: .error)
             return
@@ -291,6 +307,7 @@ final class AppModel {
             do {
                 try await restartActiveXray()
             } catch {
+                if isShuttingDown || Task.isCancelled { return }
                 showNotice("节点已切换，但本地代理重新连接失败", style: .error)
                 return
             }
@@ -300,13 +317,15 @@ final class AppModel {
 
     func startXray() {
         guard activeXray == nil, xrayStartTask == nil, xrayStopTask == nil else { return }
-        guard let executableURL = resolvedExecutable(
-            preferredPath: state.preferences.xrayPath,
-            managedURL: state.runtimeStatus?.xrayIsReady == true
-                ? state.runtimeStatus?.xrayURL
-                : nil,
-            commandName: "xray"
-        ) else {
+        guard
+            let executableURL = resolvedExecutable(
+                preferredPath: state.preferences.xrayPath,
+                managedURL: state.runtimeStatus?.xrayIsReady == true
+                    ? state.runtimeStatus?.xrayURL
+                    : nil,
+                commandName: "xray"
+            )
+        else {
             showNotice("请先安装代理运行组件", style: .error)
             return
         }
@@ -326,8 +345,9 @@ final class AppModel {
 
                 var environment: [String: String] = [:]
                 if state.runtimeStatus?.xrayIsReady == true,
-                   executableURL.standardizedFileURL == state.runtimeStatus?.xrayURL?.standardizedFileURL,
-                   let assetURL = state.runtimeStatus?.geoIPURL {
+                    executableURL.standardizedFileURL == state.runtimeStatus?.xrayURL?.standardizedFileURL,
+                    let assetURL = state.runtimeStatus?.geoIPURL
+                {
                     environment["XRAY_LOCATION_ASSET"] = assetURL.deletingLastPathComponent().path
                 }
                 let controller = XrayController(
@@ -390,9 +410,10 @@ final class AppModel {
 
     func restartXray() {
         guard state.isXrayRunning,
-              activeXray != nil,
-              xrayStartTask == nil,
-              xrayStopTask == nil else { return }
+            activeXray != nil,
+            xrayStartTask == nil,
+            xrayStopTask == nil
+        else { return }
         state.xrayPhase = .stopping
         xrayStartTask = Task { [weak self] in
             guard let self else { return }
@@ -409,6 +430,7 @@ final class AppModel {
     func detectExitIP() {
         guard detectTask == nil else { return }
         state.exit.isDetecting = true
+        state.exit.info = nil
         state.exit.errorMessage = nil
         detectTask = Task { [weak self] in
             guard let self else { return }
@@ -444,11 +466,12 @@ final class AppModel {
             runtimeTask,
             templateTask,
             speedTestTask,
+            selectionTask,
             saveTask,
             detectTask,
             noticeTask,
             xrayStartTask,
-            xrayStopTask
+            xrayStopTask,
         ].compactMap { $0 }
         pendingTasks.forEach { $0.cancel() }
 
@@ -466,6 +489,7 @@ final class AppModel {
     }
 
     private func bootstrap() async {
+        defer { bootstrapTask = nil }
         do {
             try await bootstrapper.prepareDefaults()
             let defaults = UserPreferences(parameters: .defaults(ipv6File: paths.ipv6List))
@@ -473,31 +497,48 @@ final class AppModel {
             let loadedPreferences = preferences
             normalizeBundledSourcePath(in: &preferences)
 
-            async let results = bootstrapper.loadResults()
-            async let status = runtimeManager.installedStatus()
-            let (loadedResults, installedStatus) = try await (results, status)
-
-            if let configuredIP = try await bootstrapper.currentConfigIP()?
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-               !configuredIP.isEmpty {
-                preferences.selectedIP = configuredIP
-            } else if !preferences.selectedIP.isEmpty {
-                try await bootstrapper.ensureConfig(ip: preferences.selectedIP)
+            async let installedStatus = runtimeManager.installedStatus()
+            let loadedResults: [SpeedTestResult]
+            do {
+                loadedResults = try await bootstrapper.loadResults()
+            } catch {
+                loadedResults = []
+                appendLog(source: .speedTest, level: .warning, message: "忽略了损坏的历史测速结果：\(error.localizedDescription)")
             }
+
+            var configurationWarning: String?
+            do {
+                if let configuredIP = try await bootstrapper.currentConfigIP()?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                    !configuredIP.isEmpty
+                {
+                    preferences.selectedIP = configuredIP
+                } else if !preferences.selectedIP.isEmpty {
+                    try await bootstrapper.ensureConfig(ip: preferences.selectedIP)
+                }
+            } catch {
+                configurationWarning = error.localizedDescription
+                appendLog(source: .app, level: .warning, message: "代理配置需要修复：\(error.localizedDescription)")
+            }
+
+            guard !Task.isCancelled, !isShuttingDown else { return }
             state.preferences = preferences
             state.results = loadedResults
-            state.runtimeStatus = installedStatus
+            state.runtimeStatus = await installedStatus
             refreshRuntimePhase()
             state.launchPhase = .ready
             if preferences != loadedPreferences {
                 schedulePreferencesSave()
             }
             appendLog(source: .app, level: .success, message: "应用已就绪")
+            if let configurationWarning {
+                showNotice("代理配置需要重新导入或修复：\(configurationWarning)", style: .error)
+            }
         } catch {
+            guard !Task.isCancelled, !isShuttingDown else { return }
             state.launchPhase = .failed(error.localizedDescription)
             appendLog(source: .app, level: .error, message: error.localizedDescription)
         }
-        bootstrapTask = nil
     }
 
     private func normalizeBundledSourcePath(in preferences: inout UserPreferences) {
@@ -525,7 +566,8 @@ final class AppModel {
             managedURL: state.runtimeStatus?.cfstURL,
             commandName: "cfst"
         )
-        let managedXrayURL = state.runtimeStatus?.xrayIsReady == true
+        let managedXrayURL =
+            state.runtimeStatus?.xrayIsReady == true
             ? state.runtimeStatus?.xrayURL
             : nil
         let xray = resolvedExecutable(
@@ -549,9 +591,10 @@ final class AppModel {
         candidates.append(URL(fileURLWithPath: "/opt/homebrew/bin/\(commandName)"))
         candidates.append(URL(fileURLWithPath: "/usr/local/bin/\(commandName)"))
         if let path = ProcessInfo.processInfo.environment["PATH"] {
-            candidates.append(contentsOf: path.split(separator: ":").map {
-                URL(fileURLWithPath: String($0)).appendingPathComponent(commandName)
-            })
+            candidates.append(
+                contentsOf: path.split(separator: ":").map {
+                    URL(fileURLWithPath: String($0)).appendingPathComponent(commandName)
+                })
         }
         return candidates.first { FileManager.default.isExecutableFile(atPath: $0.path) }
     }
@@ -561,7 +604,12 @@ final class AppModel {
         guard !normalized.isEmpty else { return }
         try await bootstrapper.writeConfig(ip: normalized)
         state.preferences.selectedIP = normalized
-        try await savePreferencesNow()
+        do {
+            try await savePreferencesNow()
+        } catch {
+            appendLog(source: .app, level: .warning, message: "节点已应用，但偏好保存失败：\(error.localizedDescription)")
+            schedulePreferencesSave()
+        }
     }
 
     private func restartActiveXray() async throws {

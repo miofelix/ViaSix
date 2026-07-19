@@ -112,7 +112,8 @@ public actor XrayController {
         let executableURL = executableURL.standardizedFileURL
         self.executableURL = executableURL
         self.configURL = configURL.standardizedFileURL
-        self.workingDirectoryURL = (workingDirectoryURL
+        self.workingDirectoryURL =
+            (workingDirectoryURL
             ?? executableURL.deletingLastPathComponent()).standardizedFileURL
         self.environment = environment
         self.host = host
@@ -120,9 +121,10 @@ public actor XrayController {
         self.startupTimeout = startupTimeout
         self.probeInterval = probeInterval
         self.stopTimeout = stopTimeout
-        self.portProbe = portProbe ?? { host, port in
-            Self.probeTCPPort(host: host, port: port)
-        }
+        self.portProbe =
+            portProbe ?? { host, port in
+                Self.probeTCPPort(host: host, port: port)
+            }
     }
 
     /// Validates the configuration, verifies the local port is free, starts
@@ -146,7 +148,8 @@ public actor XrayController {
                 Task.detached { await self.cancelOperation(id: id) }
             }
         } catch {
-            let wasCancelled = Task.isCancelled
+            let wasCancelled =
+                Task.isCancelled
                 || cancellationRequested
                 || (error as? XrayControllerError) == .cancelled
             await shutDownOperation(id: id, emitStopping: wasCancelled)
@@ -394,9 +397,10 @@ public actor XrayController {
         handler: XrayEventHandler
     ) async {
         guard operationID == id,
-              activeProcess?.pid == process.pid,
-              !cancellationRequested,
-              state != .stopping else {
+            activeProcess?.pid == process.pid,
+            !cancellationRequested,
+            state != .stopping
+        else {
             return
         }
 
@@ -404,8 +408,9 @@ public actor XrayController {
         let output = await process.outputTask.value
 
         guard operationID == id,
-              activeProcess?.pid == process.pid,
-              !cancellationRequested else {
+            activeProcess?.pid == process.pid,
+            !cancellationRequested
+        else {
             return
         }
 
@@ -414,10 +419,11 @@ public actor XrayController {
         operationID = nil
         eventHandler = nil
         state = .stopped
-        await handler(.unexpectedExit(
-            status: termination.status,
-            output: output.output.trimmingCharacters(in: .whitespacesAndNewlines)
-        ))
+        await handler(
+            .unexpectedExit(
+                status: termination.status,
+                output: output.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            ))
         await handler(.stateChanged(.stopped))
     }
 
@@ -555,13 +561,15 @@ public actor XrayController {
 
         var socketError: Int32 = 0
         var optionLength = socklen_t(MemoryLayout<Int32>.size)
-        guard getsockopt(
-            socketDescriptor,
-            SOL_SOCKET,
-            SO_ERROR,
-            &socketError,
-            &optionLength
-        ) == 0 else {
+        guard
+            getsockopt(
+                socketDescriptor,
+                SOL_SOCKET,
+                SO_ERROR,
+                &socketError,
+                &optionLength
+            ) == 0
+        else {
             return false
         }
         return socketError == 0
@@ -664,7 +672,8 @@ private struct SpawnedXrayProcess: Sendable {
             environmentOverrides,
             uniquingKeysWith: { _, override in override }
         )
-        let environmentStrings = environment
+        let environmentStrings =
+            environment
             .map { "\($0.key)=\($0.value)" }
             .sorted()
         var envp = environmentStrings.map { strdup($0) }

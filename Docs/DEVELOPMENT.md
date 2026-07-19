@@ -2,11 +2,26 @@
 
 本文面向 ViaSix 的开发者和贡献者。终端用户请阅读 [README](../README.md) 和 [用户指南](USER_GUIDE.md)。
 
+## 目录
+
+- [开发环境](#开发环境)
+- [构建与运行](#构建与运行)
+- [测试与验证](#测试与验证)
+- [工程结构](#工程结构)
+- [运行组件](#运行组件)
+- [内置地址列表](#内置地址列表)
+- [可写数据与资源](#可写数据与资源)
+- [默认资源与迁移](#默认资源与迁移)
+- [Xray 配置流程](#xray-配置流程)
+- [进程与并发约定](#进程与并发约定)
+- [测速结果约定](#测速结果约定)
+- [文档职责](#文档职责)
+
 ## 开发环境
 
-- macOS 14 Sonoma 或更高版本
+- macOS 15.2 或更高版本（开发环境；应用运行最低要求仍为 macOS 14）
 - Xcode 16.3 或更高版本
-- Swift 6.1
+- Swift 6.1 或更高版本
 - zsh、make 以及 macOS 自带的签名和打包工具
 
 确认工具链：
@@ -45,7 +60,21 @@ open dist/ViaSix.app
 
 `make app` 默认生成 ad-hoc 签名包，适用于本地开发与冒烟测试。正式签名和公证流程见 [发布指南](RELEASING.md)。
 
+打包脚本会定义 `VIASIX_PACKAGED_APP`，使正式 bundle 只从 `Bundle.main` 读取资源，避免 SwiftPM 的开发期 `Bundle.module` 路径泄露本机检出目录。修改资源加载或打包命令时必须保留对应验证。
+
 ## 测试与验证
+
+统一格式化 Swift 源码：
+
+```bash
+make format
+```
+
+运行格式、脚本语法、Info.plist 和文档链接检查：
+
+```bash
+make lint
+```
 
 运行全部测试：
 
@@ -59,12 +88,13 @@ make test
 make verify-app
 ```
 
-需要把编译警告视为错误时：
+运行与 CI 一致的 Release 严格构建和全部测试：
 
 ```bash
-swift build -Xswiftc -warnings-as-errors
-swift build -c release -Xswiftc -warnings-as-errors
+make check
 ```
+
+`make test` 和 `make check` 都会把 Swift 编译警告视为错误。
 
 `make clean` 只清理仓库中的 SwiftPM 和 `dist` 构建产物，不会删除 `~/Library/Application Support/ViaSix` 中的用户数据：
 
@@ -95,6 +125,9 @@ Tests/
 Packaging/            Info.plist 与应用图标源文件
 Scripts/              图标、应用打包与 bundle 验证
 Docs/                 用户、开发、架构与发布文档
+ThirdPartyLicenses/   固定上游版本的许可证原文
+.github/              CI、Dependabot 与 Pull Request 模板
+LICENSE               ViaSix 自身的 MIT License
 ```
 
 SwiftPM 定义两个主要目标：
@@ -112,7 +145,7 @@ SwiftPM 定义两个主要目标：
 Sources/ViaSixCore/Runtime/RuntimeManifest.swift
 ```
 
-当前组件：
+当前上游组件：
 
 - CloudflareSpeedTest `v2.3.5`
 - Xray-core `v26.3.27`
@@ -133,6 +166,8 @@ Sources/ViaSixCore/Runtime/RuntimeManifest.swift
 4. 解压并确认必要文件完整。
 5. 将完整组件移动到应用数据目录。
 
+CloudflareSpeedTest 是 XIU2 维护的独立第三方项目，并非 Cloudflare 官方产品。“上游组件”表示从各项目自己的正式 Release 获取。
+
 本地导入支持可执行文件、目录或多个相关文件。Xray 管理副本需要 `xray`、`geoip.dat` 和 `geosite.dat`。
 
 更新组件版本时，必须同时：
@@ -141,6 +176,10 @@ Sources/ViaSixCore/Runtime/RuntimeManifest.swift
 - 更新测试中的预期值
 - 更新 [第三方声明](../THIRD_PARTY_NOTICES.md)
 - 在 arm64 与 x86_64 对应环境验证下载和启动
+
+## 内置地址列表
+
+`ip.txt` 和 `ipv6.txt` 的来源、快照日期、文件哈希及更新步骤统一记录在[内置地址列表来源](ADDRESS_SOURCES.md)。更新默认列表时还必须增加精确匹配迁移，不能直接覆盖用户已经编辑的副本。
 
 ## 可写数据与资源
 
@@ -172,6 +211,8 @@ Sources/ViaSixCore/Runtime/RuntimeManifest.swift
 - `result.csv`：当前测速输出；启动新任务前删除。
 - `Runtime`：ViaSix 管理的第三方组件。
 - `Logs`：为未来持久日志预留；当前界面日志仅在内存中。
+
+ViaSix 会把上述目录权限收紧为 `0700`，把偏好、地址列表和代理配置等管理文件收紧为 `0600`。新增写入路径时必须保持相同边界；不要依赖用户默认 `umask` 保护敏感配置。
 
 ## 默认资源与迁移
 
@@ -247,6 +288,12 @@ ViaSix 只替换 `proxy` 出站中第一个 `vnext.address`。导入新模板时
 - `Docs/DEVELOPMENT.md`：构建、测试、目录、数据和开发约定。
 - `Docs/ARCHITECTURE.md`：模块和进程边界。
 - `Docs/RELEASING.md`：签名、公证和发布检查。
+- `Docs/ADDRESS_SOURCES.md`：默认地址列表来源、快照和更新流程。
+- `CONTRIBUTING.md`：Issue / PR、提交、测试和文档同步规则。
+- `CHANGELOG.md`：用户可见变化和版本历史。
+- `SECURITY.md`：私密漏洞报告与供应链约定。
+- `PRIVACY.md`：本机数据、网络端点、保留与删除方式。
 - `THIRD_PARTY_NOTICES.md`：第三方版本、来源和许可证义务。
+- `LICENSE`：ViaSix 自身的 MIT 授权条款。
 
 产品历史或内部验收对照不应出现在用户文档和应用文案中。

@@ -30,14 +30,18 @@ public struct AppPaths: Sendable, Equatable {
     }
 
     public static func live(appName: String = "ViaSix") -> Self {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let fileManager = FileManager.default
+        let base =
+            fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support", isDirectory: true)
         return Self(root: base.appendingPathComponent(appName, isDirectory: true))
     }
 
     public func prepare(using fileManager: FileManager = .default) throws {
         for directory in [root, data, runtime, logs] {
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            try FilePermissions.restrictDirectory(directory, using: fileManager)
         }
     }
 }
-
