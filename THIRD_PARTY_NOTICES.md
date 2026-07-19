@@ -28,4 +28,4 @@ ViaSix 下载其未修改的 macOS 正式发布压缩包。`geoip.dat`、`geosit
 
 ## 第三方网络服务
 
-未设置自定义测速 URL 时，CloudflareSpeedTest 可能使用其上游默认测速地址。出口 IP 检测使用 `https://api.myip.la/cn?json`。这些服务受各自可用性、日志和隐私政策约束。
+未设置自定义测速 URL 时，CloudflareSpeedTest 可能使用其上游默认测速地址。自动出口 IP 检测默认使用 `https://api.myip.la/cn?json`；强制 IPv4 / IPv6 检测分别使用 `https://api-ipv4.ip.sb/ip` 与 `https://api-ipv6.ip.sb/ip`。这些服务受各自可用性、日志和隐私政策约束。

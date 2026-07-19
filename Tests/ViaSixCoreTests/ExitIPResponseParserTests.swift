@@ -18,6 +18,31 @@ final class ExitIPResponseParserTests: XCTestCase {
         )
     }
 
+    func testReportsParsedAddressFamily() throws {
+        let ipv4 = try ExitIPResponseParser.parse(Data("1.1.1.1".utf8))
+        let ipv6 = try ExitIPResponseParser.parse(Data("2606::1".utf8))
+
+        XCTAssertEqual(ipv4.addressFamily, .ipv4)
+        XCTAssertEqual(ipv6.addressFamily, .ipv6)
+    }
+
+    func testDetectionModesResolveToFamilySpecificEndpoints() {
+        let custom = "https://status.example.test/ip"
+
+        XCTAssertEqual(
+            AppMetadata.exitIPEndpoint(for: .automatic, automaticEndpoint: custom),
+            custom
+        )
+        XCTAssertEqual(
+            AppMetadata.exitIPEndpoint(for: .ipv4, automaticEndpoint: custom),
+            AppMetadata.ipv4ExitIPEndpoint
+        )
+        XCTAssertEqual(
+            AppMetadata.exitIPEndpoint(for: .ipv6, automaticEndpoint: custom),
+            AppMetadata.ipv6ExitIPEndpoint
+        )
+    }
+
     func testRejectsWhitespaceOnlyResponse() {
         XCTAssertThrowsError(try ExitIPResponseParser.parse(Data(" \n".utf8)))
     }

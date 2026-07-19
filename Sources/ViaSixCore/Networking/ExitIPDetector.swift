@@ -1,6 +1,18 @@
 import Foundation
 import Network
 
+public enum IPAddressFamily: String, Codable, Equatable, Sendable {
+    case ipv4
+    case ipv6
+
+    public var displayName: String {
+        switch self {
+        case .ipv4: "IPv4"
+        case .ipv6: "IPv6"
+        }
+    }
+}
+
 public struct ProxyEndpoint: Codable, Equatable, Sendable {
     public let host: String
     public let port: Int
@@ -23,17 +35,26 @@ public struct ExitIPInfo: Codable, Equatable, Sendable {
         self.ip = ip
         self.location = location
     }
+
+    public var addressFamily: IPAddressFamily? {
+        if IPv4Address(ip) != nil { return .ipv4 }
+        if IPv6Address(ip) != nil { return .ipv6 }
+        return nil
+    }
 }
 
 public enum ExitIPDetectionError: LocalizedError, Equatable, Sendable {
     case invalidEndpoint
     case invalidResponse
+    case addressFamilyMismatch(IPAddressFamily)
     case httpStatus(Int)
 
     public var errorDescription: String? {
         switch self {
         case .invalidEndpoint: "出口 IP 服务地址必须是有效的 HTTP 或 HTTPS URL"
         case .invalidResponse: "出口 IP 服务返回了无法识别的数据"
+        case .addressFamilyMismatch(let expected):
+            "出口 IP 服务未返回预期的 \(expected.displayName) 地址"
         case .httpStatus(let code): "出口 IP 服务返回 HTTP \(code)"
         }
     }
@@ -51,7 +72,11 @@ public actor ExitIPDetector {
         self.timeout = timeout
     }
 
-    public func detect(proxy: ProxyEndpoint? = nil, endpoint: URL? = nil) async throws -> ExitIPInfo {
+    public func detect(
+        proxy: ProxyEndpoint? = nil,
+        endpoint: URL? = nil,
+        expectedFamily: IPAddressFamily? = nil
+    ) async throws -> ExitIPInfo {
         let endpoint = endpoint ?? self.endpoint
         guard let scheme = endpoint.scheme?.lowercased(), ["http", "https"].contains(scheme),
             endpoint.host != nil
@@ -81,7 +106,11 @@ public actor ExitIPDetector {
         guard (200...299).contains(response.statusCode) else {
             throw ExitIPDetectionError.httpStatus(response.statusCode)
         }
-        return try ExitIPResponseParser.parse(data)
+        let info = try ExitIPResponseParser.parse(data)
+        if let expectedFamily, info.addressFamily != expectedFamily {
+            throw ExitIPDetectionError.addressFamilyMismatch(expectedFamily)
+        }
+        return info
     }
 }
 

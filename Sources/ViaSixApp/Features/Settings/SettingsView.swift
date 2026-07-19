@@ -188,7 +188,7 @@ struct SettingsView: View {
                     )
                 )
                 .textFieldStyle(.roundedBorder)
-                Text("用于“连接”中的出口 IP 检测，支持 HTTP 或 HTTPS 地址。")
+                Text("自动模式使用此 HTTP/HTTPS 服务；强制 IPv4 或 IPv6 时使用对应的专用检测服务。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

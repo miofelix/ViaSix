@@ -113,37 +113,62 @@ struct OverviewView: View {
             detailRow(label: "协议", value: "HTTP / SOCKS")
             Divider()
 
-            HStack(alignment: .center, spacing: 12) {
-                Text("出口 IP")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 72, alignment: .leading)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    Text("出口 IP")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 72, alignment: .leading)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(model.state.exit.info?.ip ?? "未检测")
-                        .font(.system(.callout, design: .monospaced).weight(.medium))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    if let location = model.state.exit.info?.location, !location.isEmpty {
-                        Text(location)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+
+                    Picker("地址族", selection: exitIPDetectionModeBinding) {
+                        Text("自动").tag(ExitIPDetectionMode.automatic)
+                        Text("IPv4").tag(ExitIPDetectionMode.ipv4)
+                        Text("IPv6").tag(ExitIPDetectionMode.ipv6)
                     }
-                    if let error = model.state.exit.errorMessage {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                            .fixedSize(horizontal: false, vertical: true)
+                    .pickerStyle(.segmented)
+                    .controlSize(.small)
+                    .frame(width: 190)
+                    .disabled(model.state.exit.isDetecting)
+                    .accessibilityLabel("出口 IP 地址族")
+
+                    Button(model.state.exit.isDetecting ? "检测中…" : "检测") {
+                        model.detectExitIP()
                     }
+                    .disabled(model.state.exit.isDetecting || isXrayTransitioning)
+                    .accessibilityHint(model.state.isXrayRunning ? "通过本地代理检测出口" : "直接检测本机出口")
                 }
 
-                Spacer()
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Color.clear
+                        .frame(width: 72, height: 1)
 
-                Button(model.state.exit.isDetecting ? "检测中…" : "检测") {
-                    model.detectExitIP()
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 8) {
+                            Text(model.state.exit.info?.ip ?? "未检测")
+                                .font(.system(.callout, design: .monospaced).weight(.medium))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            if let family = model.state.exit.info?.addressFamily {
+                                Text(family.displayName)
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        if let location = model.state.exit.info?.location, !location.isEmpty {
+                            Text(location)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let error = model.state.exit.errorMessage {
+                            Text(error)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                 }
-                .disabled(model.state.exit.isDetecting || isXrayTransitioning)
-                .accessibilityHint(model.state.isXrayRunning ? "通过本地代理检测出口" : "直接检测本机出口")
             }
             .padding(.vertical, 11)
 
@@ -257,6 +282,14 @@ struct OverviewView: View {
             } else {
                 model.stopXray()
             }
+        }
+    }
+
+    private var exitIPDetectionModeBinding: Binding<ExitIPDetectionMode> {
+        Binding {
+            model.exitIPDetectionMode
+        } set: { mode in
+            model.exitIPDetectionMode = mode
         }
     }
 

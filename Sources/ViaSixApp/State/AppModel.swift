@@ -27,7 +27,23 @@ final class AppModel {
     var exitIPEndpoint: String {
         get { state.preferences.exitIPEndpoint }
         set {
+            guard state.preferences.exitIPEndpoint != newValue else { return }
             state.preferences.exitIPEndpoint = newValue
+            if state.preferences.exitIPDetectionMode == .automatic {
+                state.exit.info = nil
+                state.exit.errorMessage = nil
+            }
+            schedulePreferencesSave()
+        }
+    }
+
+    var exitIPDetectionMode: ExitIPDetectionMode {
+        get { state.preferences.exitIPDetectionMode }
+        set {
+            guard state.preferences.exitIPDetectionMode != newValue else { return }
+            state.preferences.exitIPDetectionMode = newValue
+            state.exit.info = nil
+            state.exit.errorMessage = nil
             schedulePreferencesSave()
         }
     }
@@ -585,14 +601,23 @@ final class AppModel {
         guard detectTask == nil else { return }
         state.exit.isDetecting = true
         state.exit.errorMessage = nil
+        let mode = state.preferences.exitIPDetectionMode
+        let endpointString = AppMetadata.exitIPEndpoint(
+            for: mode,
+            automaticEndpoint: state.preferences.exitIPEndpoint
+        )
         detectTask = Task { [weak self] in
             guard let self else { return }
             do {
                 let proxy = state.isXrayRunning ? state.proxyEndpoint : nil
-                guard let endpoint = URL(string: state.preferences.exitIPEndpoint) else {
+                guard let endpoint = URL(string: endpointString) else {
                     throw ExitIPDetectionError.invalidEndpoint
                 }
-                state.exit.info = try await exitDetector.detect(proxy: proxy, endpoint: endpoint)
+                state.exit.info = try await exitDetector.detect(
+                    proxy: proxy,
+                    endpoint: endpoint,
+                    expectedFamily: mode.expectedAddressFamily
+                )
                 appendLog(source: .app, level: .success, message: "出口 IP：\(state.exit.info?.ip ?? "")")
             } catch {
                 state.exit.errorMessage = error.localizedDescription
