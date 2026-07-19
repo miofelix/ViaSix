@@ -8,49 +8,19 @@ extension NodesView {
 
     var parametersCard: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        showsParameters.toggle()
-                    }
-                } label: {
-                    HStack(spacing: 12) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("测速参数")
-                                .font(.headline)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    parametersDisclosureButton
+                    resetParametersButton
+                }
 
-                            Text(parameterSummary)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-
-                        Spacer(minLength: 12)
-
-                        Image(systemName: showsParameters ? "chevron.up" : "chevron.down")
-                            .font(.callout.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 8) {
+                    parametersDisclosureButton
+                    HStack {
+                        Spacer(minLength: 0)
+                        resetParametersButton
                     }
                 }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity, minHeight: VisualStyle.controlHeight, alignment: .leading)
-                .contentShape(Rectangle())
-                .help(showsParameters ? "收起测速设置" : "展开测速设置")
-                .accessibilityLabel(showsParameters ? "收起测速设置" : "展开测速设置")
-                .accessibilityValue(showsParameters ? "已展开" : "已收起")
-
-                Button {
-                    showsResetConfirmation = true
-                } label: {
-                    Image(systemName: "arrow.counterclockwise")
-                }
-                .buttonStyle(.borderless)
-                .iconButtonHitTarget()
-                .foregroundStyle(.secondary)
-                .help("恢复默认测速设置")
-                .accessibilityLabel("恢复默认测速设置")
-                .disabled(isTesting)
             }
             .padding(20)
 
@@ -102,6 +72,53 @@ extension NodesView {
         }
         .cardStyle()
         .animation(.easeInOut(duration: 0.18), value: showsParameters)
+    }
+
+    private var parametersDisclosureButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                showsParameters.toggle()
+            }
+        } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("测速参数")
+                        .font(.headline)
+
+                    Text(parameterSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 12)
+
+                Image(systemName: showsParameters ? "chevron.up" : "chevron.down")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, minHeight: VisualStyle.controlHeight, alignment: .leading)
+        .contentShape(Rectangle())
+        .help(showsParameters ? "收起测速设置" : "展开测速设置")
+        .accessibilityLabel(showsParameters ? "收起测速设置" : "展开测速设置")
+        .accessibilityValue(showsParameters ? "已展开" : "已收起")
+    }
+
+    private var resetParametersButton: some View {
+        Button {
+            showsResetConfirmation = true
+        } label: {
+            Image(systemName: "arrow.counterclockwise")
+        }
+        .buttonStyle(.borderless)
+        .iconButtonHitTarget()
+        .foregroundStyle(.secondary)
+        .help("恢复默认测速设置")
+        .accessibilityLabel("恢复默认测速设置")
+        .disabled(isTesting)
     }
 
     var sourceSettings: some View {

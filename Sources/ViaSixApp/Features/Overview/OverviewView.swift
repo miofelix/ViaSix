@@ -69,48 +69,11 @@ struct OverviewView: View {
 
     private var proxyPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 9) {
-                Image(systemName: "point.3.connected.trianglepath.dotted")
-                    .foregroundStyle(.secondary)
-                Text("本地代理")
-                    .font(.headline)
-                Spacer()
-                Circle()
-                    .fill(xrayStatusColor)
-                    .frame(width: 7, height: 7)
-                Text(xrayStatusText)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-
-                Toggle("本地代理", isOn: proxyEnabledBinding)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .disabled(proxyToggleDisabled)
-                    .accessibilityLabel("本地代理")
-                    .accessibilityValue(xrayStatusText)
-            }
-            .padding(.bottom, 15)
+            proxyHeader
 
             Divider()
 
-            HStack(alignment: .center, spacing: 12) {
-                Text("代理地址")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 72, alignment: .leading)
-                Text(proxyEndpoint)
-                    .font(.system(.callout, design: .monospaced).weight(.medium))
-                    .textSelection(.enabled)
-                Spacer()
-                Button(action: copyProxyEndpoint) {
-                    Image(systemName: copiedEndpoint ? "checkmark" : "doc.on.doc")
-                }
-                .buttonStyle(.borderless)
-                .iconButtonHitTarget()
-                .help(copiedEndpoint ? "已复制" : "复制代理地址")
-                .accessibilityLabel(copiedEndpoint ? "已复制代理地址" : "复制代理地址")
-            }
-            .padding(.vertical, 10)
+            proxyEndpointRow
             Divider()
             detailRow(label: "协议", value: "HTTP / SOCKS")
             Divider()
@@ -119,25 +82,7 @@ struct OverviewView: View {
 
             Divider()
 
-            HStack(spacing: 9) {
-                Button("选择节点", systemImage: "network", action: onSelectNodes)
-
-                Button(configurationTestButtonTitle, systemImage: configurationTestButtonIcon) {
-                    if isConfigurationTestRunning {
-                        model.stopCurrentConfigurationTest()
-                    } else {
-                        model.startCurrentConfigurationTest()
-                    }
-                }
-                .disabled(configurationTestButtonDisabled)
-
-                if model.state.isXrayRunning {
-                    Button("重新连接", systemImage: "arrow.clockwise", action: model.restartXray)
-                }
-
-                Spacer()
-            }
-            .padding(.top, 14)
+            proxyActionsRow
 
             if case .failed(let message) = model.state.configurationTest.phase {
                 Text("当前节点测速失败：\(message)")
@@ -166,8 +111,162 @@ struct OverviewView: View {
         .cardStyle()
     }
 
+    private var proxyHeader: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 9) {
+                proxyIdentity
+                Spacer(minLength: 16)
+                proxyStatus
+                proxyToggle
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 9) {
+                    proxyIdentity
+                    Spacer(minLength: 12)
+                    proxyStatus
+                }
+
+                HStack {
+                    Spacer(minLength: 0)
+                    proxyToggle
+                }
+            }
+        }
+        .padding(.bottom, 15)
+    }
+
+    private var proxyIdentity: some View {
+        HStack(spacing: 9) {
+            Image(systemName: "point.3.connected.trianglepath.dotted")
+                .foregroundStyle(.secondary)
+            Text("本地代理")
+                .font(.headline)
+                .fixedSize(horizontal: true, vertical: false)
+        }
+    }
+
+    private var proxyStatus: some View {
+        HStack(spacing: 7) {
+            Circle()
+                .fill(xrayStatusColor)
+                .frame(width: 7, height: 7)
+            Text(xrayStatusText)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: true, vertical: false)
+        }
+    }
+
+    private var proxyToggle: some View {
+        Toggle("本地代理", isOn: proxyEnabledBinding)
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .disabled(proxyToggleDisabled)
+            .accessibilityLabel("本地代理")
+            .accessibilityValue(xrayStatusText)
+    }
+
+    private var proxyEndpointRow: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 12) {
+                proxyEndpointLabel
+                proxyEndpointValue
+                Spacer(minLength: 0)
+                copyProxyEndpointButton
+            }
+
+            VStack(alignment: .leading, spacing: 7) {
+                HStack {
+                    proxyEndpointLabel
+                    Spacer(minLength: 0)
+                    copyProxyEndpointButton
+                }
+                proxyEndpointValue
+            }
+        }
+        .padding(.vertical, 10)
+    }
+
+    private var proxyEndpointLabel: some View {
+        Text("代理地址")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: true, vertical: false)
+            .frame(width: 72, alignment: .leading)
+    }
+
+    private var proxyEndpointValue: some View {
+        Text(proxyEndpoint)
+            .font(.system(.callout, design: .monospaced).weight(.medium))
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
+            .layoutPriority(1)
+    }
+
+    private var copyProxyEndpointButton: some View {
+        Button(action: copyProxyEndpoint) {
+            Image(systemName: copiedEndpoint ? "checkmark" : "doc.on.doc")
+        }
+        .buttonStyle(.borderless)
+        .iconButtonHitTarget()
+        .help(copiedEndpoint ? "已复制" : "复制代理地址")
+        .accessibilityLabel(copiedEndpoint ? "已复制代理地址" : "复制代理地址")
+    }
+
+    private var proxyActionsRow: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 9) {
+                proxyActionButtons
+                Spacer(minLength: 0)
+            }
+
+            VStack(alignment: .leading, spacing: 9) {
+                proxyActionButtons
+            }
+        }
+        .padding(.top, 14)
+    }
+
+    @ViewBuilder
+    private var proxyActionButtons: some View {
+        Button("选择节点", systemImage: "network", action: onSelectNodes)
+
+        Button(configurationTestButtonTitle, systemImage: configurationTestButtonIcon) {
+            if isConfigurationTestRunning {
+                model.stopCurrentConfigurationTest()
+            } else {
+                model.startCurrentConfigurationTest()
+            }
+        }
+        .disabled(configurationTestButtonDisabled)
+
+        if model.state.isXrayRunning {
+            Button("重新连接", systemImage: "arrow.clockwise", action: model.restartXray)
+        }
+    }
+
     private var runtimePanel: some View {
-        HStack(spacing: 12) {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                runtimeStatusSummary
+                Spacer(minLength: 16)
+                runtimeInstallButton
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                runtimeStatusSummary
+                runtimeInstallButton
+            }
+        }
+        .padding(18)
+        .cardStyle()
+    }
+
+    private var runtimeStatusSummary: some View {
+        HStack(alignment: .top, spacing: 12) {
             Image(systemName: runtimeStatusIcon)
                 .foregroundStyle(runtimeStatusColor)
 
@@ -177,15 +276,14 @@ struct OverviewView: View {
                 Text("节点测速与本地代理需要运行组件。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-
-            Spacer()
-
-            Button("安装", systemImage: "arrow.down.circle", action: model.installRuntime)
-                .disabled(runtimeInstallationDisabled)
         }
-        .padding(18)
-        .cardStyle()
+    }
+
+    private var runtimeInstallButton: some View {
+        Button("安装", systemImage: "arrow.down.circle", action: model.installRuntime)
+            .disabled(runtimeInstallationDisabled)
     }
 
     private func detailRow(label: String, value: String) -> some View {
@@ -205,47 +303,75 @@ struct OverviewView: View {
 
     private var exitIPPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                Text("出口 IP")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .frame(width: 72, alignment: .leading)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 12) {
+                    exitIPLabel
+                    exitIPSummary
+                }
 
-                exitIPSummary
+                VStack(alignment: .leading, spacing: 8) {
+                    exitIPLabel
+                    exitIPSummary
+                }
             }
 
+            exitIPControls
+        }
+        .padding(.vertical, 11)
+    }
+
+    private var exitIPLabel: some View {
+        Text("出口 IP")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .frame(width: 72, alignment: .leading)
+    }
+
+    private var exitIPControls: some View {
+        ViewThatFits(in: .horizontal) {
             HStack(spacing: 9) {
                 Spacer()
                     .frame(width: 84)
-
-                Picker("地址族", selection: exitIPDetectionModeBinding) {
-                    Text("自动").tag(ExitIPDetectionMode.automatic)
-                    Text("IPv4").tag(ExitIPDetectionMode.ipv4)
-                    Text("IPv6").tag(ExitIPDetectionMode.ipv6)
-                }
-                .pickerStyle(.segmented)
-                .controlSize(.small)
-                .frame(width: 190)
-                .disabled(model.state.exit.isDetecting)
-                .accessibilityLabel("出口 IP 地址族")
-
-                Button {
-                    model.detectExitIP()
-                } label: {
-                    Label(
-                        model.state.exit.isDetecting ? "检测中…" : "检测",
-                        systemImage: model.state.exit.isDetecting ? "hourglass" : "arrow.clockwise"
-                    )
-                }
-                .disabled(model.state.exit.isDetecting || isXrayTransitioning)
-                .accessibilityHint(model.state.isXrayRunning ? "通过本地代理检测出口" : "直接检测本机出口")
-
+                exitIPModePicker
+                    .frame(width: 190)
+                exitIPDetectionButton
                 Spacer(minLength: 0)
             }
+
+            VStack(alignment: .leading, spacing: 9) {
+                exitIPModePicker
+                    .frame(maxWidth: 320)
+                exitIPDetectionButton
+            }
+            .padding(.leading, 84)
         }
-        .padding(.vertical, 11)
+    }
+
+    private var exitIPModePicker: some View {
+        Picker("地址族", selection: exitIPDetectionModeBinding) {
+            Text("自动").tag(ExitIPDetectionMode.automatic)
+            Text("IPv4").tag(ExitIPDetectionMode.ipv4)
+            Text("IPv6").tag(ExitIPDetectionMode.ipv6)
+        }
+        .pickerStyle(.segmented)
+        .controlSize(.small)
+        .disabled(model.state.exit.isDetecting)
+        .accessibilityLabel("出口 IP 地址族")
+    }
+
+    private var exitIPDetectionButton: some View {
+        Button {
+            model.detectExitIP()
+        } label: {
+            Label(
+                model.state.exit.isDetecting ? "检测中…" : "检测",
+                systemImage: model.state.exit.isDetecting ? "hourglass" : "arrow.clockwise"
+            )
+        }
+        .disabled(model.state.exit.isDetecting || isXrayTransitioning)
+        .accessibilityHint(model.state.isXrayRunning ? "通过本地代理检测出口" : "直接检测本机出口")
     }
 
     private var exitIPSummary: some View {

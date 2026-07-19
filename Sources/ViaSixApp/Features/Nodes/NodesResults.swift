@@ -4,56 +4,7 @@ import ViaSixCore
 extension NodesView {
     var resultsCard: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("候选节点")
-                        .font(.headline)
-                    Text(resultsSubtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Text("\(model.state.results.count) 条")
-                    .font(.caption.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                Button(action: copyCandidateIP) {
-                    Image(
-                        systemName: candidateSelection != nil
-                            && copiedCandidateIP == candidateSelection
-                            ? "checkmark"
-                            : "doc.on.doc"
-                    )
-                }
-                .buttonStyle(.borderless)
-                .iconButtonHitTarget()
-                .help(
-                    candidateSelection != nil && copiedCandidateIP == candidateSelection
-                        ? "已复制"
-                        : "复制所选 IP"
-                )
-                .accessibilityLabel(
-                    candidateSelection != nil && copiedCandidateIP == candidateSelection
-                        ? "已复制所选 IP"
-                        : "复制所选 IP"
-                )
-                .disabled(candidateSelection == nil)
-
-                if model.switchingIP != nil {
-                    ProgressView()
-                        .controlSize(.small)
-                        .accessibilityLabel("正在切换节点")
-                }
-
-                Button(action: requestCandidateApplication) {
-                    Label(applyButtonTitle, systemImage: "checkmark.circle")
-                }
-                .buttonStyle(.bordered)
-                .tint(VisualStyle.accent)
-                .disabled(applySelectionDisabled)
-            }
+            resultsHeader
 
             ZStack {
                 Table(model.state.results, selection: $candidateSelection) {
@@ -124,5 +75,85 @@ extension NodesView {
         }
         .padding(22)
         .cardStyle()
+    }
+
+    private var resultsHeader: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 10) {
+                resultsHeading
+                Spacer(minLength: 10)
+                resultsCount
+                resultsActions
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .firstTextBaseline) {
+                    resultsHeading
+                    Spacer(minLength: 10)
+                    resultsCount
+                }
+
+                HStack(spacing: 9) {
+                    Spacer(minLength: 0)
+                    resultsActions
+                }
+            }
+        }
+    }
+
+    private var resultsHeading: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("候选节点")
+                .font(.headline)
+            Text(resultsSubtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var resultsCount: some View {
+        Text("\(model.state.results.count) 条")
+            .font(.caption.monospacedDigit().weight(.semibold))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: true, vertical: false)
+    }
+
+    @ViewBuilder
+    private var resultsActions: some View {
+        Button(action: copyCandidateIP) {
+            Image(
+                systemName: candidateSelection != nil
+                    && copiedCandidateIP == candidateSelection
+                    ? "checkmark"
+                    : "doc.on.doc"
+            )
+        }
+        .buttonStyle(.borderless)
+        .iconButtonHitTarget()
+        .help(
+            candidateSelection != nil && copiedCandidateIP == candidateSelection
+                ? "已复制"
+                : "复制所选 IP"
+        )
+        .accessibilityLabel(
+            candidateSelection != nil && copiedCandidateIP == candidateSelection
+                ? "已复制所选 IP"
+                : "复制所选 IP"
+        )
+        .disabled(candidateSelection == nil)
+
+        if model.switchingIP != nil {
+            ProgressView()
+                .controlSize(.small)
+                .accessibilityLabel("正在切换节点")
+        }
+
+        Button(action: requestCandidateApplication) {
+            Label(applyButtonTitle, systemImage: "checkmark.circle")
+        }
+        .buttonStyle(.bordered)
+        .tint(VisualStyle.accent)
+        .disabled(applySelectionDisabled)
     }
 }

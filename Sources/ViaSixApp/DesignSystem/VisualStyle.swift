@@ -32,11 +32,10 @@ extension View {
         modifier(CardModifier())
     }
 
-    /// Shared baseline for the main app surfaces: readable type and comfortable controls.
+    /// Shared baseline for the main app surfaces. Typography intentionally follows
+    /// the system Dynamic Type setting instead of forcing a single application size.
     func comfortableInterface() -> some View {
-        self
-            .controlSize(.large)
-            .dynamicTypeSize(.xLarge)
+        controlSize(.large)
     }
 
     func iconButtonHitTarget() -> some View {

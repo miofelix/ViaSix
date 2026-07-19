@@ -65,7 +65,7 @@ struct RootView: View {
                 }
             }
             .navigationTitle(AppMetadata.name)
-            .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 280)
+            .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 260)
         } detail: {
             ZStack(alignment: .bottomTrailing) {
                 VisualStyle.pageBackground
@@ -73,8 +73,8 @@ struct RootView: View {
 
                 detailContent
                     .frame(maxWidth: 1_120, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(.horizontal, 32)
-                    .padding(.vertical, 28)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 24)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 if let notice = model.state.notice {
@@ -87,7 +87,7 @@ struct RootView: View {
             }
         }
         .tint(VisualStyle.accent)
-        .frame(minWidth: 1_040, minHeight: 700)
+        .frame(minWidth: 800, minHeight: 620)
         .comfortableInterface()
         .animation(.easeOut(duration: 0.18), value: model.state.notice?.id)
     }
