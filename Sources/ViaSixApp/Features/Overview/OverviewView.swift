@@ -10,7 +10,7 @@ struct OverviewView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 26) {
                 pageHeader
                 metricsPanel
                 proxyPanel
@@ -61,7 +61,7 @@ struct OverviewView: View {
                 systemImage: "arrow.down"
             )
         }
-        .padding(18)
+        .padding(22)
         .cardStyle()
     }
 
@@ -95,7 +95,7 @@ struct OverviewView: View {
                 Text("代理地址")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .frame(width: 62, alignment: .leading)
+                    .frame(width: 72, alignment: .leading)
                 Text(proxyEndpoint)
                     .font(.system(.callout, design: .monospaced).weight(.medium))
                     .textSelection(.enabled)
@@ -104,6 +104,7 @@ struct OverviewView: View {
                     Image(systemName: copiedEndpoint ? "checkmark" : "doc.on.doc")
                 }
                 .buttonStyle(.borderless)
+                .iconButtonHitTarget()
                 .help(copiedEndpoint ? "已复制" : "复制代理地址")
                 .accessibilityLabel(copiedEndpoint ? "已复制代理地址" : "复制代理地址")
             }
@@ -116,7 +117,7 @@ struct OverviewView: View {
                 Text("出口 IP")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .frame(width: 62, alignment: .leading)
+                    .frame(width: 72, alignment: .leading)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(model.state.exit.info?.ip ?? "未检测")
@@ -125,12 +126,12 @@ struct OverviewView: View {
                         .truncationMode(.middle)
                     if let location = model.state.exit.info?.location, !location.isEmpty {
                         Text(location)
-                            .font(.caption2)
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                     if let error = model.state.exit.errorMessage {
                         Text(error)
-                            .font(.caption2)
+                            .font(.caption)
                             .foregroundStyle(.red)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -174,7 +175,7 @@ struct OverviewView: View {
                     .padding(.top, 10)
             }
         }
-        .padding(18)
+        .padding(22)
         .cardStyle()
     }
 
@@ -196,16 +197,16 @@ struct OverviewView: View {
             Button("安装", systemImage: "arrow.down.circle", action: model.installRuntime)
                 .disabled(runtimeInstallationDisabled)
         }
-        .padding(14)
+        .padding(18)
         .cardStyle()
     }
 
     private func detailRow(label: String, value: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(label)
-                .font(.caption)
+                .font(.callout)
                 .foregroundStyle(.secondary)
-                .frame(width: 62, alignment: .leading)
+                .frame(width: 72, alignment: .leading)
             Text(value)
                 .font(.callout)
                 .lineLimit(1)
@@ -365,7 +366,7 @@ private struct OverviewMetric: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Text(detail)
-                .font(.caption2)
+                .font(.caption)
                 .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -53,8 +53,8 @@ struct ParameterDisclosure<Content: View>: View {
             }
         }
         .tint(VisualStyle.accent)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 15)
         .overlay(alignment: .bottom) {
             Divider()
         }
@@ -79,9 +79,10 @@ struct ParameterField<Content: View>: View {
                 .foregroundStyle(.primary)
 
             content
+                .frame(minHeight: VisualStyle.controlHeight)
 
             Text(hint)
-                .font(.caption2)
+                .font(.caption)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -100,13 +101,13 @@ struct ToggleSetting: View {
                 Text(title)
                     .font(.subheadline)
                 Text(hint)
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .toggleStyle(.switch)
-        .padding(.vertical, 6)
+        .padding(.vertical, 10)
     }
 }
 

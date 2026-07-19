@@ -27,6 +27,7 @@ extension NodesView {
                     )
                 }
                 .buttonStyle(.borderless)
+                .iconButtonHitTarget()
                 .help(copiedCandidateIP == candidateSelection ? "已复制" : "复制所选 IP")
                 .accessibilityLabel(
                     copiedCandidateIP == candidateSelection ? "已复制所选 IP" : "复制所选 IP"
@@ -113,7 +114,7 @@ extension NodesView {
                 }
             }
         }
-        .padding(18)
+        .padding(22)
         .cardStyle()
     }
 }

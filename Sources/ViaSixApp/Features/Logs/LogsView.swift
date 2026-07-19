@@ -9,7 +9,7 @@ struct LogsView: View {
     @State private var showsClearConfirmation = false
 
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 18) {
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("活动")
@@ -38,6 +38,7 @@ struct LogsView: View {
                     )
                 }
                 .buttonStyle(.borderless)
+                .frame(minHeight: VisualStyle.controlHeight)
                 .help(
                     followsLatest
                         ? "暂停新日志到达时的自动滚动"
@@ -51,6 +52,7 @@ struct LogsView: View {
                     Label("清空…", systemImage: "trash")
                 }
                 .buttonStyle(.borderless)
+                .frame(minHeight: VisualStyle.controlHeight)
                 .disabled(model.state.logs.isEmpty)
             }
 
@@ -261,26 +263,26 @@ private struct LogRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             Text(entry.date, format: .dateTime.hour().minute().second())
-                .font(.caption.monospacedDigit())
+                .font(.callout.monospacedDigit())
                 .foregroundStyle(.tertiary)
-                .frame(width: 70, alignment: .leading)
+                .frame(width: 82, alignment: .leading)
 
             Text(entry.source.rawValue)
-                .font(.caption.weight(.medium))
+                .font(.callout.weight(.medium))
                 .foregroundStyle(color)
-                .frame(width: 42, alignment: .leading)
+                .frame(width: 50, alignment: .leading)
 
             Text(levelTitle)
-                .font(.caption2.weight(.medium))
+                .font(.caption.weight(.medium))
                 .foregroundStyle(color)
-                .frame(width: 30, alignment: .leading)
+                .frame(width: 38, alignment: .leading)
 
             Text(entry.message)
                 .font(.system(.callout, design: .monospaced))
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 7)
+        .padding(.vertical, 11)
     }
 
     private var color: Color {

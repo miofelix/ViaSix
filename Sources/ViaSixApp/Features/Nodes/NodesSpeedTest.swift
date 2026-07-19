@@ -97,7 +97,7 @@ extension NodesView {
                 }
             }
         }
-        .padding(16)
+        .padding(20)
         .cardStyle()
     }
 }

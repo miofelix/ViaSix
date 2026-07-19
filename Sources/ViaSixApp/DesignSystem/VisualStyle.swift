@@ -4,6 +4,8 @@ import SwiftUI
 enum VisualStyle {
     static let accent = Color(nsColor: .systemBlue)
     static let surfaceBorder = Color(nsColor: .separatorColor).opacity(0.72)
+    static let controlHeight: CGFloat = 34
+    static let iconButtonSize: CGFloat = 34
 
     static var pageBackground: some View {
         Color(nsColor: .windowBackgroundColor)
@@ -27,5 +29,18 @@ struct CardModifier: ViewModifier {
 extension View {
     func cardStyle() -> some View {
         modifier(CardModifier())
+    }
+
+    /// Shared baseline for the main app surfaces: readable type and comfortable controls.
+    func comfortableInterface() -> some View {
+        self
+            .controlSize(.large)
+            .dynamicTypeSize(.xLarge)
+    }
+
+    func iconButtonHitTarget() -> some View {
+        self
+            .frame(width: VisualStyle.iconButtonSize, height: VisualStyle.iconButtonSize)
+            .contentShape(Rectangle())
     }
 }

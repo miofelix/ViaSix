@@ -104,7 +104,7 @@ struct SettingsView: View {
                     .font(.subheadline.weight(.medium))
             }
         }
-        .padding(18)
+        .padding(22)
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardStyle()
     }
@@ -143,7 +143,7 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .padding(18)
+        .padding(22)
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardStyle()
     }
@@ -176,7 +176,7 @@ struct SettingsView: View {
                 }
             }
         }
-        .padding(18)
+        .padding(22)
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardStyle()
     }
@@ -267,6 +267,7 @@ struct SettingsView: View {
                 } label: {
                     Image(systemName: "xmark")
                 }
+                .iconButtonHitTarget()
                 .help("清除自定义路径")
                 .accessibilityLabel("清除\(title)")
                 .disabled(value.isEmpty)

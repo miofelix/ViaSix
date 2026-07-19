@@ -29,6 +29,7 @@ extension NodesView {
                     Image(systemName: showsParameters ? "chevron.up" : "chevron.down")
                 }
                 .buttonStyle(.borderless)
+                .iconButtonHitTarget()
                 .help(showsParameters ? "收起测速设置" : "展开测速设置")
                 .accessibilityLabel(showsParameters ? "收起测速设置" : "展开测速设置")
 
@@ -38,12 +39,13 @@ extension NodesView {
                     Image(systemName: "arrow.counterclockwise")
                 }
                 .buttonStyle(.borderless)
+                .iconButtonHitTarget()
                 .foregroundStyle(.secondary)
                 .help("恢复默认测速设置")
                 .accessibilityLabel("恢复默认测速设置")
                 .disabled(isTesting)
             }
-            .padding(16)
+            .padding(20)
 
             if showsParameters {
                 Divider()
@@ -137,7 +139,7 @@ extension NodesView {
                             .truncationMode(.middle)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 9)
-                            .frame(height: 27)
+                            .frame(minHeight: VisualStyle.controlHeight)
                             .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 6))
 
                         Button("选择文件…") {

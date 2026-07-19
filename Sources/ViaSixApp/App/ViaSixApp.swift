@@ -21,15 +21,16 @@ struct ViaSixMacApp: App {
                     model.start()
                 }
         }
-        .defaultSize(width: 1_180, height: 760)
+        .defaultSize(width: 1_240, height: 800)
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unifiedCompact)
 
         Settings {
             SettingsView()
                 .environment(model)
-                .frame(minWidth: 620, idealWidth: 680, minHeight: 520, idealHeight: 640)
-                .padding(22)
+                .frame(minWidth: 700, idealWidth: 760, minHeight: 600, idealHeight: 720)
+                .padding(28)
+                .comfortableInterface()
                 .task {
                     model.start()
                 }

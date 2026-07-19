@@ -24,7 +24,7 @@ struct RootView: View {
                                 .frame(width: 7, height: 7)
 
                             Text(sidebarStatusTitle)
-                                .font(.caption.weight(.medium))
+                                .font(.callout.weight(.medium))
                                 .lineLimit(1)
 
                             Spacer()
@@ -34,7 +34,7 @@ struct RootView: View {
                                     .controlSize(.small)
                             } else {
                                 Image(systemName: sidebarActionIcon)
-                                    .font(.caption.weight(.semibold))
+                                    .font(.callout.weight(.semibold))
                                     .foregroundStyle(.secondary)
                             }
                         }
@@ -43,29 +43,29 @@ struct RootView: View {
                     .buttonStyle(.plain)
                     .disabled(sidebarProxyControlDisabled)
                     .help(sidebarActionHelp)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 13)
 
                     SettingsLink {
                         HStack(spacing: 9) {
                             Image(systemName: "gearshape")
                                 .frame(width: 12)
                             Text("设置…")
-                                .font(.caption.weight(.medium))
+                                .font(.callout.weight(.medium))
                             Spacer()
                             Text("⌘,")
-                                .font(.caption2)
+                                .font(.caption)
                                 .foregroundStyle(.tertiary)
                         }
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 9)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
                 }
             }
             .navigationTitle(AppMetadata.name)
-            .navigationSplitViewColumnWidth(min: 190, ideal: 210, max: 240)
+            .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 280)
         } detail: {
             ZStack(alignment: .bottomTrailing) {
                 VisualStyle.pageBackground
@@ -73,8 +73,8 @@ struct RootView: View {
 
                 detailContent
                     .frame(maxWidth: 1_120, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(.horizontal, 28)
-                    .padding(.vertical, 24)
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, 28)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 if let notice = model.state.notice {
@@ -87,7 +87,8 @@ struct RootView: View {
             }
         }
         .tint(VisualStyle.accent)
-        .frame(minWidth: 960, minHeight: 640)
+        .frame(minWidth: 1_040, minHeight: 700)
+        .comfortableInterface()
         .animation(.easeOut(duration: 0.18), value: model.state.notice?.id)
     }
 
@@ -229,6 +230,7 @@ private struct NoticeView: View {
                     .font(.caption)
             }
             .buttonStyle(.plain)
+            .iconButtonHitTarget()
             .foregroundStyle(.secondary)
             .accessibilityLabel("关闭通知")
         }
