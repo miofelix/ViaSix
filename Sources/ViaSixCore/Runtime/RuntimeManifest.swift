@@ -19,6 +19,42 @@ public enum RuntimeArchitecture: String, CaseIterable, Codable, Hashable, Sendab
 public enum RuntimeComponent: String, CaseIterable, Codable, Hashable, Sendable {
     case cfst
     case xray
+
+    public var displayName: String {
+        switch self {
+        case .cfst: "CloudflareSpeedTest"
+        case .xray: "Xray-core"
+        }
+    }
+
+    public var repositoryURL: URL {
+        switch self {
+        case .cfst: URL(string: "https://github.com/XIU2/CloudflareSpeedTest")!
+        case .xray: URL(string: "https://github.com/XTLS/Xray-core")!
+        }
+    }
+
+    var latestReleaseAPIURL: URL {
+        URL(
+            string: "https://api.github.com/repos\(repositoryURL.path)/releases/latest"
+        )!
+    }
+
+    func archiveName(for architecture: RuntimeArchitecture) -> String {
+        switch (self, architecture) {
+        case (.cfst, .arm64): "cfst_darwin_arm64.zip"
+        case (.cfst, .x8664): "cfst_darwin_amd64.zip"
+        case (.xray, .arm64): "Xray-macos-arm64-v8a.zip"
+        case (.xray, .x8664): "Xray-macos-64.zip"
+        }
+    }
+
+    var payloadFiles: [RuntimePayloadFile] {
+        switch self {
+        case .cfst: [.cfst]
+        case .xray: [.xray, .geoIP, .geoSite]
+        }
+    }
 }
 
 public enum RuntimePayloadFile: String, CaseIterable, Codable, Hashable, Sendable {

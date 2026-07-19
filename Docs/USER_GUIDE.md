@@ -34,7 +34,7 @@ ViaSix 包含两个相互配合的功能：
 3. 选择“安装组件”。
 4. 等待 CloudflareSpeedTest 和 Xray-core 均显示为已就绪。
 
-ViaSix 会根据当前 Mac 的处理器架构下载对应版本，并在安装前校验文件完整性。该操作需要访问 GitHub Releases。
+ViaSix 会查询上游最新正式版本，根据当前 Mac 的处理器架构下载对应资产，并使用 Release 提供的 SHA-256 在安装前校验文件完整性。该操作需要访问 GitHub API 与 GitHub Releases。
 
 CloudflareSpeedTest 是 XIU2 维护的独立第三方项目，并非 Cloudflare 官方产品。这里的“上游组件”表示从 CloudflareSpeedTest 与 Xray-core 各自项目的正式 Release 获取。
 

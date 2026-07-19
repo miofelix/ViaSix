@@ -113,12 +113,15 @@ ViaSix 只修改 `tag == "proxy"` 的第一个 `settings.vnext.address`。导入
 
 ## 运行组件安装
 
-官方安装流程按 CPU 架构选择固定资产：
+官方安装流程按 CPU 架构选择上游最新正式版资产：
 
-1. 从固定 HTTPS URL 下载到临时目录。
-2. 校验清单中固定的 SHA-256。
-3. 解压并确认所有必要 payload。
-4. 在完整验证后原子移动到 `Runtime/`。
+1. 查询两个上游仓库的 GitHub latest Release 元数据。
+2. 按当前架构匹配 macOS 资产，并要求 Release 提供 SHA-256 digest。
+3. 从 GitHub HTTPS URL 下载到临时目录并重新计算 SHA-256。
+4. 解压并确认所有必要 payload。
+5. 在完整验证后原子移动到 `Runtime/`。
+
+源码中的固定清单是可审计基线和测试夹具，不再决定在线安装版本。GitHub 元数据缺少目标资产或 digest 时安装会失败，不会绕过完整性检查。
 
 自定义路径优先于 ViaSix 管理副本，其后依次查找 Homebrew 常用目录和当前 `PATH`。本地导入组件由用户自行信任。
 
@@ -135,7 +138,7 @@ ViaSix 只修改 `tag == "proxy"` 的第一个 `settings.vnext.address`。导入
 | 输入或组件 | 信任方式 | 主要风险 |
 | --- | --- | --- |
 | 内置资源 | 随应用源码和签名发布 | 错误默认值、迁移覆盖 |
-| 在线运行组件 | 固定 URL、版本和 SHA-256 | 上游供应链、许可证变化 |
+| 在线运行组件 | GitHub latest Release、资产命名规则和 SHA-256 digest | 上游供应链、许可证变化 |
 | 本地导入组件 | 用户明确选择 | 恶意或架构不兼容二进制 |
 | Xray JSON | 结构和回环监听校验 | 凭据泄露、错误服务器配置 |
 | 自定义 IP / CIDR / URL | 参数校验后交给 CFST | 过量网络负载、不可信目标 |

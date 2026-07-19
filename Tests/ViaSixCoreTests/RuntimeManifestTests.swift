@@ -77,6 +77,66 @@ final class RuntimeManifestTests: XCTestCase {
         }
     }
 
+    func testLatestReleaseResolverBuildsAssetsFromGitHubMetadata() async throws {
+        let resolver = RuntimeReleaseResolver { url in
+            if url == RuntimeComponent.cfst.latestReleaseAPIURL {
+                return RuntimeReleaseResponse(
+                    data: Data(
+                        #"{"tag_name":"v9.1.0","assets":[{"name":"cfst_darwin_arm64.zip","browser_download_url":"https://github.com/XIU2/CloudflareSpeedTest/releases/download/v9.1.0/cfst_darwin_arm64.zip","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}"#
+                            .utf8
+                    ),
+                    statusCode: 200
+                )
+            }
+            return RuntimeReleaseResponse(
+                data: Data(
+                    #"{"tag_name":"v10.2.0","assets":[{"name":"Xray-macos-arm64-v8a.zip","browser_download_url":"https://github.com/XTLS/Xray-core/releases/download/v10.2.0/Xray-macos-arm64-v8a.zip","digest":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}]}"#
+                        .utf8
+                ),
+                statusCode: 200
+            )
+        }
+
+        let assets = try await resolver.latestAssets(for: .arm64)
+        XCTAssertEqual(assets.map(\.component), [.cfst, .xray])
+        XCTAssertEqual(assets.map(\.version), ["9.1.0", "10.2.0"])
+        XCTAssertEqual(assets[0].sha256, String(repeating: "a", count: 64))
+        XCTAssertEqual(assets[1].payloadFiles, [.xray, .geoIP, .geoSite])
+    }
+
+    func testLatestReleaseResolverRequiresSHA256Digest() async {
+        let resolver = RuntimeReleaseResolver { url in
+            let component = url == RuntimeComponent.cfst.latestReleaseAPIURL ? "cfst" : "xray"
+            let name = component == "cfst" ? "cfst_darwin_arm64.zip" : "Xray-macos-arm64-v8a.zip"
+            let repository = component == "cfst" ? "XIU2/CloudflareSpeedTest" : "XTLS/Xray-core"
+            var asset: [String: Any] = [
+                "name": name,
+                "browser_download_url":
+                    "https://github.com/\(repository)/releases/download/v1.0.0/\(name)",
+            ]
+            if component == "xray" {
+                asset["digest"] = "sha256:\(String(repeating: "b", count: 64))"
+            }
+            let data = try JSONSerialization.data(withJSONObject: [
+                "tag_name": "v1.0.0",
+                "assets": [asset],
+            ])
+            return RuntimeReleaseResponse(data: data, statusCode: 200)
+        }
+
+        do {
+            _ = try await resolver.latestAssets(for: .arm64)
+            XCTFail("Expected missing digest to fail")
+        } catch let error as RuntimeComponentError {
+            XCTAssertEqual(
+                error,
+                .missingLatestReleaseDigest(.cfst, "cfst_darwin_arm64.zip")
+            )
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     func testSHA256ForDataAndFile() throws {
         let expected = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         let data = Data("abc".utf8)

@@ -1,11 +1,11 @@
 # 第三方声明
 
-ViaSix 可以下载并执行以下独立命令行程序。第三方二进制不存放在本源码仓库中，并继续受各自许可证约束。固定上游版本的许可证原文保存在 [`ThirdPartyLicenses/`](ThirdPartyLicenses/) 中，并随应用包提供离线副本。
+ViaSix 可以下载并执行以下独立命令行程序。第三方二进制不存放在本源码仓库中，并继续受各自许可证约束。自动安装会选择上游最新正式版本；下列版本是源码审计基线，其许可证原文保存在 [`ThirdPartyLicenses/`](ThirdPartyLicenses/) 中，并随应用包提供离线副本。实际安装版本及对应源码以相应 GitHub Release 为准。
 
 ## CloudflareSpeedTest
 
 - 项目：XIU2/CloudflareSpeedTest
-- ViaSix 使用版本：v2.3.5
+- 审计基线版本：v2.3.5
 - 源码：https://github.com/XIU2/CloudflareSpeedTest/tree/v2.3.5
 - 固定提交：`65b43aa58c5f9c7ab8ab83d2d27e35fc00d9cec4`
 - 许可证：GNU General Public License v3.0
@@ -17,7 +17,7 @@ CloudflareSpeedTest 是 XIU2 维护的独立第三方项目，并非 Cloudflare 
 ## Xray-core
 
 - 项目：XTLS/Xray-core
-- ViaSix 使用版本：v26.3.27
+- 审计基线版本：v26.3.27
 - 源码：https://github.com/XTLS/Xray-core/tree/v26.3.27
 - 固定提交：`d2758a023cd7f4174a5a5fa4ff66e487d4342ba0`
 - 许可证：Mozilla Public License 2.0

@@ -82,6 +82,10 @@ public typealias RuntimeArchiveExtractor = @Sendable (URL, URL) throws -> Void
 
 public enum RuntimeComponentError: LocalizedError, Equatable, Sendable {
     case missingManifestAsset(RuntimeComponent, RuntimeArchitecture)
+    case missingLatestRelease(RuntimeComponent)
+    case invalidLatestRelease(RuntimeComponent)
+    case missingLatestReleaseAsset(RuntimeComponent, String)
+    case missingLatestReleaseDigest(RuntimeComponent, String)
     case sourceNotFound(URL)
     case sourceIsNotFileOrDirectory(URL)
     case noPayloadFiles([URL])
@@ -96,6 +100,14 @@ public enum RuntimeComponentError: LocalizedError, Equatable, Sendable {
         switch self {
         case .missingManifestAsset(let component, let architecture):
             return "缺少 \(component.rawValue) 的 \(architecture.rawValue) 运行组件清单。"
+        case .missingLatestRelease(let component):
+            return "未能解析 \(component.displayName) 的最新正式版本。"
+        case .invalidLatestRelease(let component):
+            return "\(component.displayName) 的 GitHub 最新版本信息无效。"
+        case .missingLatestReleaseAsset(let component, let archiveName):
+            return "\(component.displayName) 的最新版本缺少当前 Mac 所需的 \(archiveName)。"
+        case .missingLatestReleaseDigest(let component, let archiveName):
+            return "\(component.displayName) 的 \(archiveName) 未提供可用的 SHA-256 校验值。"
         case .sourceNotFound(let url):
             return "本地路径不存在：\(url.path)"
         case .sourceIsNotFileOrDirectory(let url):
@@ -125,6 +137,7 @@ public actor RuntimeComponentManager {
 
     private let downloadHandler: RuntimeDownloadHandler
     private let archiveExtractor: RuntimeArchiveExtractor
+    private let releaseResolver: RuntimeReleaseResolver?
 
     public init(
         runtimeDirectory: URL,
@@ -134,6 +147,7 @@ public actor RuntimeComponentManager {
         self.manifest = manifest
         self.downloadHandler = Self.downloadUsingURLSession
         self.archiveExtractor = Self.extractUsingDitto
+        self.releaseResolver = RuntimeReleaseResolver()
     }
 
     public init(
@@ -153,6 +167,7 @@ public actor RuntimeComponentManager {
         self.manifest = manifest
         self.downloadHandler = downloadHandler
         self.archiveExtractor = archiveExtractor
+        self.releaseResolver = nil
     }
 
     public func installedStatus() -> RuntimeInstallationStatus {
@@ -214,7 +229,12 @@ public actor RuntimeComponentManager {
     public func downloadAndInstall(
         architecture: RuntimeArchitecture = .current
     ) async throws -> RuntimeInstallationStatus {
-        let assets = try assetsForInstallation(architecture: architecture)
+        let assets: [RuntimeAsset]
+        if let releaseResolver {
+            assets = try await releaseResolver.latestAssets(for: architecture)
+        } else {
+            assets = try assetsForInstallation(architecture: architecture)
+        }
         let fileManager = FileManager.default
         let workspace = transactionDirectory(prefix: "download")
         let downloadsDirectory = workspace.appendingPathComponent("Downloads", isDirectory: true)

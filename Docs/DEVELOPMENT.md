@@ -145,7 +145,7 @@ SwiftPM 定义两个主要目标：
 Sources/ViaSixCore/Runtime/RuntimeManifest.swift
 ```
 
-当前上游组件：
+源码审计基线组件：
 
 - CloudflareSpeedTest `v2.3.5`
 - Xray-core `v26.3.27`
@@ -160,17 +160,20 @@ Sources/ViaSixCore/Runtime/RuntimeManifest.swift
 
 在线安装流程：
 
-1. 按当前 CPU 架构选择固定资产。
-2. 通过 HTTPS 下载到临时目录。
-3. 校验固定 SHA-256。
-4. 解压并确认必要文件完整。
-5. 将完整组件移动到应用数据目录。
+1. 查询上游 GitHub latest Release。
+2. 按当前 CPU 架构和资产命名规则选择 macOS 资产。
+3. 要求 Release 元数据提供 SHA-256 digest。
+4. 通过 HTTPS 下载到临时目录并重新计算 SHA-256。
+5. 解压并确认必要文件完整。
+6. 将完整组件移动到应用数据目录。
+
+固定基线用于审计、单元测试和显式注入清单的场景；ViaSix 的默认在线安装不使用它覆盖 GitHub 最新正式版本。
 
 CloudflareSpeedTest 是 XIU2 维护的独立第三方项目，并非 Cloudflare 官方产品。“上游组件”表示从各项目自己的正式 Release 获取。
 
 本地导入支持可执行文件、目录或多个相关文件。Xray 管理副本需要 `xray`、`geoip.dat` 和 `geosite.dat`。
 
-更新组件版本时，必须同时：
+更新审计基线时，必须同时：
 
 - 更新 `RuntimeManifest.swift` 的版本、URL、资产名和哈希
 - 更新测试中的预期值

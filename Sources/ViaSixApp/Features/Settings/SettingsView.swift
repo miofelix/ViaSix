@@ -36,15 +36,13 @@ struct SettingsView: View {
             }
 
             componentRow(
-                title: "CloudflareSpeedTest",
-                version: "v\(RuntimeManifest.cfstVersion)",
+                component: .cfst,
                 url: resolvedDisplayURL(for: .cfst),
                 ready: componentReady(.cfst)
             )
             Divider()
             componentRow(
-                title: "Xray-core",
-                version: "v\(RuntimeManifest.xrayVersion)",
+                component: .xray,
                 url: resolvedDisplayURL(for: .xray),
                 ready: componentReady(.xray)
             )
@@ -68,7 +66,7 @@ struct SettingsView: View {
                 }
             }
 
-            Text("自动安装会从上游 Releases 下载，并在使用前校验完整性。")
+            Text("自动安装会获取上游最新正式版本，并使用 Release 提供的 SHA-256 校验完整性。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -235,8 +233,7 @@ struct SettingsView: View {
     }
 
     private func componentRow(
-        title: String,
-        version: String,
+        component: RuntimeComponent,
         url: URL?,
         ready: Bool
     ) -> some View {
@@ -244,12 +241,17 @@ struct SettingsView: View {
             Image(systemName: ready ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
                 .foregroundStyle(ready ? .green : .orange)
             VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 7) {
-                    Text(title).fontWeight(.medium)
-                    Text(version)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                Link(destination: component.repositoryURL) {
+                    HStack(spacing: 6) {
+                        Text(component.displayName)
+                            .fontWeight(.medium)
+                        Image(systemName: "arrow.up.right.square")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .buttonStyle(.plain)
+                .help("在 GitHub 打开 \(component.displayName)")
                 Text(url?.path ?? "未找到")
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
