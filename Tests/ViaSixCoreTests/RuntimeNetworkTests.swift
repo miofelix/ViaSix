@@ -61,7 +61,8 @@ final class RuntimeNetworkTests: XCTestCase {
             _ = try await task.value
             XCTFail("Expected cancellation")
         } catch {
-            let isCancelled = error is CancellationError
+            let isCancelled =
+                error is CancellationError
                 || (error as? URLError)?.code == .cancelled
             XCTAssertTrue(isCancelled, "Unexpected cancellation error: \(error)")
         }
@@ -89,7 +90,8 @@ final class RuntimeNetworkTests: XCTestCase {
             _ = try await task.value
             XCTFail("Expected cancellation")
         } catch {
-            let isCancelled = error is CancellationError
+            let isCancelled =
+                error is CancellationError
                 || (error as? URLError)?.code == .cancelled
             XCTAssertTrue(isCancelled, "Unexpected cancellation error: \(error)")
         }

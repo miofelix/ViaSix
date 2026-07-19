@@ -6,13 +6,14 @@ import XCTest
 
 final class SupervisedCommandTests: XCTestCase {
     func testTimeoutKillsTheCommandProcessGroup() async throws {
-        let fixture = try CommandFixture(script: #"""
-            #!/bin/sh
-            sleep 30 &
-            child=$!
-            printf '%s %s\n' "$$" "$child" > pids.txt
-            wait "$child"
-            """#)
+        let fixture = try CommandFixture(
+            script: #"""
+                #!/bin/sh
+                sleep 30 &
+                child=$!
+                printf '%s %s\n' "$$" "$child" > pids.txt
+                wait "$child"
+                """#)
         defer { fixture.remove() }
 
         do {
@@ -36,13 +37,14 @@ final class SupervisedCommandTests: XCTestCase {
     }
 
     func testTaskCancellationKillsTheCommandProcessGroup() async throws {
-        let fixture = try CommandFixture(script: #"""
-            #!/bin/sh
-            sleep 30 &
-            child=$!
-            printf '%s %s\n' "$$" "$child" > pids.txt
-            wait "$child"
-            """#)
+        let fixture = try CommandFixture(
+            script: #"""
+                #!/bin/sh
+                sleep 30 &
+                child=$!
+                printf '%s %s\n' "$$" "$child" > pids.txt
+                wait "$child"
+                """#)
         defer { fixture.remove() }
 
         let task = Task {
