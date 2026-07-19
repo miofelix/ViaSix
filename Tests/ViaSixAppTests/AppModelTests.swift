@@ -130,6 +130,68 @@ final class AppModelTests: XCTestCase {
         await model.shutdown()
     }
 
+    func testSaveXrayTemplateWaitsForSuccessfulWrite() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        try paths.prepare()
+        let model = makeModel(paths: paths)
+        let template = validTemplate(host: "127.0.0.2", port: 18_081)
+
+        try await model.saveXrayTemplate(template)
+
+        XCTAssertEqual(try Data(contentsOf: paths.templateConfig), template)
+        XCTAssertEqual(model.state.proxyEndpoint, ProxyEndpoint(host: "127.0.0.2", port: 18_081))
+        XCTAssertTrue(model.state.logs.contains { $0.message == "已保存代理连接模板" })
+        await model.shutdown()
+    }
+
+    func testSaveXrayTemplatePropagatesWriteFailure() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let model = makeModel(paths: paths)
+
+        do {
+            try await model.saveXrayTemplate(validTemplate())
+            XCTFail("Expected the missing application data directory to make the save fail")
+        } catch {
+            XCTAssertTrue(model.state.logs.contains { $0.message.contains("保存代理配置失败") })
+        }
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.templateConfig.path))
+        await model.shutdown()
+    }
+
+    func testSaveXrayTemplateRejectsOverlapAndShutdownCancelsPendingSave() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let replacer = SuspendedTemplateReplacer()
+        let model = makeModel(paths: paths, templateReplacer: replacer)
+        let pendingSave = Task {
+            try await model.saveXrayTemplate(validTemplate())
+        }
+        try await waitForTemplateRequest(replacer)
+
+        do {
+            try await model.saveXrayTemplate(validTemplate(port: 11_452))
+            XCTFail("Expected a second template operation to be rejected")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "另一项代理配置操作尚未完成")
+        }
+
+        await model.shutdown()
+        do {
+            try await pendingSave.value
+            XCTFail("Expected shutdown to cancel the pending template save")
+        } catch is CancellationError {
+            // Expected: shutdown owns and cancels the underlying save task.
+        } catch {
+            XCTFail("Expected CancellationError, got \(error)")
+        }
+        let requestCount = await replacer.requestCount
+        XCTAssertEqual(requestCount, 1)
+        XCTAssertFalse(model.state.logs.contains { $0.message.contains("保存代理配置失败") })
+    }
+
     func testCurrentConfigurationTestUsesSelectedIPAndExpiresAfterSelectionChanges() async throws {
         let paths = makePaths()
         defer { try? FileManager.default.removeItem(at: paths.root) }
@@ -309,18 +371,28 @@ final class AppModelTests: XCTestCase {
         XCTFail("Timed out waiting for \(count) exit IP requests")
     }
 
+    private func waitForTemplateRequest(_ replacer: SuspendedTemplateReplacer) async throws {
+        for _ in 0..<100 {
+            if await replacer.requestCount > 0 { return }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTFail("Timed out waiting for the template save to start")
+    }
+
     private func makeModel(
         paths: AppPaths,
         store: PreferencesStore? = nil,
         bootstrapper: AppBootstrapper? = nil,
-        exitDetector: (any ExitIPDetecting)? = nil
+        exitDetector: (any ExitIPDetecting)? = nil,
+        templateReplacer: (any XrayTemplateReplacing)? = nil
     ) -> AppModel {
         AppModel(
             paths: paths,
             preferencesStore: store ?? PreferencesStore(fileURL: paths.preferences),
             bootstrapper: bootstrapper ?? AppBootstrapper(paths: paths),
             runtimeManager: RuntimeComponentManager(paths: paths),
-            exitDetector: exitDetector ?? ExitIPDetector()
+            exitDetector: exitDetector ?? ExitIPDetector(),
+            templateReplacer: templateReplacer
         )
     }
 
@@ -329,6 +401,37 @@ final class AppModelTests: XCTestCase {
             root: FileManager.default.temporaryDirectory
                 .appendingPathComponent("AppModelTests-\(UUID().uuidString)", isDirectory: true)
         )
+    }
+
+    private func validTemplate(host: String = "127.0.0.1", port: Int = 11_451) -> Data {
+        Data(
+            #"""
+            {
+              "inbounds": [{"listen": "\#(host)", "port": \#(port), "protocol": "mixed"}],
+              "outbounds": [{
+                "tag": "proxy",
+                "settings": {"vnext": [{
+                  "address": "2001:db8::10",
+                  "users": [{"id": "7b602ceb-cc3f-4274-a79d-c1a38f0fb0da"}]
+                }]},
+                "streamSettings": {
+                  "tlsSettings": {"serverName": "proxy.example.net"},
+                  "wsSettings": {"host": "proxy.example.net", "path": "/viasix"}
+                }
+              }]
+            }
+            """#.utf8
+        )
+    }
+}
+
+private actor SuspendedTemplateReplacer: XrayTemplateReplacing {
+    private(set) var requestCount = 0
+
+    func replaceTemplate(with _: Data, selectedIP _: String?) async throws -> ProxyEndpoint {
+        requestCount += 1
+        try await Task.sleep(for: .seconds(30))
+        return ProxyEndpoint()
     }
 }
 

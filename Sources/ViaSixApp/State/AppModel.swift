@@ -2,6 +2,12 @@ import Foundation
 import Observation
 import ViaSixCore
 
+protocol XrayTemplateReplacing: Sendable {
+    func replaceTemplate(with data: Data, selectedIP: String?) async throws -> ProxyEndpoint
+}
+
+extension AppBootstrapper: XrayTemplateReplacing {}
+
 @MainActor
 @Observable
 final class AppModel {
@@ -91,10 +97,12 @@ final class AppModel {
     @ObservationIgnored private let bootstrapper: AppBootstrapper
     @ObservationIgnored private let runtimeManager: RuntimeComponentManager
     @ObservationIgnored private let exitDetector: any ExitIPDetecting
+    @ObservationIgnored private let templateReplacer: any XrayTemplateReplacing
 
     @ObservationIgnored private var bootstrapTask: Task<Void, Never>?
     @ObservationIgnored private var runtimeTask: Task<Void, Never>?
-    @ObservationIgnored private var templateTask: Task<Void, Never>?
+    @ObservationIgnored private var templateImportTask: Task<Void, Never>?
+    @ObservationIgnored private var templateSaveTask: Task<ProxyEndpoint, Error>?
     @ObservationIgnored private var speedTestTask: Task<Void, Never>?
     @ObservationIgnored private var configurationTestTask: Task<Void, Never>?
     @ObservationIgnored private var selectionTask: Task<Void, Never>?
@@ -117,13 +125,15 @@ final class AppModel {
         preferencesStore: PreferencesStore,
         bootstrapper: AppBootstrapper,
         runtimeManager: RuntimeComponentManager,
-        exitDetector: any ExitIPDetecting
+        exitDetector: any ExitIPDetecting,
+        templateReplacer: (any XrayTemplateReplacing)? = nil
     ) {
         self.paths = paths
         self.preferencesStore = preferencesStore
         self.bootstrapper = bootstrapper
         self.runtimeManager = runtimeManager
         self.exitDetector = exitDetector
+        self.templateReplacer = templateReplacer ?? bootstrapper
         self.state = AppState(
             preferences: UserPreferences(parameters: .defaults(ipv6File: paths.ipv6List))
         )
@@ -197,7 +207,7 @@ final class AppModel {
     }
 
     func importXrayTemplate(from url: URL) {
-        guard templateTask == nil else { return }
+        guard templateImportTask == nil, templateSaveTask == nil else { return }
         switch state.xrayPhase {
         case .validating, .starting, .running, .stopping:
             showNotice("请先停止本地代理再更换连接配置", style: .error)
@@ -207,8 +217,9 @@ final class AppModel {
         }
 
         let selectedIP = state.preferences.selectedIP
-        templateTask = Task { [weak self] in
+        templateImportTask = Task { [weak self] in
             guard let self else { return }
+            defer { templateImportTask = nil }
             let isAccessingSecurityScopedResource = url.startAccessingSecurityScopedResource()
             defer {
                 if isAccessingSecurityScopedResource {
@@ -226,38 +237,50 @@ final class AppModel {
                 appendLog(source: .app, level: .error, message: "导入代理配置失败：\(error.localizedDescription)")
                 showNotice("导入失败：\(error.localizedDescription)", style: .error)
             }
-            templateTask = nil
         }
     }
 
-    func saveXrayTemplate(_ data: Data) {
-        guard templateTask == nil else {
-            showNotice("代理配置正在保存，请稍候", style: .error)
-            return
+    func saveXrayTemplate(_ data: Data) async throws {
+        guard templateImportTask == nil, templateSaveTask == nil else {
+            throw AppModelError.templateOperationInProgress
         }
+        guard !isShuttingDown else { throw CancellationError() }
         switch state.xrayPhase {
         case .validating, .starting, .running, .stopping:
-            showNotice("请先停止本地代理再保存连接配置", style: .error)
-            return
+            throw AppModelError.xrayMustBeStopped
         case .stopped, .failed:
             break
         }
 
         let selectedIP = state.preferences.selectedIP
-        templateTask = Task { [weak self] in
-            guard let self else { return }
-            do {
-                state.proxyEndpoint = try await bootstrapper.replaceTemplate(
-                    with: data,
-                    selectedIP: selectedIP
-                )
-                appendLog(source: .app, level: .success, message: "已保存代理连接模板")
-                showNotice("代理配置已保存", style: .success)
-            } catch {
-                appendLog(source: .app, level: .error, message: "保存代理配置失败：\(error.localizedDescription)")
-                showNotice("保存失败：\(error.localizedDescription)", style: .error)
+        let task = Task<ProxyEndpoint, Error> { [templateReplacer] in
+            try Task.checkCancellation()
+            let endpoint = try await templateReplacer.replaceTemplate(
+                with: data,
+                selectedIP: selectedIP
+            )
+            try Task.checkCancellation()
+            return endpoint
+        }
+        templateSaveTask = task
+        defer { templateSaveTask = nil }
+
+        do {
+            let endpoint = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
             }
-            templateTask = nil
+            try Task.checkCancellation()
+            guard !isShuttingDown else { throw CancellationError() }
+            state.proxyEndpoint = endpoint
+            appendLog(source: .app, level: .success, message: "已保存代理连接模板")
+            showNotice("代理配置已保存", style: .success)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            appendLog(source: .app, level: .error, message: "保存代理配置失败：\(error.localizedDescription)")
+            throw error
         }
     }
 
@@ -690,7 +713,7 @@ final class AppModel {
         let pendingTasks = [
             bootstrapTask,
             runtimeTask,
-            templateTask,
+            templateImportTask,
             speedTestTask,
             configurationTestTask,
             selectionTask,
@@ -700,7 +723,9 @@ final class AppModel {
             xrayStartTask,
             xrayStopTask,
         ].compactMap { $0 }
+        let pendingTemplateSaveTask = templateSaveTask
         pendingTasks.forEach { $0.cancel() }
+        pendingTemplateSaveTask?.cancel()
 
         if let activeRunner {
             await activeRunner.cancel()
@@ -711,6 +736,9 @@ final class AppModel {
 
         for task in pendingTasks {
             await task.value
+        }
+        if let pendingTemplateSaveTask {
+            _ = try? await pendingTemplateSaveTask.value
         }
         try? await preferencesStore.save(state.preferences)
     }
@@ -1030,12 +1058,16 @@ final class AppModel {
 
 private enum AppModelError: LocalizedError {
     case missingSelectedIP
+    case templateOperationInProgress
+    case xrayMustBeStopped
     case xrayNotActive
     case xrayExitedDuringRestart
 
     var errorDescription: String? {
         switch self {
         case .missingSelectedIP: "请先完成测速并选择一个节点"
+        case .templateOperationInProgress: "另一项代理配置操作尚未完成"
+        case .xrayMustBeStopped: "请先停止本地代理再保存连接配置"
         case .xrayNotActive: "本地代理当前未运行"
         case .xrayExitedDuringRestart: "本地代理在重新连接后立即退出"
         }
