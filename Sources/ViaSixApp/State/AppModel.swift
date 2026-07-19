@@ -1118,6 +1118,7 @@ final class AppModel {
         detectTask = nil
         exitIPEnrichmentTask = nil
         state.exit.isDetecting = false
+        state.exit.isEnriching = false
     }
 
     private func startExitIPEnrichment(
@@ -1127,12 +1128,14 @@ final class AppModel {
         detectionID: UUID
     ) {
         exitIPEnrichmentTask?.cancel()
+        state.exit.isEnriching = true
         exitIPEnrichmentTask = Task { [weak self] in
             guard let self else { return }
             defer {
                 if activeExitDetectionID == detectionID {
                     activeExitDetectionID = nil
                     exitIPEnrichmentTask = nil
+                    state.exit.isEnriching = false
                 }
             }
 

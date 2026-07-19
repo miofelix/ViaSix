@@ -404,13 +404,22 @@ struct OverviewView: View {
 
             if let info = model.state.exit.info {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Image(systemName: "mappin.and.ellipse")
-                        .foregroundStyle(.secondary)
-                    Text(info.location.isEmpty ? "位置未返回" : info.location)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if model.state.exit.isEnriching, info.location.isEmpty {
+                        ProgressView()
+                            .controlSize(.mini)
+                    } else {
+                        Image(systemName: "mappin.and.ellipse")
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(
+                        model.state.exit.isEnriching && info.location.isEmpty
+                            ? "正在补充位置与网络信息…"
+                            : (info.location.isEmpty ? "位置未返回" : info.location)
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
 
                 if !info.details.isEmpty {
@@ -423,6 +432,16 @@ struct OverviewView: View {
                             .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                }
+
+                if model.state.exit.isEnriching, !info.location.isEmpty {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.mini)
+                        Text("正在补充网络信息…")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
                 }
 
                 exitIPMetadata

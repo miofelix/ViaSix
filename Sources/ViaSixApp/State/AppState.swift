@@ -67,6 +67,7 @@ struct AppState: Equatable, Sendable {
 
         var info: ExitIPInfo?
         var isDetecting = false
+        var isEnriching = false
         var errorMessage: String?
         var detectedAt: Date?
         var context: DetectionContext?

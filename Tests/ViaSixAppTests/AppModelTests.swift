@@ -615,6 +615,7 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertEqual(model.state.exit.info, primaryInfo)
         XCTAssertFalse(model.state.exit.isDetecting)
+        XCTAssertTrue(model.state.exit.isEnriching)
         XCTAssertNil(model.state.exit.errorMessage)
         let detectedAt = try XCTUnwrap(model.state.exit.detectedAt)
 
@@ -624,6 +625,7 @@ final class AppModelTests: XCTestCase {
         try await waitUntil { model.state.exit.info == enrichedInfo }
 
         XCTAssertEqual(model.state.exit.detectedAt, detectedAt)
+        XCTAssertFalse(model.state.exit.isEnriching)
         await model.shutdown()
     }
 
@@ -643,6 +645,7 @@ final class AppModelTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(40))
 
         XCTAssertEqual(model.state.exit.info, primaryInfo)
+        XCTAssertFalse(model.state.exit.isEnriching)
         XCTAssertEqual(model.state.exit.detectedAt, detectedAt)
         XCTAssertNil(model.state.exit.errorMessage)
         await model.shutdown()
@@ -946,9 +949,7 @@ private actor ControlledTwoPhaseExitDetector: ExitIPDetecting {
 
     private var primaryResults: [ExitIPInfo]
     private var enrichmentRequests: [EnrichmentRequest] = []
-    private var enrichmentContinuations: [
-        UUID: CheckedContinuation<ExitIPInfo, any Error>
-    ] = [:]
+    private var enrichmentContinuations: [UUID: CheckedContinuation<ExitIPInfo, any Error>] = [:]
 
     init(primaryResults: [ExitIPInfo]) {
         self.primaryResults = primaryResults

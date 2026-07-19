@@ -85,6 +85,17 @@ final class ExitIPResponseParserTests: XCTestCase {
         )
     }
 
+    func testGeolocationParserUsesASNOrganizationAsProviderFallback() throws {
+        let data = Data(
+            #"{"ip":"1.1.1.1","asn_organization":"Cloudflare, Inc.","asn":13335}"#.utf8
+        )
+
+        XCTAssertEqual(
+            try ExitIPGeolocationResponseParser.parse(data, expectedIP: "1.1.1.1"),
+            ExitIPInfo(ip: "1.1.1.1", details: "Cloudflare, Inc. · AS13335")
+        )
+    }
+
     func testGeolocationParserRejectsMismatchedIP() {
         let data = Data(#"{"ip":"1.0.0.1","country":"澳大利亚"}"#.utf8)
 

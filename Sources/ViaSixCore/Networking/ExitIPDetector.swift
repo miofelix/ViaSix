@@ -212,10 +212,11 @@ public actor ExitIPDetector: ExitIPDetecting {
                 using: session,
                 requestLoader: requestLoader
             )
-            guard let geolocation = try? ExitIPGeolocationResponseParser.parse(
-                data,
-                expectedIP: info.ip
-            )
+            guard
+                let geolocation = try? ExitIPGeolocationResponseParser.parse(
+                    data,
+                    expectedIP: info.ip
+                )
             else {
                 return info
             }
@@ -306,7 +307,11 @@ public enum ExitIPGeolocationResponseParser {
             [response.country, response.region, response.city],
             separator: " · "
         )
-        let provider = firstNonEmptyValue([response.organization, response.isp])
+        let provider = firstNonEmptyValue([
+            response.organization,
+            response.isp,
+            response.asnOrganization,
+        ])
         let details = joinedUniqueValues(
             [provider, response.asn.map { $0.hasPrefix("AS") ? $0 : "AS\($0)" }, response.timezone],
             separator: " · "
@@ -321,11 +326,13 @@ public enum ExitIPGeolocationResponseParser {
         let city: String?
         let organization: String?
         let isp: String?
+        let asnOrganization: String?
         let asn: String?
         let timezone: String?
 
         private enum CodingKeys: String, CodingKey {
             case ip, country, region, city, organization, isp, asn, timezone
+            case asnOrganization = "asn_organization"
         }
 
         init(from decoder: Decoder) throws {
@@ -336,6 +343,10 @@ public enum ExitIPGeolocationResponseParser {
             self.city = try values.decodeIfPresent(String.self, forKey: .city)
             self.organization = try values.decodeIfPresent(String.self, forKey: .organization)
             self.isp = try values.decodeIfPresent(String.self, forKey: .isp)
+            self.asnOrganization = try values.decodeIfPresent(
+                String.self,
+                forKey: .asnOrganization
+            )
             if let asn = try? values.decode(Int.self, forKey: .asn) {
                 self.asn = String(asn)
             } else {
