@@ -174,6 +174,40 @@ final class XrayControllerTests: XCTestCase {
         }
     }
 
+    func testClosingParentLifetimePipeStopsRuntimeGroupAndClosesOutput() async throws {
+        let fixture = try XrayControllerFixture(behavior: "normal")
+        defer { fixture.remove() }
+        let spawned = try SpawnedXrayProcess.start(
+            executableURL: fixture.executableURL,
+            arguments: ["run", "-config", fixture.configURL.path],
+            workingDirectoryURL: fixture.directoryURL,
+            environmentOverrides: [:]
+        )
+        defer {
+            spawned.lifetime.close()
+            _ = Darwin.kill(-spawned.processGroup, SIGKILL)
+            var waitStatus: Int32 = 0
+            while Darwin.waitpid(spawned.pid, &waitStatus, 0) == -1, errno == EINTR {}
+            Darwin.close(spawned.output.fileDescriptor)
+        }
+
+        try await waitUntilFileExists(fixture.processIDsURL)
+        let runtimeProcessIDs = try fixture.runtimeProcessIDs()
+        XCTAssertEqual(runtimeProcessIDs.count, 2)
+
+        // Closing this descriptor models the kernel closing all of the app's
+        // descriptors after a crash or force-quit. No explicit signal is sent
+        // from the test to the supervised process group.
+        spawned.lifetime.close()
+
+        try await waitUntilProcessIsReaped(spawned.pid)
+
+        for processID in runtimeProcessIDs {
+            try await waitUntilProcessIsGone(processID)
+        }
+        try await waitUntilOutputPipeCloses(spawned.output.fileDescriptor)
+    }
+
     func testRestartStopsOwnedProcessAndStartsAValidatedReplacement() async throws {
         let fixture = try XrayControllerFixture(behavior: "normal")
         defer { fixture.remove() }
@@ -255,6 +289,38 @@ final class XrayControllerTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(10))
         }
         XCTFail("PID \(pid) is still alive")
+    }
+
+    private func waitUntilProcessIsReaped(_ pid: pid_t) async throws {
+        for _ in 0..<400 {
+            var waitStatus: Int32 = 0
+            let result = Darwin.waitpid(pid, &waitStatus, WNOHANG)
+            if result == pid { return }
+            if result == -1 {
+                if errno == EINTR { continue }
+                if errno == ECHILD { return }
+                return XCTFail("waitpid failed for PID \(pid): \(String(cString: strerror(errno)))")
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTFail("Timed out waiting to reap PID \(pid)")
+    }
+
+    private func waitUntilOutputPipeCloses(_ fileDescriptor: Int32) async throws {
+        for _ in 0..<200 {
+            var descriptor = pollfd(
+                fd: fileDescriptor,
+                events: Int16(POLLIN | POLLHUP),
+                revents: 0
+            )
+            if Darwin.poll(&descriptor, 1, 10) > 0,
+                descriptor.revents & Int16(POLLHUP) != 0
+            {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTFail("Output pipe remained open after the supervised group exited")
     }
 }
 
