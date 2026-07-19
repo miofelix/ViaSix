@@ -22,6 +22,7 @@ struct OverviewView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.bottom, 4)
         }
+        .scrollbarSafeContent()
     }
 
     private var pageHeader: some View {

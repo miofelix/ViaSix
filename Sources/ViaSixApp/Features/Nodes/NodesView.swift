@@ -23,6 +23,7 @@ struct NodesView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.bottom, 4)
         }
+        .scrollbarSafeContent()
         .onAppear {
             syncCandidateSelection()
             if !model.state.results.isEmpty {

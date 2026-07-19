@@ -98,8 +98,9 @@ extension NodesView {
 
                     TableColumn("节点地区") { result in
                         Text(metric(result.region))
+                            .padding(.trailing, VisualStyle.scrollbarClearance)
                     }
-                    .width(min: 54, ideal: 72)
+                    .width(min: 76, ideal: 94)
                 }
                 .frame(height: resultsTableHeight)
                 .accessibilityLabel("候选节点")

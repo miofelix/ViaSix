@@ -22,6 +22,7 @@ struct XrayTemplateEditorView: View {
             TextEditor(text: $text)
                 .font(.system(.body, design: .monospaced))
                 .scrollContentBackground(.hidden)
+                .scrollbarSafeContent()
                 .padding(10)
                 .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
                 .overlay {

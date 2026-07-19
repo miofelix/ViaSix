@@ -25,6 +25,7 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .scrollbarSafeContent()
     }
 
     private var runtimeCard: some View {

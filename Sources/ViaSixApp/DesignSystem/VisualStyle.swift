@@ -6,6 +6,7 @@ enum VisualStyle {
     static let surfaceBorder = Color(nsColor: .separatorColor).opacity(0.72)
     static let controlHeight: CGFloat = 34
     static let iconButtonSize: CGFloat = 34
+    static let scrollbarClearance: CGFloat = 14
 
     static var pageBackground: some View {
         Color(nsColor: .windowBackgroundColor)
@@ -42,5 +43,9 @@ extension View {
         self
             .frame(width: VisualStyle.iconButtonSize, height: VisualStyle.iconButtonSize)
             .contentShape(Rectangle())
+    }
+
+    func scrollbarSafeContent() -> some View {
+        contentMargins(.trailing, VisualStyle.scrollbarClearance, for: .scrollContent)
     }
 }

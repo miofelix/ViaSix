@@ -89,6 +89,7 @@ struct LogsView: View {
                             }
                         }
                     }
+                    .scrollbarSafeContent()
                     .onAppear {
                         scrollToLatest(using: proxy)
                     }
