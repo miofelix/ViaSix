@@ -118,6 +118,8 @@ struct OverviewView: View {
                 Text("出口 IP")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
                     .frame(width: 72, alignment: .leading)
 
                 VStack(alignment: .leading, spacing: 3) {
@@ -137,6 +139,15 @@ struct OverviewView: View {
                         Text(location)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let details = model.state.exit.info?.details, !details.isEmpty {
+                        Text(details)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     if let error = model.state.exit.errorMessage {
                         Text(error)

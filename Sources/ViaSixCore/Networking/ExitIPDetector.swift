@@ -30,16 +30,31 @@ public struct ProxyEndpoint: Codable, Equatable, Sendable {
 public struct ExitIPInfo: Codable, Equatable, Sendable {
     public let ip: String
     public let location: String
+    public let details: String
 
-    public init(ip: String, location: String = "") {
+    public init(ip: String, location: String = "", details: String = "") {
         self.ip = ip
         self.location = location
+        self.details = details
     }
 
     public var addressFamily: IPAddressFamily? {
         if IPv4Address(ip) != nil { return .ipv4 }
         if IPv6Address(ip) != nil { return .ipv6 }
         return nil
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case ip, location, details
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            ip: try values.decode(String.self, forKey: .ip),
+            location: try values.decodeIfPresent(String.self, forKey: .location) ?? "",
+            details: try values.decodeIfPresent(String.self, forKey: .details) ?? ""
+        )
     }
 }
 
@@ -61,6 +76,8 @@ public enum ExitIPDetectionError: LocalizedError, Equatable, Sendable {
 }
 
 public actor ExitIPDetector {
+    private static let userAgent = "ViaSix/1.0"
+
     private let endpoint: URL
     private let timeout: TimeInterval
 
@@ -99,18 +116,48 @@ public actor ExitIPDetector {
 
         let session = URLSession(configuration: configuration)
         defer { session.invalidateAndCancel() }
-        let (data, response) = try await session.data(from: endpoint)
+        let data = try await load(endpoint, using: session)
+        let info = try ExitIPResponseParser.parse(data)
+        if let expectedFamily, info.addressFamily != expectedFamily {
+            throw ExitIPDetectionError.addressFamilyMismatch(expectedFamily)
+        }
+
+        do {
+            try Task.checkCancellation()
+            guard let geolocationURL = AppMetadata.exitIPGeolocationURL(for: info.ip) else {
+                return info
+            }
+            let geolocationData = try await load(geolocationURL, using: session)
+            let geolocation = try ExitIPGeolocationResponseParser.parse(
+                geolocationData,
+                expectedIP: info.ip
+            )
+            try Task.checkCancellation()
+            return ExitIPInfo(
+                ip: info.ip,
+                location: geolocation.location.isEmpty ? info.location : geolocation.location,
+                details: geolocation.details.isEmpty ? info.details : geolocation.details
+            )
+        } catch {
+            if error is CancellationError || (error as? URLError)?.code == .cancelled {
+                throw error
+            }
+            try Task.checkCancellation()
+            return info
+        }
+    }
+
+    private func load(_ url: URL, using session: URLSession) async throws -> Data {
+        var request = URLRequest(url: url)
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse else {
             throw ExitIPDetectionError.invalidResponse
         }
         guard (200...299).contains(response.statusCode) else {
             throw ExitIPDetectionError.httpStatus(response.statusCode)
         }
-        let info = try ExitIPResponseParser.parse(data)
-        if let expectedFamily, info.addressFamily != expectedFamily {
-            throw ExitIPDetectionError.addressFamilyMismatch(expectedFamily)
-        }
-        return info
+        return data
     }
 }
 
@@ -133,14 +180,6 @@ public enum ExitIPResponseParser {
         return ExitIPInfo(ip: ip)
     }
 
-    private static func normalizedIPAddress(_ value: String) -> String? {
-        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard IPv4Address(normalized) != nil || IPv6Address(normalized) != nil else {
-            return nil
-        }
-        return normalized
-    }
-
     private struct APIResponse: Decodable {
         let ip: String
         let location: Location?
@@ -155,4 +194,107 @@ public enum ExitIPResponseParser {
             }
         }
     }
+}
+
+public enum ExitIPGeolocationResponseParser {
+    public static func parse(_ data: Data, expectedIP: String) throws -> ExitIPInfo {
+        let response: APIResponse
+        do {
+            response = try JSONDecoder().decode(APIResponse.self, from: data)
+        } catch {
+            throw ExitIPDetectionError.invalidResponse
+        }
+
+        guard let ip = normalizedIPAddress(expectedIP), addressesMatch(response.ip, ip) else {
+            throw ExitIPDetectionError.invalidResponse
+        }
+
+        let location = joinedUniqueValues(
+            [response.country, response.region, response.city],
+            separator: " · "
+        )
+        let provider = firstNonEmptyValue([response.organization, response.isp])
+        let details = joinedUniqueValues(
+            [provider, response.asn.map { $0.hasPrefix("AS") ? $0 : "AS\($0)" }, response.timezone],
+            separator: " · "
+        )
+        return ExitIPInfo(ip: ip, location: location, details: details)
+    }
+
+    private struct APIResponse: Decodable {
+        let ip: String
+        let country: String?
+        let region: String?
+        let city: String?
+        let organization: String?
+        let isp: String?
+        let asn: String?
+        let timezone: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case ip, country, region, city, organization, isp, asn, timezone
+        }
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            self.ip = try values.decode(String.self, forKey: .ip)
+            self.country = try values.decodeIfPresent(String.self, forKey: .country)
+            self.region = try values.decodeIfPresent(String.self, forKey: .region)
+            self.city = try values.decodeIfPresent(String.self, forKey: .city)
+            self.organization = try values.decodeIfPresent(String.self, forKey: .organization)
+            self.isp = try values.decodeIfPresent(String.self, forKey: .isp)
+            if let asn = try? values.decode(Int.self, forKey: .asn) {
+                self.asn = String(asn)
+            } else {
+                self.asn = try values.decodeIfPresent(String.self, forKey: .asn)
+            }
+            self.timezone = try values.decodeIfPresent(String.self, forKey: .timezone)
+        }
+    }
+}
+
+private func normalizedIPAddress(_ value: String) -> String? {
+    let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard IPv4Address(normalized) != nil || IPv6Address(normalized) != nil else {
+        return nil
+    }
+    return normalized
+}
+
+private func addressesMatch(_ candidate: String, _ expected: String) -> Bool {
+    let candidate = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let candidateAddress = IPv4Address(candidate),
+        let expectedAddress = IPv4Address(expected)
+    {
+        return candidateAddress.rawValue == expectedAddress.rawValue
+    }
+    if let candidateAddress = IPv6Address(candidate),
+        let expectedAddress = IPv6Address(expected)
+    {
+        return candidateAddress.rawValue == expectedAddress.rawValue
+    }
+    return false
+}
+
+private func joinedUniqueValues(_ values: [String?], separator: String) -> String {
+    var seen = Set<String>()
+    return values.compactMap { value in
+        guard let value else { return nil }
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+        let comparisonKey = normalized.folding(
+            options: [.caseInsensitive, .diacriticInsensitive],
+            locale: .current
+        )
+        guard seen.insert(comparisonKey).inserted else { return nil }
+        return normalized
+    }.joined(separator: separator)
+}
+
+private func firstNonEmptyValue(_ values: [String?]) -> String? {
+    values.lazy.compactMap { value in
+        guard let value else { return nil }
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty ? nil : normalized
+    }.first
 }

@@ -5,6 +5,7 @@ public enum AppMetadata {
     public static let defaultExitIPEndpoint = "https://api.myip.la/cn?json"
     public static let ipv4ExitIPEndpoint = "https://api-ipv4.ip.sb/ip"
     public static let ipv6ExitIPEndpoint = "https://api-ipv6.ip.sb/ip"
+    public static let exitIPGeolocationEndpoint = "https://api.ip.sb/geoip"
     public static let proxyHost = "127.0.0.1"
     public static let proxyPort = 11_451
 
@@ -17,5 +18,9 @@ public enum AppMetadata {
         case .ipv4: ipv4ExitIPEndpoint
         case .ipv6: ipv6ExitIPEndpoint
         }
+    }
+
+    public static func exitIPGeolocationURL(for ip: String) -> URL? {
+        URL(string: exitIPGeolocationEndpoint)?.appendingPathComponent(ip)
     }
 }

@@ -60,6 +60,61 @@ final class ExitIPResponseParserTests: XCTestCase {
         )
     }
 
+    func testParsesDetailedIPSBGeolocationResponse() throws {
+        let data = Data(
+            #"{"ip":"2606:0000:0000:0000:0000:0000:0000:0001","country":"中国","region":"山东","city":"青岛","organization":"China Telecom","isp":"China Telecom","asn":4134,"timezone":"Asia/Shanghai"}"#
+                .utf8
+        )
+
+        XCTAssertEqual(
+            try ExitIPGeolocationResponseParser.parse(data, expectedIP: "2606::1"),
+            ExitIPInfo(
+                ip: "2606::1",
+                location: "中国 · 山东 · 青岛",
+                details: "China Telecom · AS4134 · Asia/Shanghai"
+            )
+        )
+    }
+
+    func testGeolocationParserAcceptsMissingOptionalFields() throws {
+        let data = Data(#"{"ip":"1.1.1.1","isp":"Example ISP"}"#.utf8)
+
+        XCTAssertEqual(
+            try ExitIPGeolocationResponseParser.parse(data, expectedIP: "1.1.1.1"),
+            ExitIPInfo(ip: "1.1.1.1", details: "Example ISP")
+        )
+    }
+
+    func testGeolocationParserRejectsMismatchedIP() {
+        let data = Data(#"{"ip":"1.0.0.1","country":"澳大利亚"}"#.utf8)
+
+        XCTAssertThrowsError(
+            try ExitIPGeolocationResponseParser.parse(data, expectedIP: "1.1.1.1")
+        ) { error in
+            XCTAssertEqual(error as? ExitIPDetectionError, .invalidResponse)
+        }
+    }
+
+    func testGeolocationParserRejectsInvalidJSON() {
+        XCTAssertThrowsError(
+            try ExitIPGeolocationResponseParser.parse(
+                Data("service-unavailable".utf8),
+                expectedIP: "1.1.1.1"
+            )
+        ) { error in
+            XCTAssertEqual(error as? ExitIPDetectionError, .invalidResponse)
+        }
+    }
+
+    func testExitIPInfoDecodesPayloadWithoutDetails() throws {
+        let decoded = try JSONDecoder().decode(
+            ExitIPInfo.self,
+            from: Data(#"{"ip":"1.1.1.1","location":"澳大利亚"}"#.utf8)
+        )
+
+        XCTAssertEqual(decoded, ExitIPInfo(ip: "1.1.1.1", location: "澳大利亚"))
+    }
+
     func testDetectorRejectsUnsupportedEndpointBeforeMakingRequest() async {
         let detector = ExitIPDetector()
 
