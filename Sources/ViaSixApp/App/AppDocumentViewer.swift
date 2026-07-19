@@ -100,6 +100,7 @@ struct AppDocumentViewer: View {
                 .padding(.horizontal, 34)
                 .padding(.vertical, 30)
             }
+            .scrollbarSafeContent()
             .scrollIndicators(.automatic)
             .onChange(of: pendingAnchor, initial: true) { _, anchor in
                 guard let anchor else { return }
