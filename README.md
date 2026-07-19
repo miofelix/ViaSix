@@ -67,7 +67,7 @@ export ALL_PROXY=socks5h://127.0.0.1:11451
   Logs/                预留的持久化日志目录
 ```
 
-默认列表和模板只会在文件不存在时复制，应用升级不会覆盖用户修改。界面中的运行日志当前仅保存在内存中，退出应用后清空。
+默认列表和模板会在首次启动时复制。升级时仅会把 ViaSix 1.0 早期版本原封不动的旧 IPv4 默认列表迁移为完整列表；任何用户改动过的列表和模板都不会被覆盖。界面中的运行日志当前仅保存在内存中，退出应用后清空。
 
 > [!IMPORTANT]
 > `template.json` 沿用参考项目的 VLESS 连接资料。公开分发、共享构建产物或投入生产使用前，请确认这些连接资料的授权、安全性和有效性，并按实际部署替换 UUID、主机名及传输参数。
@@ -127,11 +127,12 @@ Sources/
   ViaSixApp/        SwiftUI 界面、菜单栏与应用生命周期
 Tests/
   ViaSixCoreTests/  核心逻辑及进程行为测试
+  ViaSixAppTests/   应用状态编排与配置一致性测试
 Packaging/          App bundle 元数据
 Scripts/            构建、打包与 bundle 验证脚本
 Docs/               架构说明
 ```
 
-完整测试会验证参数到 CLI 的映射、CSV 与流式输出解析、偏好兼容、配置原子更新、运行组件校验安装，以及 CFST / Xray 的进程生命周期。打包验证会检查 Info.plist、主程序、内置资源、第三方声明和代码签名。
+完整测试会验证参数到 CLI 的映射、CSV 与流式输出解析、偏好兼容、配置原子更新、AppModel 状态一致性、运行组件校验安装，以及 CFST / Xray 的进程生命周期。打包验证会检查 Info.plist、主程序、内置资源、第三方声明和代码签名。
 
 架构和进程边界见 [Docs/ARCHITECTURE.md](Docs/ARCHITECTURE.md)，第三方版本与许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。

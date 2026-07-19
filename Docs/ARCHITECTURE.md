@@ -36,7 +36,7 @@ The signed app bundle is treated as read-only. Mutable data is stored in:
   Logs/
 ```
 
-Default resources are copied once. User edits are never overwritten by an application update.
+Default resources are copied on first launch. An application update may migrate an exact byte-for-byte match of a previously shipped default, while any user-edited resource is preserved.
 
 ## Process ownership
 
@@ -47,4 +47,3 @@ ViaSix only stops child processes that it started and still owns. It never uses 
 Official release archives are selected by CPU architecture, downloaded over HTTPS, verified against a pinned SHA-256 digest, expanded in a temporary directory and moved into place only after all required files are present. A user-selected local executable takes precedence over the managed copy.
 
 The current distribution model is intended for Developer ID signing and notarization. It is not compatible with the Mac App Store sandbox because the application launches external networking helpers.
-
