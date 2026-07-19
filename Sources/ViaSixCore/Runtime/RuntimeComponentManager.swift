@@ -136,6 +136,10 @@ public enum RuntimeComponentError: LocalizedError, Equatable, Sendable {
 
 public actor RuntimeComponentManager {
     private static let extractionTimeout: Duration = .seconds(120)
+    private static let downloadSession = RuntimeNetworkPolicy.makeSession(
+        requestTimeout: RuntimeNetworkPolicy.downloadRequestTimeout,
+        resourceTimeout: RuntimeNetworkPolicy.downloadResourceTimeout
+    )
 
     public let runtimeDirectory: URL
     public let manifest: RuntimeManifest
@@ -479,7 +483,16 @@ public actor RuntimeComponentManager {
     }
 
     private static func downloadUsingURLSession(_ url: URL) async throws -> RuntimeDownloadedFile {
-        let (fileURL, response) = try await URLSession.shared.download(from: url)
+        try await downloadUsingURLSession(url, using: downloadSession)
+    }
+
+    static func downloadUsingURLSession(
+        _ url: URL,
+        using session: URLSession
+    ) async throws -> RuntimeDownloadedFile {
+        try Task.checkCancellation()
+        let (fileURL, response) = try await session.download(from: url)
+        try Task.checkCancellation()
         guard let response = response as? HTTPURLResponse else {
             throw RuntimeComponentError.invalidDownloadResponse(url)
         }

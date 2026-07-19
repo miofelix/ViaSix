@@ -13,6 +13,11 @@ public struct RuntimeReleaseResponse: Equatable, Sendable {
 public typealias RuntimeReleaseLoader = @Sendable (URL) async throws -> RuntimeReleaseResponse
 
 public struct RuntimeReleaseResolver: Sendable {
+    private static let networkSession = RuntimeNetworkPolicy.makeSession(
+        requestTimeout: RuntimeNetworkPolicy.releaseRequestTimeout,
+        resourceTimeout: RuntimeNetworkPolicy.releaseResourceTimeout
+    )
+
     private let loader: RuntimeReleaseLoader
 
     public init() {
@@ -98,10 +103,19 @@ public struct RuntimeReleaseResolver: Sendable {
     }
 
     private static func loadUsingURLSession(_ url: URL) async throws -> RuntimeReleaseResponse {
+        try await loadUsingURLSession(url, using: networkSession)
+    }
+
+    static func loadUsingURLSession(
+        _ url: URL,
+        using session: URLSession
+    ) async throws -> RuntimeReleaseResponse {
+        try Task.checkCancellation()
         var request = URLRequest(url: url)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("ViaSix", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
+        try Task.checkCancellation()
         guard let response = response as? HTTPURLResponse else {
             throw RuntimeComponentError.invalidDownloadResponse(url)
         }
@@ -128,5 +142,27 @@ public struct RuntimeReleaseResolver: Sendable {
             case downloadURL = "browser_download_url"
             case digest
         }
+    }
+}
+
+enum RuntimeNetworkPolicy {
+    static let releaseRequestTimeout: TimeInterval = 20
+    static let releaseResourceTimeout: TimeInterval = 45
+    static let downloadRequestTimeout: TimeInterval = 30
+    static let downloadResourceTimeout: TimeInterval = 10 * 60
+
+    static func makeSession(
+        requestTimeout: TimeInterval,
+        resourceTimeout: TimeInterval,
+        protocolClasses: [AnyClass]? = nil
+    ) -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = requestTimeout
+        configuration.timeoutIntervalForResource = resourceTimeout
+        configuration.waitsForConnectivity = false
+        if let protocolClasses {
+            configuration.protocolClasses = protocolClasses
+        }
+        return URLSession(configuration: configuration)
     }
 }
