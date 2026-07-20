@@ -108,7 +108,7 @@ make clean
 Sources/
   ViaSixCore/
     Configuration/    Xray 模板验证与配置生成
-    Infrastructure/   路径、默认资源、启动准备与偏好存储
+    Infrastructure/   路径、默认资源、启动准备、系统代理与网络接入能力
     Models/           测速参数、结果和用户偏好
     Networking/       出口 IP 检测
     Parsing/          CSV 与 CFST 流式输出解析
@@ -149,6 +149,8 @@ Sources/ViaSixCore/Runtime/RuntimeManifest.swift
 
 - CloudflareSpeedTest `v2.3.5`
 - Xray-core `v26.3.27`
+
+普通 Xray 代理继续按上述审计基线运行；虚拟网卡能力另有更高的最低门槛（Xray `v26.7.11`），且还需要特权 helper、DNS 管理和恢复能力全部通过探测。阶段二不会因为下载到较新的 Xray 就自动启用虚拟网卡。
 
 组件解析优先级：
 
@@ -212,12 +214,14 @@ CloudflareSpeedTest 是 XIU2 维护的独立第三方项目，并非 Cloudflare 
 - `preferences.json`：`Codable` 用户偏好，新增字段应提供向后兼容默认值。
 - `ip.txt` / `ipv6.txt`：复制到用户目录后的地址源。
 - `server.json`：远端 `proxy` 出站配置。
-- `local-proxy.json`：本机监听地址、端口、UDP、嗅探、私网直连和日志级别。
+- `local-proxy.json`：本机监听地址、端口、UDP、嗅探、私网直连、路由模式和系统代理偏好。
 - `template.json`：由前两者维护的完整 Xray 配置兼容镜像。
 - `config.json`：由模板和当前节点生成，不是配置的唯一来源。
 - `result.csv`：当前测速输出；启动新任务前删除。
 - `Runtime`：ViaSix 管理的第三方组件。
 - `Logs`：为未来持久日志预留；当前界面日志仅在内存中。
+
+虚拟网卡能力目前只由 `VirtualInterfaceManager` 探测，默认实现不会创建接口或修改路由/DNS。其版本、特权 helper、上游防回环和恢复要求见[虚拟网卡能力边界](VIRTUAL_NETWORK.md)；在真实后端和隔离环境回归完成前，不得增加用户可见开关。
 
 ViaSix 会把上述目录权限收紧为 `0700`，把偏好、地址列表和代理配置等管理文件收紧为 `0600`。新增写入路径时必须保持相同边界；不要依赖用户默认 `umask` 保护敏感配置。
 
@@ -272,6 +276,7 @@ ViaSix 只替换 `proxy` 出站中第一个 `vnext.address`。导入新模板时
 ## 进程与并发约定
 
 - CFST 与 Xray 均由各自 actor 管理完整生命周期。
+- 系统代理和虚拟网卡能力探测也必须通过独立的 actor/协议边界；不得把特权路由操作放进 SwiftUI 或普通用户态流程。
 - ViaSix 只停止自己创建并仍持有的子进程。
 - 不允许按进程名进行全局 kill。
 - CFST 使用独立进程组，取消任务时应清理其子进程。
@@ -295,6 +300,7 @@ ViaSix 只替换 `proxy` 出站中第一个 `vnext.address`。导入新模板时
 - `Docs/USER_GUIDE.md`：详细使用、配置、备份和排错。
 - `Docs/DEVELOPMENT.md`：构建、测试、目录、数据和开发约定。
 - `Docs/ARCHITECTURE.md`：模块和进程边界。
+- `Docs/VIRTUAL_NETWORK.md`：虚拟网卡能力、权限和恢复边界（当前仅架构预留）。
 - `Docs/RELEASING.md`：签名、公证和发布检查。
 - `Docs/ADDRESS_SOURCES.md`：默认地址列表来源、快照和更新流程。
 - `CONTRIBUTING.md`：Issue / PR、提交、测试和文档同步规则。

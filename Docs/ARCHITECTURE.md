@@ -11,6 +11,7 @@
 - [代理配置流程](#代理配置流程)
 - [系统代理生命周期](#系统代理生命周期)
 - [网络接入边界](#网络接入边界)
+- [虚拟网卡能力边界](VIRTUAL_NETWORK.md)
 - [运行组件安装](#运行组件安装)
 - [进程与并发边界](#进程与并发边界)
 - [信任边界](#信任边界)
@@ -27,7 +28,7 @@ ViaSixApp（SwiftUI，@MainActor）
                     ▼
 ViaSixCore
   Models / Parsing / Configuration / Networking
-  Infrastructure / Runtime / Resources
+  Infrastructure / Runtime / Resources / Network access capabilities
                     │
                     ▼
 Application Support + ViaSix 自有子进程 + 第三方网络服务
@@ -165,7 +166,7 @@ local-proxy.json + 模式 ─┤
 
 路由模式决定“进入本地 mixed 入站之后如何出站”，系统代理决定“遵循 macOS 代理设置的应用是否自动进入该入站”。这两个维度都不会捕获忽略系统代理的进程或任意系统数据包。
 
-当前版本没有虚拟网卡/TUN、默认路由接管或 DNS 重写能力，也不安装 Network Extension 或系统扩展。后续如实现虚拟网卡，应作为独立能力边界处理权限、上游服务器绕行、路由与 DNS 的原子恢复、崩溃恢复和可用性检测，不能把系统代理开关或现有三种 Xray 路由模式当作 TUN 状态。
+当前版本没有可用的虚拟网卡/TUN、默认路由接管或 DNS 重写能力，也不安装 Network Extension 或特权 helper。`VirtualInterfaceManager` 只提供后端能力探测和不可用的默认实现，不触碰系统网络；普通用户界面因此不会显示虚假的 TUN 开关。完整设计、权限边界、Xray 版本门槛和恢复顺序见 [虚拟网卡能力边界](VIRTUAL_NETWORK.md)。
 
 ## 运行组件安装
 
@@ -184,7 +185,7 @@ local-proxy.json + 模式 ─┤
 ## 进程与并发边界
 
 - UI 和 `AppModel` 保持在 `@MainActor`。
-- CFST、Xray、系统代理、偏好和组件管理使用 actor 隔离。
+- CFST、Xray、系统代理、虚拟网卡能力探测、偏好和组件管理使用 actor 隔离。
 - 每个会改变外部状态的长任务都由 `AppModel` 持有；退出时先取消，再停止自有进程并等待任务收敛。
 - ViaSix 从不按进程名全局结束进程，只向自己创建并仍持有的 PID / 进程组发送信号。
 - Xray 启动包含配置校验、端口占用检查、就绪探测、超时、异常退出和清理路径。
@@ -198,6 +199,7 @@ local-proxy.json + 模式 ─┤
 | 本地导入组件 | 用户明确选择 | 恶意或架构不兼容二进制 |
 | Xray JSON | 结构和回环监听校验 | 凭据泄露、错误服务器配置 |
 | macOS 网络代理设置 | SystemConfiguration 锁、前置状态比较和恢复快照 | 权限失败、外部并发修改、异常退出遗留 |
+| 虚拟网卡后端能力 | Xray 版本、helper/IPC、路由/DNS/恢复能力探测 | 默认路由回环、特权操作、DNS 泄漏、外部路由修改 |
 | 自定义 IP / CIDR / URL | 参数校验后交给 CFST | 过量网络负载、不可信目标 |
 | 出口 IP 服务 | 用户可配置的 HTTP / HTTPS 响应并验证 IP 格式 | 可用性、第三方日志和错误数据 |
 
