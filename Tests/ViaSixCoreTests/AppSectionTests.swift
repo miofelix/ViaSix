@@ -4,10 +4,11 @@ import XCTest
 
 final class AppSectionTests: XCTestCase {
     func testAllSectionsHaveDisplayMetadata() {
-        XCTAssertEqual(AppSection.allCases.count, 3)
+        XCTAssertEqual(AppSection.allCases.count, 4)
 
         for section in AppSection.allCases {
             XCTAssertFalse(section.title.isEmpty)
+            XCTAssertFalse(section.subtitle.isEmpty)
             XCTAssertFalse(section.systemImage.isEmpty)
         }
     }

@@ -1,97 +1,192 @@
+import AppKit
 import SwiftUI
 import ViaSixCore
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
-    @State private var selection: AppSection? = .overview
+    @Environment(AppRouter.self) private var router
 
     var body: some View {
-        NavigationSplitView {
-            VStack(spacing: 0) {
-                List(AppSection.allCases, selection: $selection) { section in
-                    Label(section.title, systemImage: section.systemImage)
-                        .tag(section)
-                }
-                .listStyle(.sidebar)
+        HStack(spacing: 0) {
+            sidebar
 
-                Divider()
+            Rectangle()
+                .fill(VisualStyle.surfaceBorder)
+                .frame(width: 1)
 
-                VStack(spacing: 0) {
-                    Button(action: toggleProxy) {
-                        HStack(spacing: 9) {
-                            Circle()
-                                .fill(sidebarStatusColor)
-                                .frame(width: 7, height: 7)
+            detail
+        }
+        .background(VisualStyle.pageBackgroundColor)
+        .tint(VisualStyle.accent)
+        .frame(minWidth: 900, minHeight: 640)
+        .comfortableInterface()
+        .animation(VisualStyle.standardAnimation, value: model.state.notice?.id)
+    }
 
-                            Text(sidebarStatusTitle)
-                                .font(.callout.weight(.medium))
-                                .lineLimit(1)
+    private var sidebar: some View {
+        VStack(spacing: 0) {
+            brandHeader
 
-                            Spacer()
-
-                            if sidebarProxyIsTransitioning {
-                                ProgressView()
-                                    .controlSize(.small)
-                            } else {
-                                Image(systemName: sidebarActionIcon)
-                                    .font(.callout.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(sidebarProxyControlDisabled)
-                    .help(sidebarActionHelp)
-                    .accessibilityLabel(sidebarActionHelp)
-                    .accessibilityValue(sidebarStatusTitle)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 13)
-
-                    SettingsLink {
-                        HStack(spacing: 9) {
-                            Image(systemName: "gearshape")
-                                .frame(width: 12)
-                            Text("设置…")
-                                .font(.callout.weight(.medium))
-                            Spacer()
-                            Text("⌘,")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
+            VStack(spacing: 4) {
+                ForEach(AppSection.allCases) { section in
+                    sidebarNavigationButton(section)
                 }
             }
-            .navigationTitle(AppMetadata.name)
-            .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 260)
-        } detail: {
-            ZStack(alignment: .bottomTrailing) {
-                VisualStyle.pageBackground
-                    .ignoresSafeArea()
+            .padding(.horizontal, 12)
 
-                detailContent
-                    .frame(maxWidth: 1_120, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 24)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            Spacer(minLength: VisualStyle.spacing16)
 
-                if let notice = model.state.notice {
-                    NoticeView(notice: notice) {
-                        model.clearNotice()
-                    }
-                    .padding(22)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            sidebarProxyPanel
+                .padding(12)
+        }
+        .frame(width: VisualStyle.sidebarWidth)
+        .background(VisualStyle.sidebarBackgroundColor)
+    }
+
+    private var brandHeader: some View {
+        HStack(spacing: 11) {
+            Image(nsImage: NSApplication.shared.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 34, height: 34)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(AppMetadata.name)
+                    .font(.system(size: 18, weight: .bold))
+                Text("网络代理与节点测速")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 18)
+        .padding(.bottom, 20)
+    }
+
+    private func sidebarNavigationButton(_ section: AppSection) -> some View {
+        let isSelected = router.selectedSection == section
+
+        return Button {
+            router.select(section)
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: section.systemImage)
+                    .font(.system(size: 15, weight: isSelected ? .semibold : .medium))
+                    .frame(width: 20)
+
+                Text(section.title)
+                    .font(.callout.weight(isSelected ? .semibold : .medium))
+
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(isSelected ? VisualStyle.accent : Color.primary)
+            .padding(.horizontal, 13)
+            .frame(height: VisualStyle.navigationRowHeight)
+            .background(
+                isSelected ? VisualStyle.accent.opacity(0.13) : .clear,
+                in: RoundedRectangle(
+                    cornerRadius: VisualStyle.radiusSmall,
+                    style: .continuous
+                )
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(section.title)
+        .accessibilityValue(isSelected ? "当前页面" : "")
+    }
+
+    private var sidebarProxyPanel: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(sidebarPresentation.tone.color)
+                    .frame(width: 7, height: 7)
+
+                Text(sidebarPresentation.statusTitle)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+
+                Spacer(minLength: 4)
+
+                if sidebarPresentation.isBusy {
+                    ProgressView()
+                        .controlSize(.small)
                 }
+            }
+
+            if let endpoint = sidebarPresentation.endpointSummary {
+                Text(endpoint)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+            }
+
+            if let detail = sidebarPresentation.detailText {
+                Text(detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button(action: performSidebarAction) {
+                Label(
+                    sidebarPresentation.actionTitle,
+                    systemImage: sidebarPresentation.actionSystemImage
+                )
+                .font(.caption.weight(.semibold))
+                .frame(maxWidth: .infinity, minHeight: 30)
+            }
+            .buttonStyle(.bordered)
+            .disabled(
+                sidebarPresentation.action == .none
+                    || sidebarProxyControlDisabled
+            )
+            .help(sidebarActionHelp)
+            .accessibilityLabel(sidebarActionHelp)
+            .accessibilityValue(sidebarPresentation.statusTitle)
+        }
+        .padding(12)
+        .background(
+            VisualStyle.surfaceColor,
+            in: RoundedRectangle(
+                cornerRadius: VisualStyle.radiusMedium,
+                style: .continuous
+            )
+        )
+        .overlay {
+            RoundedRectangle(
+                cornerRadius: VisualStyle.radiusMedium,
+                style: .continuous
+            )
+            .stroke(VisualStyle.surfaceBorder)
+        }
+    }
+
+    private var detail: some View {
+        ZStack(alignment: .bottomTrailing) {
+            VisualStyle.pageBackground
+                .ignoresSafeArea()
+
+            detailContent
+                .frame(maxWidth: 1_160, maxHeight: .infinity, alignment: .topLeading)
+                .padding(.horizontal, VisualStyle.pageHorizontalPadding)
+                .padding(.vertical, VisualStyle.pageVerticalPadding)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+
+            if let notice = model.state.notice {
+                NoticeView(notice: notice) {
+                    model.clearNotice()
+                }
+                .padding(22)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .tint(VisualStyle.accent)
-        .frame(minWidth: 800, minHeight: 620)
-        .comfortableInterface()
-        .animation(.easeOut(duration: 0.18), value: model.state.notice?.id)
     }
 
     @ViewBuilder
@@ -117,11 +212,12 @@ struct RootView: View {
             } actions: {
                 Button("重试", action: model.retryBootstrap)
                     .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
         case .ready:
-            page(for: selection ?? .overview)
+            page(for: router.selectedSection)
         }
     }
 
@@ -130,53 +226,34 @@ struct RootView: View {
         switch section {
         case .overview:
             OverviewView {
-                selection = .nodes
+                router.select(.nodes)
             }
         case .nodes:
             NodesView()
         case .logs:
             LogsView()
+        case .settings:
+            SettingsView()
         }
     }
 
-    private func toggleProxy() {
-        switch model.state.xrayPhase {
-        case .running, .validating, .starting:
+    private func performSidebarAction() {
+        switch sidebarPresentation.action {
+        case .stopProxy:
             model.stopXray()
-        case .stopped, .failed:
+        case .startProxy:
             model.startXray()
-        case .stopping:
+        case .none:
             break
         }
     }
 
-    private var sidebarStatusColor: Color {
-        switch model.state.xrayPhase {
-        case .running: .green
-        case .validating, .starting, .stopping: .orange
-        case .failed: .red
-        case .stopped: .secondary
-        }
-    }
-
-    private var sidebarStatusTitle: String {
-        switch model.state.xrayPhase {
-        case .running: "本地代理运行中"
-        case .validating: "正在校验"
-        case .starting: "正在启动"
-        case .stopping: "正在停止"
-        case .failed: "本地代理异常"
-        case .stopped: "本地代理已停止"
-        }
-    }
-
-    private var sidebarProxyIsTransitioning: Bool {
-        switch model.state.xrayPhase {
-        case .validating, .starting, .stopping:
-            true
-        case .running, .failed, .stopped:
-            false
-        }
+    private var sidebarPresentation: SidebarProxyPresentation {
+        SidebarProxyPresentation(
+            launchPhase: model.state.launchPhase,
+            xrayPhase: model.state.xrayPhase,
+            endpoint: model.state.proxyEndpoint
+        )
     }
 
     private var sidebarProxyControlDisabled: Bool {
@@ -196,16 +273,15 @@ struct RootView: View {
         }
     }
 
-    private var sidebarActionIcon: String {
-        switch model.state.xrayPhase {
-        case .running, .validating, .starting:
-            "stop.fill"
-        case .stopped, .failed, .stopping:
-            "play.fill"
-        }
-    }
-
     private var sidebarActionHelp: String {
+        switch model.state.launchPhase {
+        case .idle, .loading:
+            return "ViaSix 正在准备"
+        case .failed:
+            return "初始化失败，请在主内容区重试"
+        case .ready:
+            break
+        }
         if let operation = model.state.runtimeOperation {
             return operation.description
         }
@@ -215,7 +291,9 @@ struct RootView: View {
         return switch model.state.xrayPhase {
         case .running, .validating, .starting:
             "停止本地代理"
-        case .stopped, .failed, .stopping:
+        case .stopping:
+            "正在停止本地代理"
+        case .stopped, .failed:
             if !model.hasXrayExecutable {
                 "请先在设置中安装 Xray-core"
             } else if let issue = model.proxyConfigurationIssue {
@@ -271,8 +349,8 @@ private struct NoticeView: View {
     private var color: Color {
         switch notice.style {
         case .info: VisualStyle.accent
-        case .success: .green
-        case .error: .red
+        case .success: VisualStyle.positive
+        case .error: VisualStyle.negative
         }
     }
 

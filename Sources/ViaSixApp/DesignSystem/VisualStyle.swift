@@ -4,14 +4,70 @@ import ViaSixCore
 
 enum VisualStyle {
     static let accent = Color(nsColor: .systemBlue)
-    static let surfaceBorder = Color(nsColor: .separatorColor).opacity(0.72)
+    static let positive = Color(nsColor: .systemGreen)
+    static let warning = Color(nsColor: .systemOrange)
+    static let negative = Color(nsColor: .systemRed)
+    static let pageBackgroundColor = Color(
+        nsColor: NSColor(name: nil) { appearance in
+            let match = appearance.bestMatch(from: [.darkAqua, .aqua])
+            if match == .darkAqua {
+                return NSColor(srgbRed: 0.105, green: 0.11, blue: 0.135, alpha: 1)
+            }
+            return NSColor(srgbRed: 0.945, green: 0.95, blue: 0.96, alpha: 1)
+        }
+    )
+    static let sidebarBackgroundColor = Color(nsColor: .windowBackgroundColor)
+    static let surfaceColor = Color(nsColor: .controlBackgroundColor)
+    static let elevatedSurfaceColor = Color(nsColor: .textBackgroundColor)
+    static let selectedSurfaceColor = Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
+    static let subtleFill = Color(nsColor: .quaternaryLabelColor).opacity(0.12)
+    static let surfaceBorder = Color(nsColor: .separatorColor).opacity(0.58)
+
+    static let spacing4: CGFloat = 4
+    static let spacing8: CGFloat = 8
+    static let spacing12: CGFloat = 12
+    static let spacing16: CGFloat = 16
+    static let spacing20: CGFloat = 20
+    static let spacing24: CGFloat = 24
+
+    static let radiusSmall: CGFloat = 8
+    static let radiusMedium: CGFloat = 12
+    static let radiusLarge: CGFloat = 16
+    static let navigationRowHeight: CGFloat = 42
+    static let settingsRowHeight: CGFloat = 52
+    static let pageHeaderHeight: CGFloat = 60
+    static let sidebarWidth: CGFloat = 216
+    static let pageHorizontalPadding: CGFloat = 22
+    static let pageVerticalPadding: CGFloat = 20
     static let controlHeight: CGFloat = 34
     static let iconButtonSize: CGFloat = 34
     static let disclosureHitTarget: CGFloat = 44
     static let scrollbarClearance: CGFloat = 14
 
+    static let fastAnimation = Animation.easeOut(duration: 0.12)
+    static let standardAnimation = Animation.easeInOut(duration: 0.18)
+    static let deliberateAnimation = Animation.easeInOut(duration: 0.24)
+
     static var pageBackground: some View {
-        Color(nsColor: .windowBackgroundColor)
+        pageBackgroundColor
+    }
+}
+
+enum AppTone: Equatable, Sendable {
+    case accent
+    case positive
+    case warning
+    case negative
+    case neutral
+
+    var color: Color {
+        switch self {
+        case .accent: VisualStyle.accent
+        case .positive: VisualStyle.positive
+        case .warning: VisualStyle.warning
+        case .negative: VisualStyle.negative
+        case .neutral: .secondary
+        }
     }
 }
 
@@ -125,13 +181,20 @@ struct CardModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background(
-                Color(nsColor: .controlBackgroundColor),
-                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                VisualStyle.surfaceColor,
+                in: RoundedRectangle(
+                    cornerRadius: VisualStyle.radiusMedium,
+                    style: .continuous
+                )
             )
             .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(VisualStyle.surfaceBorder, lineWidth: 1)
+                RoundedRectangle(
+                    cornerRadius: VisualStyle.radiusMedium,
+                    style: .continuous
+                )
+                .stroke(VisualStyle.surfaceBorder, lineWidth: 1)
             }
+            .shadow(color: .black.opacity(0.035), radius: 2, y: 1)
     }
 }
 
@@ -143,7 +206,7 @@ extension View {
     /// Shared baseline for the main app surfaces. Typography intentionally follows
     /// the system Dynamic Type setting instead of forcing a single application size.
     func comfortableInterface() -> some View {
-        controlSize(.large)
+        controlSize(.regular)
     }
 
     func iconButtonHitTarget() -> some View {
@@ -158,6 +221,208 @@ extension View {
 
     func horizontalScrollbarSafeContent() -> some View {
         contentMargins(.bottom, VisualStyle.scrollbarClearance, for: .scrollContent)
+    }
+}
+
+// MARK: - Shared page components
+
+struct AppPageHeader<Trailing: View>: View {
+    let title: String
+    let subtitle: String?
+    private let trailing: Trailing
+
+    init(
+        _ title: String,
+        subtitle: String? = nil,
+        @ViewBuilder trailing: () -> Trailing
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: VisualStyle.spacing16) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 21, weight: .bold))
+                    .lineLimit(1)
+
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Spacer(minLength: VisualStyle.spacing16)
+            trailing
+        }
+        .frame(minHeight: VisualStyle.pageHeaderHeight)
+    }
+}
+
+extension AppPageHeader where Trailing == EmptyView {
+    init(_ title: String, subtitle: String? = nil) {
+        self.init(title, subtitle: subtitle) {
+            EmptyView()
+        }
+    }
+}
+
+struct CardHeader<Trailing: View>: View {
+    let title: String
+    let systemImage: String
+    let tone: AppTone
+    private let trailing: Trailing
+
+    init(
+        _ title: String,
+        systemImage: String,
+        tone: AppTone = .accent,
+        @ViewBuilder trailing: () -> Trailing
+    ) {
+        self.title = title
+        self.systemImage = systemImage
+        self.tone = tone
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        HStack(spacing: VisualStyle.spacing12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(tone.color)
+                .frame(width: 34, height: 34)
+                .background(
+                    tone.color.opacity(0.11),
+                    in: RoundedRectangle(
+                        cornerRadius: VisualStyle.radiusSmall,
+                        style: .continuous
+                    )
+                )
+
+            Text(title)
+                .font(.headline)
+                .lineLimit(1)
+
+            Spacer(minLength: VisualStyle.spacing12)
+            trailing
+        }
+        .padding(.horizontal, VisualStyle.spacing16)
+        .padding(.vertical, 11)
+    }
+}
+
+extension CardHeader where Trailing == EmptyView {
+    init(
+        _ title: String,
+        systemImage: String,
+        tone: AppTone = .accent
+    ) {
+        self.init(title, systemImage: systemImage, tone: tone) {
+            EmptyView()
+        }
+    }
+}
+
+struct SurfaceCard<Content: View>: View {
+    private let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .cardStyle()
+    }
+}
+
+struct StatusBadge: View {
+    let title: String
+    let tone: AppTone
+    var systemImage: String?
+
+    init(_ title: String, tone: AppTone = .neutral, systemImage: String? = nil) {
+        self.title = title
+        self.tone = tone
+        self.systemImage = systemImage
+    }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.caption2.weight(.semibold))
+            } else {
+                Circle()
+                    .fill(tone.color)
+                    .frame(width: 6, height: 6)
+            }
+
+            Text(title)
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
+        }
+        .foregroundStyle(tone.color)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(
+            tone.color.opacity(0.09),
+            in: Capsule(style: .continuous)
+        )
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct SettingRow<Trailing: View>: View {
+    let title: String
+    let detail: String?
+    let systemImage: String?
+    private let trailing: Trailing
+
+    init(
+        _ title: String,
+        detail: String? = nil,
+        systemImage: String? = nil,
+        @ViewBuilder trailing: () -> Trailing
+    ) {
+        self.title = title
+        self.detail = detail
+        self.systemImage = systemImage
+        self.trailing = trailing()
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: VisualStyle.spacing12) {
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24)
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.callout.weight(.medium))
+
+                if let detail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Spacer(minLength: VisualStyle.spacing12)
+            trailing
+        }
+        .frame(minHeight: VisualStyle.settingsRowHeight)
+        .contentShape(Rectangle())
     }
 }
 

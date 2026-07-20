@@ -6,6 +6,7 @@ import ViaSixCore
 struct ViaSixMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model: AppModel
+    @State private var router = AppRouter()
 
     init() {
         let model = AppModel.live()
@@ -17,6 +18,7 @@ struct ViaSixMacApp: App {
         Window("ViaSix", id: "main") {
             RootView()
                 .environment(model)
+                .environment(router)
                 .task {
                     model.start()
                 }
@@ -39,6 +41,7 @@ struct ViaSixMacApp: App {
         MenuBarExtra {
             MenuBarView()
                 .environment(model)
+                .environment(router)
                 .task {
                     model.start()
                 }
