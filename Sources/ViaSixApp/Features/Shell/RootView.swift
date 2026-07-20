@@ -180,9 +180,15 @@ struct RootView: View {
                 .frame(maxWidth: .infinity, alignment: .topLeading)
 
             if let notice = model.state.notice {
-                NoticeView(notice: notice) {
-                    model.clearNotice()
-                }
+                NoticeView(
+                    notice: notice,
+                    openSettings: {
+                        router.select(.settings)
+                    },
+                    dismiss: {
+                        model.clearNotice()
+                    }
+                )
                 .padding(22)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
@@ -311,6 +317,7 @@ struct RootView: View {
 
 private struct NoticeView: View {
     let notice: AppNotice
+    let openSettings: () -> Void
     let dismiss: () -> Void
 
     var body: some View {
@@ -321,7 +328,7 @@ private struct NoticeView: View {
                 .font(.callout.weight(.medium))
                 .lineLimit(2)
             if notice.action == .openSettings {
-                SettingsLink {
+                Button(action: openSettings) {
                     Text("打开设置")
                         .font(.callout.weight(.medium))
                 }

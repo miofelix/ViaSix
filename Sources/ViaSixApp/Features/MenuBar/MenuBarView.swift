@@ -2,81 +2,43 @@ import AppKit
 import SwiftUI
 import ViaSixCore
 
+/// The menu bar is intentionally action-oriented: the most common controls
+/// are available without opening a second window, while detailed editing stays
+/// in the main application pages.
 struct MenuBarView: View {
     @Environment(AppModel.self) private var model
+    @Environment(AppRouter.self) private var router
     @Environment(\.openWindow) private var openWindow
-    @State private var copyNotice: String?
 
     var body: some View {
-        // Keep the menu aligned with the most common macOS flow: open the full
-        // app first, inspect connection state, operate the proxy, then use
-        // secondary utilities and lifecycle commands.
         Button("打开 ViaSix", systemImage: "macwindow") {
-            openMainWindow()
+            openMainWindow(.overview)
         }
         .keyboardShortcut("o")
 
         Divider()
 
-        Label(xrayStatusTitle, systemImage: xrayStatusIcon)
-            .lineLimit(1)
-            .truncationMode(.middle)
-        if !model.state.preferences.selectedIP.isEmpty {
-            Label {
-                Text("当前节点 \(model.state.preferences.selectedIP)")
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            } icon: {
-                Image(systemName: "network")
-            }
-            .help("当前节点：\(model.state.preferences.selectedIP)")
-        }
-
-        if case .failed(let message) = model.state.xrayPhase {
-            Text(message)
-                .lineLimit(2)
-                .foregroundStyle(.secondary)
-        }
+        proxyStatus
+        routingModeMenu
+        nodeMenu
 
         Divider()
 
-        runtimeOperationStatus
-
-        if let proxyUnavailableMessage {
-            Label(proxyUnavailableMessage, systemImage: "info.circle")
-                .foregroundStyle(.secondary)
+        localProxyMenu
+        systemProxyMenu
+        Button("重新连接", systemImage: "arrow.clockwise") {
+            model.restartXray()
         }
-        xrayActions
+        .disabled(!model.state.isXrayRunning || proxyRestartDisabled)
+        speedTestMenu
 
         Divider()
 
-        if let speedTestUnavailableMessage {
-            Label(speedTestUnavailableMessage, systemImage: "info.circle")
-                .foregroundStyle(.secondary)
+        Button("日志", systemImage: "text.alignleft") {
+            openMainWindow(.logs)
         }
-        speedTestStatus
-        speedTestAction
-
-        Divider()
-
-        if !model.state.preferences.selectedIP.isEmpty {
-            Button("复制当前节点 IP", systemImage: "doc.on.doc") {
-                copyToPasteboard(model.state.preferences.selectedIP, label: "节点 IP")
-            }
-        }
-        Button("复制代理地址", systemImage: "doc.on.doc") {
-            copyToPasteboard(proxyEndpoint, label: "代理地址")
-        }
-
-        if let copyNotice {
-            Label(copyNotice, systemImage: "checkmark.circle")
-                .foregroundStyle(.secondary)
-        }
-
-        Divider()
-
-        SettingsLink {
-            Label("设置…", systemImage: "gearshape")
+        Button("设置", systemImage: "gearshape") {
+            openMainWindow(.settings)
         }
 
         Divider()
@@ -88,172 +50,139 @@ struct MenuBarView: View {
     }
 
     @ViewBuilder
-    private var runtimeOperationStatus: some View {
-        if let operation = model.state.runtimeOperation {
-            Label(operation.description, systemImage: "shippingbox")
+    private var proxyStatus: some View {
+        let presentation = SidebarProxyPresentation(
+            launchPhase: model.state.launchPhase,
+            xrayPhase: model.state.xrayPhase,
+            endpoint: model.state.proxyEndpoint
+        )
+
+        Label(presentation.statusTitle, systemImage: presentationIcon(presentation))
+            .lineLimit(1)
+            .accessibilityLabel("本地代理状态")
+            .accessibilityValue(statusAccessibilityValue(presentation))
+        if let endpoint = presentation.endpointSummary {
+            Text(endpoint)
+                .font(.caption.monospaced())
                 .foregroundStyle(.secondary)
-            if operation.canCancel {
-                Button("取消组件操作", systemImage: "xmark.circle") {
-                    model.cancelRuntimeOperation()
-                }
-            }
-        } else if let error = model.state.runtimeOperationError {
-            Text("组件操作失败：\(error)")
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        if let detail = presentation.detailText {
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
                 .lineLimit(2)
-                .foregroundStyle(.secondary)
-            Button("重新安装最新组件", systemImage: "arrow.clockwise") {
-                model.installRuntime()
+        }
+        if !model.state.preferences.selectedIP.isEmpty {
+            Label {
+                Text("节点：\(model.state.preferences.selectedIP)")
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            } icon: {
+                Image(systemName: "network")
             }
-            .disabled(runtimeActionsDisabled)
+            .foregroundStyle(.secondary)
         }
     }
 
-    @ViewBuilder
-    private var speedTestAction: some View {
-        switch model.state.configurationTest.phase {
-        case .running:
-            Button("停止当前节点测速", systemImage: "stop.fill") {
-                model.stopCurrentConfigurationTest()
-            }
-        case .stopping:
-            Button("正在停止当前节点测速…", systemImage: "hourglass") {}
-                .disabled(true)
-        case .idle, .failed:
-            if !model.state.preferences.selectedIP.isEmpty,
-                !isFullSpeedTestActive
-            {
-                Button("测试当前节点", systemImage: "scope") {
-                    model.startCurrentConfigurationTest()
+    private var routingModeMenu: some View {
+        Menu {
+            ForEach(ProxyRoutingMode.allCases, id: \.rawValue) { mode in
+                Toggle(isOn: routingModeBinding(for: mode)) {
+                    Label(mode.displayName, systemImage: mode.appSystemImage)
                 }
-                .disabled(model.currentConfigurationTestUnavailableReason != nil)
+                .disabled(routingModeDisabled)
+                .help(mode.appDescription)
             }
-            fullSpeedTestAction
-        }
-    }
-
-    @ViewBuilder
-    private var fullSpeedTestAction: some View {
-        switch model.state.speedTest.phase {
-        case .idle, .failed:
-            Button("开始节点测速", systemImage: "gauge.with.dots.needle.67percent") {
-                model.startSpeedTest()
-            }
-            .disabled(
-                model.state.launchPhase != .ready
-                    || model.state.runtimeOperation != nil
-                    || model.isTemplateOperationBusy
-                    || model.switchingIP != nil
-                    || !model.hasCfstExecutable
-                    || model.isCfstBusy
-                    || parameterValidationMessage != nil
+        } label: {
+            Label(
+                "代理模式：\(model.state.localProxyConfiguration.routingMode.displayName)",
+                systemImage: model.state.localProxyConfiguration.routingMode.appSystemImage
             )
-        case .running:
-            Button("停止节点测速", systemImage: "stop.fill") {
-                model.stopSpeedTest()
-            }
-        case .stopping:
-            Button("正在停止测速…", systemImage: "hourglass") {}
-                .disabled(true)
         }
+        .accessibilityLabel("代理模式")
+        .accessibilityValue(model.state.localProxyConfiguration.routingMode.displayName)
     }
 
-    @ViewBuilder
-    private var speedTestStatus: some View {
-        if isCurrentConfigurationTestActive {
-            switch model.state.configurationTest.phase {
-            case .running:
-                Label("正在测试当前节点…", systemImage: "gauge.with.dots.needle.67percent")
-                    .foregroundStyle(.secondary)
-            case .stopping:
-                Label("正在停止当前节点测速…", systemImage: "hourglass")
-                    .foregroundStyle(.secondary)
-            case .idle, .failed:
-                EmptyView()
-            }
-        } else {
-            fullSpeedTestStatus
-        }
-    }
+    private var nodeMenu: some View {
+        let visible = MenuBarNodePresentation.visibleResults(
+            from: model.state.results,
+            selectedIP: model.state.preferences.selectedIP
+        )
+        let hasMore = MenuBarNodePresentation.hasAdditionalResults(
+            in: model.state.results,
+            selectedIP: model.state.preferences.selectedIP
+        )
 
-    @ViewBuilder
-    private var fullSpeedTestStatus: some View {
-        switch model.state.speedTest.phase {
-        case .running:
-            if model.state.speedTest.total > 0 {
-                Label(
-                    "测速进度：\(model.state.speedTest.current)/\(model.state.speedTest.total)",
-                    systemImage: "gauge.with.dots.needle.67percent"
-                )
-                .foregroundStyle(.secondary)
+        return Menu {
+            if visible.isEmpty {
+                Button("暂无测速节点", systemImage: "network.slash") {}
+                    .disabled(true)
             } else {
-                Label("测速正在准备输出…", systemImage: "gauge.with.dots.needle.67percent")
-                    .foregroundStyle(.secondary)
+                ForEach(visible) { result in
+                    Toggle(
+                        isOn: nodeSelectionBinding(for: result.ip)
+                    ) {
+                        Text(MenuBarNodePresentation.title(for: result))
+                    }
+                    .disabled(nodeSelectionDisabled)
+                    .help(nodeHelp(for: result))
+                }
             }
-        case .stopping:
-            Label("正在停止测速…", systemImage: "hourglass")
-                .foregroundStyle(.secondary)
-        case .failed(let message):
-            if case .failed(let currentMessage) = model.state.configurationTest.phase {
-                Text("当前节点测速失败：\(currentMessage)")
-                    .lineLimit(2)
-                    .foregroundStyle(.secondary)
-            } else if let result = model.state.configurationTest.result {
-                Label(
-                    "当前节点：\(result.performanceSummary)",
-                    systemImage: "checkmark.circle"
-                )
-                .foregroundStyle(.secondary)
+
+            Divider()
+
+            if hasMore {
+                Button("查看全部节点…", systemImage: "list.bullet") {
+                    openMainWindow(.nodes)
+                }
             } else {
-                Text("测速失败：\(message)")
-                    .lineLimit(2)
-                    .foregroundStyle(.secondary)
+                Button("打开节点页", systemImage: "list.bullet") {
+                    openMainWindow(.nodes)
+                }
             }
-        case .idle:
-            if case .failed(let message) = model.state.configurationTest.phase {
-                Text("当前节点测速失败：\(message)")
-                    .lineLimit(2)
-                    .foregroundStyle(.secondary)
-            } else if let result = model.state.configurationTest.result {
-                Label(
-                    "当前节点：\(result.performanceSummary)",
-                    systemImage: "checkmark.circle"
-                )
+
+        } label: {
+            Label(nodeMenuTitle, systemImage: "point.3.connected.trianglepath.dotted")
+        }
+        .accessibilityLabel("节点")
+        .accessibilityValue(nodeMenuTitle)
+    }
+
+    private var localProxyMenu: some View {
+        Menu {
+            Label(localProxyStatusTitle, systemImage: localProxyStatusIcon)
                 .foregroundStyle(.secondary)
+
+            if let issue = model.proxyConfigurationIssue, !model.state.isXrayRunning {
+                Text(issue)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
-        }
-    }
+            if case .failed(let message) = model.state.xrayPhase {
+                Text(message)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
 
-    private var isCurrentConfigurationTestActive: Bool {
-        switch model.state.configurationTest.phase {
-        case .running, .stopping: true
-        case .idle, .failed: false
+            Divider()
+            localProxyActions
+        } label: {
+            Label("本地代理", systemImage: "network")
         }
-    }
-
-    private var isFullSpeedTestActive: Bool {
-        switch model.state.speedTest.phase {
-        case .running, .stopping: true
-        case .idle, .failed: false
-        }
+        .accessibilityLabel("本地代理")
+        .accessibilityValue(localProxyStatusTitle)
     }
 
     @ViewBuilder
-    private var xrayActions: some View {
+    private var localProxyActions: some View {
         switch model.state.xrayPhase {
         case .stopped, .failed:
             Button("启动本地代理", systemImage: "play.fill") {
                 model.startXray()
             }
-            .disabled(
-                model.state.launchPhase != .ready
-                    || model.state.runtimeOperation != nil
-                    || model.isTemplateOperationBusy
-                    || model.switchingIP != nil
-                    || !model.hasXrayExecutable
-                    || (model.requiresSelectedNodeForProxy
-                        && model.state.preferences.selectedIP.isEmpty)
-                    || !model.isProxyConfigurationReady
-            )
+            .disabled(proxyStartDisabled)
         case .validating, .starting:
             Button("停止本地代理", systemImage: "stop.fill") {
                 model.stopXray()
@@ -262,116 +191,321 @@ struct MenuBarView: View {
             Button("停止本地代理", systemImage: "stop.fill") {
                 model.stopXray()
             }
-            Button("重启本地代理", systemImage: "arrow.clockwise") {
-                model.restartXray()
-            }
-            .disabled(model.switchingIP != nil || model.isTemplateOperationBusy)
         case .stopping:
             Button("正在停止本地代理…", systemImage: "hourglass") {}
                 .disabled(true)
         }
     }
 
-    private var xrayStatusTitle: String {
-        let endpoint = model.state.proxyEndpoint.displayAddress
-        return switch model.state.xrayPhase {
-        case .stopped: "本地代理已停止 · \(endpoint)"
-        case .validating: "正在检查代理配置"
-        case .starting: "正在启动本地代理"
-        case .running: "本地代理运行中 · \(endpoint)"
-        case .stopping: "正在停止本地代理"
-        case .failed: "本地代理运行异常"
+    private var systemProxyMenu: some View {
+        let presentation = systemProxyPresentation
+
+        return Menu {
+            Toggle("使用系统代理", isOn: systemProxyRequestedBinding)
+                .disabled(systemProxyToggleDisabled)
+
+            Divider()
+
+            Label(
+                "用户请求：\(model.state.localProxyConfiguration.systemProxyEnabled ? "已启用" : "未启用")",
+                systemImage: model.state.localProxyConfiguration.systemProxyEnabled
+                    ? "checkmark.circle"
+                    : "circle"
+            )
+            .foregroundStyle(.secondary)
+
+            Label(
+                "macOS：\(presentation.text)",
+                systemImage: systemProxyStatusIcon(presentation)
+            )
+            .foregroundStyle(.secondary)
+
+            if case .failed(let message) = model.state.systemProxyPhase {
+                Text(message)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        } label: {
+            Label("系统代理：\(presentation.text)", systemImage: "desktopcomputer")
+        }
+        .accessibilityLabel("系统代理")
+        .accessibilityValue(
+            "用户请求：\(model.state.localProxyConfiguration.systemProxyEnabled ? "已启用" : "未启用")，macOS：\(presentation.text)"
+        )
+    }
+
+    private var speedTestMenu: some View {
+        Menu {
+            speedTestStatus
+
+            Divider()
+
+            switch model.state.speedTest.phase {
+            case .idle, .failed:
+                Button("开始节点测速", systemImage: "gauge.with.dots.needle.67percent") {
+                    model.startSpeedTest()
+                }
+                .disabled(!canStartFullSpeedTest)
+            case .running:
+                Button("停止节点测速", systemImage: "stop.fill") {
+                    model.stopSpeedTest()
+                }
+            case .stopping:
+                Button("正在停止测速…", systemImage: "hourglass") {}
+                    .disabled(true)
+            }
+
+            if !model.state.preferences.selectedIP.isEmpty {
+                switch model.state.configurationTest.phase {
+                case .idle, .failed:
+                    Button("测试当前节点", systemImage: "scope") {
+                        model.startCurrentConfigurationTest()
+                    }
+                    .disabled(model.currentConfigurationTestUnavailableReason != nil)
+                case .running:
+                    Button("停止当前节点测速", systemImage: "stop.fill") {
+                        model.stopCurrentConfigurationTest()
+                    }
+                case .stopping:
+                    Button("正在停止当前节点测速…", systemImage: "hourglass") {}
+                        .disabled(true)
+                }
+            }
+
+            Button("打开节点页", systemImage: "list.bullet") {
+                openMainWindow(.nodes)
+            }
+        } label: {
+            Label(speedTestMenuTitle, systemImage: "gauge.with.dots.needle.67percent")
+        }
+        .accessibilityLabel("测速")
+        .accessibilityValue(speedTestMenuTitle)
+    }
+
+    @ViewBuilder
+    private var speedTestStatus: some View {
+        switch model.state.speedTest.phase {
+        case .running:
+            if model.state.speedTest.total > 0 {
+                Label(
+                    "正在测速 · \(model.state.speedTest.current)/\(model.state.speedTest.total)",
+                    systemImage: "gauge.with.dots.needle.67percent"
+                )
+            } else {
+                Label("测速准备中", systemImage: "gauge.with.dots.needle.67percent")
+            }
+        case .stopping:
+            Label("正在停止测速", systemImage: "hourglass")
+        case .failed(let message):
+            Text("测速失败：\(message)")
+                .lineLimit(2)
+        case .idle:
+            if let result = model.state.selectedResult {
+                Label("当前节点：\(result.performanceSummary)", systemImage: "checkmark.circle")
+            } else {
+                Label("尚未测速", systemImage: "circle")
+            }
         }
     }
 
-    private var xrayStatusIcon: String {
+    private var nodeMenuTitle: String {
+        let selected = model.state.preferences.selectedIP
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !selected.isEmpty else { return "节点：未选择" }
+        if let result = model.state.results.first(where: { $0.ip == selected }) {
+            return "节点：\(MenuBarNodePresentation.title(for: result))"
+        }
+        return "节点：\(selected)"
+    }
+
+    private var localProxyStatusTitle: String {
+        switch model.state.xrayPhase {
+        case .stopped: "未启动"
+        case .validating: "正在校验配置"
+        case .starting: "正在启动"
+        case .running: "运行中 · \(model.state.proxyEndpoint.displayAddress)"
+        case .stopping: "正在停止"
+        case .failed: "运行异常"
+        }
+    }
+
+    private var localProxyStatusIcon: String {
         switch model.state.xrayPhase {
         case .running: "checkmark.circle.fill"
-        case .validating, .starting, .stopping: "clock.fill"
+        case .validating, .starting, .stopping: "hourglass"
         case .failed: "exclamationmark.triangle.fill"
         case .stopped: "circle"
         }
     }
 
-    private var proxyEndpoint: String {
-        model.state.proxyEndpoint.displayAddress
-    }
-
-    private var parameterValidationMessage: String? {
-        guard model.state.launchPhase == .ready else { return nil }
-        do {
-            _ = try model.parameters.validated()
-            return nil
-        } catch {
-            return error.localizedDescription
+    private var speedTestMenuTitle: String {
+        switch model.state.speedTest.phase {
+        case .running: "测速进行中"
+        case .stopping: "正在停止测速"
+        case .failed: "测速失败"
+        case .idle: "测速"
         }
     }
 
-    private var runtimeActionsDisabled: Bool {
+    private var systemProxyPresentation: SystemProxyStatusPresentation {
+        SystemProxyStatusPresentation(
+            phase: model.state.systemProxyPhase,
+            isRequested: model.state.localProxyConfiguration.systemProxyEnabled
+        )
+    }
+
+    private var routingModeDisabled: Bool {
         guard model.state.launchPhase == .ready else { return true }
-        if model.state.runtimeOperation != nil
+        if model.isRoutingModeChanging
+            || model.isSystemProxyTransitioning
+            || model.state.runtimeOperation != nil
             || model.isTemplateOperationBusy
             || model.switchingIP != nil
-            || model.isCfstBusy
         {
             return true
         }
         switch model.state.xrayPhase {
-        case .validating, .starting, .running, .stopping:
+        case .validating, .starting, .stopping:
             return true
-        case .stopped, .failed:
+        case .stopped, .running, .failed:
             return false
         }
     }
 
-    private var speedTestUnavailableMessage: String? {
-        guard model.state.runtimeOperation == nil else { return nil }
-        if model.isTemplateOperationBusy { return "代理配置操作进行中" }
-        if model.switchingIP != nil { return "正在应用节点，完成后即可开始测速" }
-        if let parameterValidationMessage {
-            return "完整测速设置需要检查：\(parameterValidationMessage)"
+    private var nodeSelectionDisabled: Bool {
+        guard model.state.launchPhase == .ready else { return true }
+        guard model.state.speedTestResultsAreCurrent else { return true }
+        if model.switchingIP != nil
+            || model.isCfstBusy
+            || model.isTemplateOperationBusy
+            || model.isRoutingModeChanging
+        {
+            return true
         }
-        guard model.state.launchPhase == .ready, !model.hasCfstExecutable else { return nil }
-        return "请在设置中安装 CloudflareSpeedTest"
+        guard case .idle = model.state.speedTest.phase else { return true }
+        switch model.state.xrayPhase {
+        case .validating, .starting, .stopping:
+            return true
+        case .stopped, .running, .failed:
+            return false
+        }
     }
 
-    private var proxyUnavailableMessage: String? {
-        guard model.state.runtimeOperation == nil else { return nil }
-        if model.isTemplateOperationBusy { return "代理配置操作进行中" }
-        if model.switchingIP != nil { return "正在应用节点" }
+    private var proxyStartDisabled: Bool {
+        guard model.state.launchPhase == .ready else { return true }
+        if model.state.runtimeOperation != nil
+            || model.isTemplateOperationBusy
+            || model.switchingIP != nil
+            || !model.hasXrayExecutable
+            || !model.isProxyConfigurationReady
+        {
+            return true
+        }
+        return model.requiresSelectedNodeForProxy
+            && model.state.preferences.selectedIP.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var proxyRestartDisabled: Bool {
+        model.switchingIP != nil
+            || model.isTemplateOperationBusy
+            || model.state.runtimeOperation != nil
+    }
+
+    private var canStartFullSpeedTest: Bool {
+        guard model.state.launchPhase == .ready else { return false }
+        guard model.state.runtimeOperation == nil,
+            !model.isTemplateOperationBusy,
+            model.switchingIP == nil,
+            !model.isCfstBusy,
+            model.hasCfstExecutable
+        else { return false }
+        do {
+            _ = try model.parameters.validated()
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private var systemProxyRequestedBinding: Binding<Bool> {
+        Binding {
+            model.state.localProxyConfiguration.systemProxyEnabled
+        } set: { enabled in
+            model.setSystemProxyEnabled(enabled)
+        }
+    }
+
+    private var systemProxyToggleDisabled: Bool {
+        guard model.state.launchPhase == .ready else { return true }
+        if model.isRoutingModeChanging
+            || model.state.runtimeOperation != nil
+            || model.isTemplateOperationBusy
+            || model.switchingIP != nil
+        {
+            return true
+        }
         switch model.state.xrayPhase {
-        case .validating, .starting, .running, .stopping:
-            return nil
-        case .stopped, .failed:
+        case .validating, .starting, .stopping:
+            return true
+        case .stopped, .running, .failed:
             break
         }
-        if model.requiresSelectedNodeForProxy
-            && model.state.preferences.selectedIP.isEmpty
-        {
-            return "请先打开 ViaSix 选择节点"
-        }
-        if let issue = model.proxyConfigurationIssue {
-            return "请在设置中修复代理配置：\(issue)"
-        }
-        guard !model.hasXrayExecutable else { return nil }
-        return "请在设置中安装 Xray-core"
+        return model.isSystemProxyTransitioning
     }
 
-    private func copyToPasteboard(_ value: String, label: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(value, forType: .string)
-
-        let notice = "已复制\(label)"
-        copyNotice = notice
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(2))
-            if copyNotice == notice {
-                copyNotice = nil
-            }
+    private func routingModeBinding(for mode: ProxyRoutingMode) -> Binding<Bool> {
+        Binding {
+            model.state.localProxyConfiguration.routingMode == mode
+        } set: { isSelected in
+            guard isSelected else { return }
+            model.setRoutingMode(mode)
         }
     }
 
-    private func openMainWindow() {
+    private func nodeSelectionBinding(for ip: String) -> Binding<Bool> {
+        Binding {
+            model.state.preferences.selectedIP == ip
+        } set: { isSelected in
+            guard isSelected else { return }
+            model.selectIP(ip)
+        }
+    }
+
+    private func nodeHelp(for result: SpeedTestResult) -> String {
+        let metrics = result.performanceSummary
+        return metrics == "暂无有效测速指标" ? result.ip : "\(result.ip) · \(metrics)"
+    }
+
+    private func presentationIcon(_ presentation: SidebarProxyPresentation) -> String {
+        if presentation.tone == .negative {
+            return "exclamationmark.triangle.fill"
+        }
+        return switch presentation.action {
+        case .startProxy: "play.circle"
+        case .stopProxy: presentation.isBusy ? "hourglass" : "checkmark.circle.fill"
+        case .none:
+            "hourglass"
+        }
+    }
+
+    private func statusAccessibilityValue(_ presentation: SidebarProxyPresentation) -> String {
+        if let detail = presentation.detailText {
+            return "\(presentation.statusTitle)，\(detail)"
+        }
+        return presentation.statusTitle
+    }
+
+    private func systemProxyStatusIcon(_ presentation: SystemProxyStatusPresentation) -> String {
+        switch presentation.tone {
+        case .active: "checkmark.circle.fill"
+        case .pending: "hourglass"
+        case .error: "exclamationmark.triangle.fill"
+        case .neutral: "circle"
+        }
+    }
+
+    private func openMainWindow(_ section: AppSection) {
+        router.select(section)
         openWindow(id: "main")
         NSApplication.shared.activate(ignoringOtherApps: true)
     }
