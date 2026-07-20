@@ -6,129 +6,246 @@ struct LocalProxySettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var configuration = LocalProxyConfiguration()
+    @State private var originalConfiguration: LocalProxyConfiguration?
     @State private var portText = "11451"
     @State private var isLoading = true
     @State private var isSaving = false
     @State private var errorMessage: String?
+    @State private var showsDiscardConfirmation = false
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: 16) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("本机代理设置")
-                        .font(.title3.weight(.semibold))
-                    Text("设置代理模式、网络接入、本地监听和协议行为。")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+            AppPageHeader("本机代理", subtitle: "代理模式、macOS 接入与本地监听") {
+                Button {
+                    requestDismiss()
+                } label: {
+                    Image(systemName: "xmark")
                 }
-                Spacer()
-                Button("取消") { dismiss() }
-                    .disabled(isSaving)
+                .buttonStyle(.borderless)
+                .iconButtonHitTarget()
+                .help("关闭")
+                .accessibilityLabel("关闭本机代理设置")
+                .keyboardShortcut(.cancelAction)
+                .disabled(isSaving)
             }
-            .padding(22)
+            .padding(.horizontal, VisualStyle.spacing20)
+            .padding(.vertical, VisualStyle.spacing4)
             Divider()
 
             if isLoading {
                 ProgressView("正在读取本机设置…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        ProxySectionCard(title: "代理模式") {
-                            ProxyRoutingModePicker(
-                                selection: $configuration.routingMode,
-                                isDisabled: isSaving
-                            )
-                            Text("模式只影响进入本地代理的连接；系统代理是否开启在网络接入中单独控制。")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        ProxySectionCard(title: "网络接入") {
-                            Toggle(
-                                "启动本地代理时使用系统代理",
-                                isOn: $configuration.systemProxyEnabled
-                            )
-                            Text("开启后，ViaSix 会在本地代理启动成功时配置 macOS 系统代理，并在停止时恢复原设置。")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Text("系统代理不会接管忽略 macOS 代理设置的应用流量。")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        ProxySectionCard(title: "监听") {
-                            localRow("监听地址") {
-                                TextField("127.0.0.1", text: $configuration.listenAddress)
-                                    .textFieldStyle(.roundedBorder)
-                            }
-                            localRow("监听端口") {
-                                TextField("11451", text: $portText)
-                                    .textFieldStyle(.roundedBorder)
-                                    .frame(width: 130)
-                            }
-                            Text("仅允许回环地址，避免意外暴露给局域网。")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        ProxySectionCard(title: "协议行为") {
-                            Toggle("启用 UDP", isOn: $configuration.udpEnabled)
-                            Toggle("启用协议嗅探", isOn: $configuration.sniffingEnabled)
-                            Toggle("私有地址直连", isOn: $configuration.bypassPrivateNetworks)
-                            Text("UDP 仅在客户端通过 SOCKS5/兼容协议发起时生效；它不会把系统流量自动变成 TUN。")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        ProxySectionCard(title: "日志") {
-                            Picker("Xray 日志级别", selection: $configuration.logLevel) {
-                                ForEach(XrayLogLevel.allCases, id: \.self) { level in
-                                    Text(level.displayName).tag(level)
-                                }
-                            }
-                            .pickerStyle(.menu)
-                        }
-                        if let errorMessage {
-                            Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                                .font(.caption)
-                                .foregroundStyle(.red)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        HStack {
-                            Spacer()
-                            Button("取消") { dismiss() }
-                                .disabled(isSaving)
-                            Button {
-                                save()
-                            } label: {
-                                HStack(spacing: 6) {
-                                    if isSaving { ProgressView().controlSize(.small) }
-                                    Text(isSaving ? "正在保存…" : "保存本机设置")
-                                }
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(isSaving)
-                        }
-                    }
-                    .padding(22)
-                }
+                editor
             }
         }
-        .frame(minWidth: 560, minHeight: 520)
+        .frame(minWidth: 680, minHeight: 620)
         .background(VisualStyle.pageBackground)
         .task { load() }
-        .interactiveDismissDisabled(isSaving)
+        .interactiveDismissDisabled(isSaving || hasUnsavedChanges)
+        .alert("放弃未保存的更改？", isPresented: $showsDiscardConfirmation) {
+            Button("继续编辑", role: .cancel) {}
+            Button("放弃更改", role: .destructive) { dismiss() }
+        } message: {
+            Text("关闭后，本次对本机代理设置的修改将不会保留。")
+        }
+    }
+
+    private var editor: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: VisualStyle.spacing16) {
+                LazyVGrid(
+                    columns: [
+                        GridItem(
+                            .flexible(),
+                            spacing: VisualStyle.spacing16,
+                            alignment: .top
+                        ),
+                        GridItem(.flexible(), alignment: .top),
+                    ],
+                    alignment: .leading,
+                    spacing: VisualStyle.spacing16
+                ) {
+                    routingModeSection
+                    networkAccessSection
+                }
+
+                listenerSection
+                behaviorSection
+
+                if let errorMessage {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                editorFooter
+            }
+            .padding(VisualStyle.spacing20)
+        }
+        .scrollbarSafeContent()
+    }
+
+    private var routingModeSection: some View {
+        ConfigurationSection("代理模式", systemImage: configuration.routingMode.appSystemImage) {
+            ProxyRoutingModePicker(
+                selection: $configuration.routingMode,
+                isDisabled: isSaving,
+                showsDescription: false
+            )
+            Text(configuration.routingMode.appDescription)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var networkAccessSection: some View {
+        ConfigurationSection("网络接入", systemImage: "network") {
+            SettingRow(
+                "系统代理",
+                detail: configuration.systemProxyEnabled
+                    ? "本地代理运行时自动接入 macOS"
+                    : "不修改 macOS 系统代理"
+            ) {
+                Toggle("系统代理", isOn: $configuration.systemProxyEnabled)
+                    .labelsHidden()
+                    .disabled(isSaving)
+            }
+
+            Text(systemProxyCurrentStateDescription)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var listenerSection: some View {
+        ConfigurationSection("本地监听", systemImage: "dot.radiowaves.left.and.right") {
+            localRow("监听地址") {
+                TextField("127.0.0.1", text: $configuration.listenAddress)
+                    .textFieldStyle(.roundedBorder)
+            }
+            localRow("监听端口") {
+                TextField("11451", text: $portText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 130)
+            }
+            Text("仅允许 localhost、127.0.0.0/8 或 ::1。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var behaviorSection: some View {
+        ConfigurationSection("连接行为", systemImage: "switch.2") {
+            behaviorRow(
+                "UDP",
+                detail: "允许兼容客户端通过本地代理转发 UDP",
+                isOn: $configuration.udpEnabled
+            )
+            Divider()
+            behaviorRow(
+                "协议嗅探",
+                detail: "识别连接中的域名以改善路由判断",
+                isOn: $configuration.sniffingEnabled
+            )
+            Divider()
+            behaviorRow(
+                "私有地址直连",
+                detail: "局域网与本机地址不经过代理服务器",
+                isOn: $configuration.bypassPrivateNetworks
+            )
+            Divider()
+            SettingRow("日志级别", detail: "Xray 运行日志") {
+                Picker("Xray 日志级别", selection: $configuration.logLevel) {
+                    ForEach(XrayLogLevel.allCases, id: \.self) { level in
+                        Text(level.displayName).tag(level)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(width: 130)
+                .disabled(isSaving)
+            }
+        }
+    }
+
+    private func behaviorRow(
+        _ title: String,
+        detail: String,
+        isOn: Binding<Bool>
+    ) -> some View {
+        SettingRow(title, detail: detail) {
+            Toggle(title, isOn: isOn)
+                .labelsHidden()
+                .disabled(isSaving)
+        }
+    }
+
+    private var editorFooter: some View {
+        HStack(spacing: VisualStyle.spacing12) {
+            Label(endpointSummary, systemImage: "dot.radiowaves.left.and.right")
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            Button("取消") { requestDismiss() }
+                .disabled(isSaving)
+
+            Button {
+                save()
+            } label: {
+                HStack(spacing: 6) {
+                    if isSaving {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    Text(isSaving ? "正在保存…" : "保存本机设置")
+                }
+                .frame(minWidth: 104)
+            }
+            .buttonStyle(.borderedProminent)
+            .keyboardShortcut("s", modifiers: .command)
+            .disabled(isSaving)
+        }
+        .padding(.top, VisualStyle.spacing4)
     }
 
     private func localRow<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        HStack(alignment: .center, spacing: VisualStyle.spacing12) {
             Text(title)
-                .font(.caption.weight(.medium))
-                .frame(width: 100, alignment: .leading)
+                .font(.callout.weight(.medium))
+                .frame(width: 112, alignment: .leading)
             content()
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(minHeight: VisualStyle.controlHeight)
+    }
+
+    private var endpointSummary: String {
+        let host = configuration.listenAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayHost = host.isEmpty ? "未填写地址" : host
+        return "\(displayHost):\(portText)"
+    }
+
+    private var hasUnsavedChanges: Bool {
+        guard let originalConfiguration else { return false }
+        return configuration != originalConfiguration
+            || portText != String(originalConfiguration.port)
+    }
+
+    private var systemProxyCurrentStateDescription: String {
+        let presentation = SystemProxyStatusPresentation(
+            phase: model.state.systemProxyPhase,
+            isRequested: model.state.localProxyConfiguration.systemProxyEnabled
+        )
+        if case .failed(let message) = model.state.systemProxyPhase {
+            return "当前状态：\(presentation.text)。\(message)"
+        }
+        return "当前状态：\(presentation.text)。"
     }
 
     private func load() {
@@ -141,6 +258,7 @@ struct LocalProxySettingsView: View {
             portText = String(configuration.port)
             errorMessage = "读取本机设置失败：\(error.localizedDescription)"
         }
+        originalConfiguration = configuration
         isLoading = false
     }
 
@@ -166,6 +284,14 @@ struct LocalProxySettingsView: View {
             }
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func requestDismiss() {
+        if hasUnsavedChanges {
+            showsDiscardConfirmation = true
+        } else {
+            dismiss()
         }
     }
 }

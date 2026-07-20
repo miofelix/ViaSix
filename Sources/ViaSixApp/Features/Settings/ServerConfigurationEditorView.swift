@@ -1,11 +1,27 @@
 import SwiftUI
 import ViaSixCore
 
+enum ServerConfigurationInputMode: String, CaseIterable, Identifiable {
+    case manual
+    case shareLink
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .manual: "手动配置"
+        case .shareLink: "分享链接"
+        }
+    }
+}
+
 struct ServerConfigurationEditorView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
     @State private var profile = XrayServerProfile()
+    @State private var originalProfile: XrayServerProfile?
+    @State private var inputMode: ServerConfigurationInputMode
     @State private var serverPortText = "443"
     @State private var shareLink = ""
     @State private var shareLinkError: String?
@@ -13,6 +29,11 @@ struct ServerConfigurationEditorView: View {
     @State private var isSaving = false
     @State private var loadError: String?
     @State private var saveError: String?
+    @State private var showsDiscardConfirmation = false
+
+    init(initialInputMode: ServerConfigurationInputMode = .manual) {
+        _inputMode = State(initialValue: initialInputMode)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -22,263 +43,449 @@ struct ServerConfigurationEditorView: View {
                 ProgressView("正在读取服务器配置…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let loadError {
-                ContentUnavailableView(
-                    "无法使用可视化编辑器",
-                    systemImage: "curlybraces.square",
-                    description: Text(loadError)
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                loadFailureView(loadError)
             } else {
                 form
             }
         }
-        .frame(minWidth: 650, minHeight: 620)
+        .frame(minWidth: 700, minHeight: editorMinimumHeight)
         .background(VisualStyle.pageBackground)
+        .animation(VisualStyle.standardAnimation, value: editorMinimumHeight)
         .task { load() }
         .onChange(of: profile.protocolName) { _, protocolName in
-            if protocolName == .shadowsocks {
-                profile.transport = .tcp
-                profile.security = .none
-                if profile.encryption == "none" {
-                    profile.encryption = "chacha20-ietf-poly1305"
-                }
-            } else if protocolName == .trojan, profile.security == .none {
-                profile.security = .tls
-            }
+            applyProtocolDefaults(for: protocolName)
         }
-        .interactiveDismissDisabled(isSaving)
+        .interactiveDismissDisabled(isSaving || hasUnsavedChanges)
+        .alert("放弃未保存的更改？", isPresented: $showsDiscardConfirmation) {
+            Button("继续编辑", role: .cancel) {}
+            Button("放弃更改", role: .destructive) { dismiss() }
+        } message: {
+            Text("关闭后，本次对服务器连接的修改将不会保留。")
+        }
     }
 
     private var header: some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("服务器连接配置")
-                    .font(.title3.weight(.semibold))
-                Text("填写远端服务器参数。本机监听地址和端口可在“本机代理设置”中管理。")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+        AppPageHeader("服务器连接", subtitle: "远端协议、传输与安全参数") {
+            Button {
+                requestDismiss()
+            } label: {
+                Image(systemName: "xmark")
             }
-            Spacer()
-            Button("取消") { dismiss() }
-                .keyboardShortcut(.cancelAction)
-                .disabled(isSaving)
+            .buttonStyle(.borderless)
+            .iconButtonHitTarget()
+            .help("关闭")
+            .accessibilityLabel("关闭服务器连接设置")
+            .keyboardShortcut(.cancelAction)
+            .disabled(isSaving)
         }
-        .padding(22)
+        .padding(.horizontal, VisualStyle.spacing20)
+        .padding(.vertical, VisualStyle.spacing4)
     }
 
     private var form: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                ProxySectionCard(title: "从分享链接填写") {
-                    HStack(spacing: 10) {
-                        TextField("vless://、vmess://、trojan:// 或 ss://", text: $shareLink)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(.body, design: .monospaced))
-                        Button("读取") { parseShareLink() }
-                            .buttonStyle(.bordered)
-                            .disabled(shareLink.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            VStack(alignment: .leading, spacing: VisualStyle.spacing16) {
+                ConfigurationSection("配置方式", systemImage: "square.and.pencil") {
+                    Picker("配置方式", selection: $inputMode) {
+                        ForEach(ServerConfigurationInputMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
                     }
-                    if let shareLinkError {
-                        Text(shareLinkError)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                            .fixedSize(horizontal: false, vertical: true)
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(maxWidth: 360)
+                    .disabled(isSaving)
+
+                    if inputMode == .shareLink {
+                        shareLinkForm
                     } else {
-                        Text("支持 VLESS、VMess、Trojan 和 Shadowsocks 分享链接。读取后可以继续修改字段。")
+                        Text("填写服务器提供的连接参数；保存前会检查必填字段。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
 
-                ProxySectionCard(title: "服务器") {
-                    fieldRow("协议") {
-                        Picker("协议", selection: $profile.protocolName) {
-                            ForEach(XrayServerProtocol.allCases, id: \.self) { protocolName in
-                                Text(protocolName.displayName).tag(protocolName)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(width: 180)
-                    }
-                    fieldRow("服务器地址") {
-                        TextField("域名或 IP", text: $profile.serverAddress)
-                            .textFieldStyle(.roundedBorder)
-                    }
-                    fieldRow("服务器端口") {
-                        TextField("443", text: $serverPortText)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 120)
-                    }
-                    fieldRow(profile.protocolName == .trojan || profile.protocolName == .shadowsocks ? "密码" : "UUID") {
-                        TextField(
-                            profile.protocolName == .trojan || profile.protocolName == .shadowsocks
-                                ? "服务器密码"
-                                : "服务器提供的 UUID",
-                            text: $profile.userID
-                        )
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(.body, design: .monospaced))
-                    }
-                    if profile.protocolName == .vless {
-                        fieldRow("加密") {
-                            TextField("none", text: $profile.encryption)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(width: 180)
-                        }
-                        fieldRow("Flow（可选）") {
-                            TextField("例如 xtls-rprx-vision", text: $profile.flow)
-                                .textFieldStyle(.roundedBorder)
-                        }
-                    } else if profile.protocolName == .vmess {
-                        fieldRow("Alter ID") {
-                            TextField("0", value: $profile.alterID, format: .number)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(width: 120)
-                        }
-                        fieldRow("加密方式") {
-                            TextField("auto", text: $profile.vmessSecurity)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(width: 180)
-                        }
-                    } else if profile.protocolName == .shadowsocks {
-                        fieldRow("加密算法") {
-                            TextField("例如 chacha20-ietf-poly1305", text: $profile.encryption)
-                                .textFieldStyle(.roundedBorder)
-                        }
-                    }
+                if inputMode == .manual {
+                    manualConfigurationForm
                 }
 
-                if profile.protocolName != .shadowsocks {
-                    ProxySectionCard(title: "传输") {
-                        fieldRow("传输方式") {
-                            Picker("传输方式", selection: $profile.transport) {
-                                ForEach(XrayTransport.allCases, id: \.self) { transport in
-                                    Text(transport.displayName).tag(transport)
-                                }
-                            }
-                            .labelsHidden()
-                            .frame(width: 180)
-                        }
-                        if profile.transport == .websocket {
-                            fieldRow("WebSocket Host") {
-                                TextField("通常与 Server Name 相同", text: $profile.host)
-                                    .textFieldStyle(.roundedBorder)
-                            }
-                            fieldRow("路径") {
-                                TextField("/", text: $profile.path)
-                                    .textFieldStyle(.roundedBorder)
-                            }
-                        } else if profile.transport == .grpc {
-                            fieldRow("Service Name") {
-                                TextField("gRPC 服务名", text: $profile.serviceName)
-                                    .textFieldStyle(.roundedBorder)
-                            }
-                        }
-                    }
+                editorFeedback
+                editorFooter
+            }
+            .padding(VisualStyle.spacing20)
+        }
+        .scrollbarSafeContent()
+    }
 
-                    ProxySectionCard(title: "安全") {
-                        fieldRow("安全方式") {
-                            Picker("安全方式", selection: $profile.security) {
-                                ForEach(XrayTransportSecurity.allCases, id: \.self) { security in
-                                    Text(security.displayName).tag(security)
-                                }
-                            }
-                            .labelsHidden()
-                            .frame(width: 180)
-                        }
-                        if profile.security != .none {
-                            fieldRow("Server Name") {
-                                TextField("TLS/REALITY 的域名", text: $profile.serverName)
-                                    .textFieldStyle(.roundedBorder)
-                            }
-                            fieldRow("指纹") {
-                                TextField("chrome", text: $profile.fingerprint)
-                                    .textFieldStyle(.roundedBorder)
-                                    .frame(width: 180)
-                            }
-                        }
-                        if profile.security == .tls {
-                            Toggle("允许不安全 TLS（不推荐）", isOn: $profile.allowInsecure)
-                        } else if profile.security == .reality {
-                            fieldRow("公钥") {
-                                TextField("Reality publicKey", text: $profile.realityPublicKey)
-                                    .textFieldStyle(.roundedBorder)
-                                    .font(.system(.body, design: .monospaced))
-                            }
-                            fieldRow("Short ID") {
-                                TextField("可选", text: $profile.realityShortID)
-                                    .textFieldStyle(.roundedBorder)
-                                    .font(.system(.body, design: .monospaced))
-                            }
-                            fieldRow("Spider X") {
-                                TextField("可选", text: $profile.realitySpiderX)
-                                    .textFieldStyle(.roundedBorder)
-                            }
-                        }
-                    }
+    private var shareLinkForm: some View {
+        VStack(alignment: .leading, spacing: VisualStyle.spacing8) {
+            HStack(spacing: VisualStyle.spacing8) {
+                TextField("vless://、vmess://、trojan:// 或 ss://", text: $shareLink)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .onSubmit(parseShareLink)
+
+                Button("读取并继续", systemImage: "arrow.right") {
+                    parseShareLink()
                 }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    isSaving
+                        || shareLink.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
+            }
 
-                if let saveError {
-                    Label(saveError, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            if let shareLinkError {
+                Label(shareLinkError, systemImage: "exclamationmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("支持 VLESS、VMess、Trojan 和 Shadowsocks 分享链接。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.top, VisualStyle.spacing4)
+    }
 
-                HStack {
-                    Text("测速时选择的节点 IP 会自动写入服务器地址。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("取消") { dismiss() }
-                        .disabled(isSaving)
-                    Button {
-                        save()
-                    } label: {
-                        HStack(spacing: 6) {
-                            if isSaving { ProgressView().controlSize(.small) }
-                            Text(isSaving ? "正在保存…" : "保存服务器配置")
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(isSaving)
+    @ViewBuilder
+    private var manualConfigurationForm: some View {
+        ConfigurationSection("服务器", systemImage: "server.rack") {
+            serverFields
+        }
+
+        if profile.protocolName != .shadowsocks {
+            ConfigurationSection("传输", systemImage: "arrow.left.arrow.right") {
+                transportFields
+            }
+
+            ConfigurationSection("安全", systemImage: "lock.shield") {
+                securityFields
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var serverFields: some View {
+        fieldRow("协议") {
+            Picker("协议", selection: $profile.protocolName) {
+                ForEach(XrayServerProtocol.allCases, id: \.self) { protocolName in
+                    Text(protocolName.displayName).tag(protocolName)
                 }
             }
-            .padding(22)
+            .labelsHidden()
+            .frame(width: 180)
         }
+        fieldRow("服务器地址") {
+            TextField("域名或 IP", text: $profile.serverAddress)
+                .textFieldStyle(.roundedBorder)
+        }
+        fieldRow("服务器端口") {
+            TextField("443", text: $serverPortText)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 120)
+        }
+        fieldRow(credentialTitle) {
+            TextField(credentialPlaceholder, text: $profile.userID)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.body, design: .monospaced))
+        }
+
+        switch profile.protocolName {
+        case .vless:
+            fieldRow("加密") {
+                TextField("none", text: $profile.encryption)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 180)
+            }
+            fieldRow("Flow") {
+                TextField("可选，例如 xtls-rprx-vision", text: $profile.flow)
+                    .textFieldStyle(.roundedBorder)
+            }
+        case .vmess:
+            fieldRow("Alter ID") {
+                TextField("0", value: $profile.alterID, format: .number)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 120)
+            }
+            fieldRow("加密方式") {
+                TextField("auto", text: $profile.vmessSecurity)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 180)
+            }
+        case .shadowsocks:
+            fieldRow("加密算法") {
+                TextField("例如 chacha20-ietf-poly1305", text: $profile.encryption)
+                    .textFieldStyle(.roundedBorder)
+            }
+        case .trojan:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private var transportFields: some View {
+        fieldRow("传输方式") {
+            Picker("传输方式", selection: $profile.transport) {
+                ForEach(XrayTransport.allCases, id: \.self) { transport in
+                    Text(transport.displayName).tag(transport)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 180)
+        }
+
+        if profile.transport == .websocket {
+            fieldRow("WebSocket Host") {
+                TextField("通常与 Server Name 相同", text: $profile.host)
+                    .textFieldStyle(.roundedBorder)
+            }
+            fieldRow("路径") {
+                TextField("/", text: $profile.path)
+                    .textFieldStyle(.roundedBorder)
+            }
+        } else if profile.transport == .grpc {
+            fieldRow("Service Name") {
+                TextField("gRPC 服务名", text: $profile.serviceName)
+                    .textFieldStyle(.roundedBorder)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var securityFields: some View {
+        fieldRow("安全方式") {
+            Picker("安全方式", selection: $profile.security) {
+                ForEach(XrayTransportSecurity.allCases, id: \.self) { security in
+                    Text(security.displayName).tag(security)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 180)
+        }
+
+        if profile.security != .none {
+            fieldRow("Server Name") {
+                TextField("TLS/REALITY 的域名", text: $profile.serverName)
+                    .textFieldStyle(.roundedBorder)
+            }
+            fieldRow("指纹") {
+                TextField("chrome", text: $profile.fingerprint)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 180)
+            }
+        }
+
+        if profile.security == .tls {
+            fieldRow("证书校验") {
+                Toggle("允许不安全 TLS", isOn: $profile.allowInsecure)
+                    .help("仅在服务器证书无法正常验证且你了解风险时开启")
+            }
+        } else if profile.security == .reality {
+            fieldRow("公钥") {
+                TextField("Reality publicKey", text: $profile.realityPublicKey)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+            }
+            fieldRow("Short ID") {
+                TextField("可选", text: $profile.realityShortID)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+            }
+            fieldRow("Spider X") {
+                TextField("可选", text: $profile.realitySpiderX)
+                    .textFieldStyle(.roundedBorder)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var editorFeedback: some View {
+        if let saveError {
+            Label(saveError, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.red)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var editorFooter: some View {
+        HStack(spacing: VisualStyle.spacing12) {
+            if inputMode == .manual {
+                Label(
+                    "\(profile.protocolName.displayName) · \(serverAddressSummary)",
+                    systemImage: "server.rack"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            } else {
+                Text("读取链接后可以检查并修改所有字段")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Button("取消") { requestDismiss() }
+                .disabled(isSaving)
+
+            Button {
+                save()
+            } label: {
+                HStack(spacing: 6) {
+                    if isSaving {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    Text(isSaving ? "正在保存…" : "保存服务器")
+                }
+                .frame(minWidth: 96)
+            }
+            .buttonStyle(.borderedProminent)
+            .keyboardShortcut("s", modifiers: .command)
+            .disabled(isSaving || inputMode != .manual)
+        }
+        .padding(.top, VisualStyle.spacing4)
+    }
+
+    private var credentialTitle: String {
+        profile.protocolName == .trojan || profile.protocolName == .shadowsocks
+            ? "密码"
+            : "UUID"
+    }
+
+    private var credentialPlaceholder: String {
+        profile.protocolName == .trojan || profile.protocolName == .shadowsocks
+            ? "服务器密码"
+            : "服务器提供的 UUID"
+    }
+
+    private var serverAddressSummary: String {
+        let address = profile.serverAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        return address.isEmpty ? "未填写地址" : "\(address):\(serverPortText)"
+    }
+
+    private var editorMinimumHeight: CGFloat {
+        if !isLoading, loadError == nil, inputMode == .shareLink {
+            return 420
+        }
+        return 640
+    }
+
+    private var hasUnsavedChanges: Bool {
+        if inputMode == .shareLink,
+            !shareLink.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            return true
+        }
+        guard let originalProfile else { return false }
+        guard let port = Int(serverPortText.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            return true
+        }
+        var currentProfile = profile
+        currentProfile.serverPort = port
+        return currentProfile != originalProfile
+    }
+
+    private func loadFailureView(_ message: String) -> some View {
+        VStack(spacing: VisualStyle.spacing16) {
+            ContentUnavailableView(
+                "无法使用表单读取当前配置",
+                systemImage: "curlybraces.square",
+                description: Text(message)
+            )
+
+            HStack(spacing: VisualStyle.spacing8) {
+                Button("使用分享链接重新配置", systemImage: "link") {
+                    beginReplacement(using: .shareLink)
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button("手动重新配置", systemImage: "slider.horizontal.3") {
+                    beginReplacement(using: .manual)
+                }
+
+                Button("关闭") {
+                    dismiss()
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(VisualStyle.spacing24)
     }
 
     private func fieldRow<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        HStack(alignment: .center, spacing: VisualStyle.spacing12) {
             Text(title)
-                .font(.caption.weight(.medium))
-                .frame(width: 118, alignment: .leading)
+                .font(.callout.weight(.medium))
+                .frame(width: 128, alignment: .leading)
             content()
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(minHeight: VisualStyle.controlHeight)
     }
 
     private func load() {
+        guard FileManager.default.fileExists(atPath: model.paths.serverConfig.path) else {
+            profile = XrayServerProfile()
+            serverPortText = String(profile.serverPort)
+            originalProfile = profile
+            loadError = nil
+            isLoading = false
+            return
+        }
+
         do {
             let data = try Data(contentsOf: model.paths.serverConfig)
             profile = try ConfigTemplate.serverProfile(in: data)
+            applyProtocolDefaults(for: profile.protocolName)
             serverPortText = String(profile.serverPort)
+            originalProfile = profile
             loadError = nil
         } catch {
             loadError =
-                "当前服务器配置不是可视化编辑器支持的 VLESS、VMess、Trojan 或 Shadowsocks 出站结构。你仍可以返回设置，使用“高级 JSON”编辑器管理它。\n\n\(error.localizedDescription)"
+                "当前服务器配置包含表单无法识别的结构。可以使用高级 JSON 保留全部字段，或明确选择重新配置。\n\n\(error.localizedDescription)"
         }
         isLoading = false
+    }
+
+    private func beginReplacement(using mode: ServerConfigurationInputMode) {
+        profile = XrayServerProfile()
+        serverPortText = String(profile.serverPort)
+        originalProfile = profile
+        shareLink = ""
+        shareLinkError = nil
+        saveError = nil
+        loadError = nil
+        inputMode = mode
     }
 
     private func parseShareLink() {
         shareLinkError = nil
         do {
             profile = try ServerShareLinkParser.profile(from: shareLink)
+            applyProtocolDefaults(for: profile.protocolName)
             serverPortText = String(profile.serverPort)
+            saveError = nil
+            withAnimation(VisualStyle.standardAnimation) {
+                inputMode = .manual
+            }
         } catch {
             shareLinkError = error.localizedDescription
+        }
+    }
+
+    private func applyProtocolDefaults(for protocolName: XrayServerProtocol) {
+        if protocolName == .shadowsocks {
+            profile.transport = .tcp
+            profile.security = .none
+            if profile.encryption == "none" {
+                profile.encryption = "chacha20-ietf-poly1305"
+            }
+        } else if protocolName == .trojan, profile.security == .none {
+            profile.security = .tls
         }
     }
 
@@ -306,24 +513,12 @@ struct ServerConfigurationEditorView: View {
             saveError = error.localizedDescription
         }
     }
-}
 
-struct ProxySectionCard<Content: View>: View {
-    let title: String
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(.headline)
-            content
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.quaternary.opacity(0.26), in: RoundedRectangle(cornerRadius: 10))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(VisualStyle.surfaceBorder.opacity(0.78))
+    private func requestDismiss() {
+        if hasUnsavedChanges {
+            showsDiscardConfirmation = true
+        } else {
+            dismiss()
         }
     }
 }

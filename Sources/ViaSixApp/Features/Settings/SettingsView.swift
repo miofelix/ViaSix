@@ -7,23 +7,18 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var showsCustomExecutables = false
     @State private var showsTemplateEditor = false
-    @State private var showsServerEditor = false
     @State private var showsLocalProxyEditor = false
+    @State private var presentedServerEditorMode: ServerConfigurationInputMode?
     @State private var exitIPEndpointDraft = ""
     @State private var exitIPEndpointError: String?
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("设置")
-                        .font(.title2.weight(.semibold))
-                    Text("代理配置、运行组件与应用数据")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
+            VStack(alignment: .leading, spacing: VisualStyle.spacing20) {
+                AppPageHeader("设置", subtitle: "连接、网络接入与运行组件")
 
-                proxyConfigurationCard
+                serverConfigurationCard
+                localProxyCard
                 runtimeCard
                 dataCard
             }
@@ -44,69 +39,70 @@ struct SettingsView: View {
     }
 
     private var runtimeCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Label("运行组件", systemImage: "shippingbox")
-                    .font(.headline)
-                Spacer()
+        SurfaceCard {
+            CardHeader("运行组件", systemImage: "shippingbox") {
                 runtimeBadge
             }
-
-            componentRow(
-                component: .cfst,
-                url: resolvedDisplayURL(for: .cfst),
-                ready: componentReady(.cfst)
-            )
-            Divider()
-            componentRow(
-                component: .xray,
-                url: resolvedDisplayURL(for: .xray),
-                ready: componentReady(.xray)
-            )
-
-            HStack {
-                Button(runtimeInstallTitle, systemImage: "arrow.down.circle") {
-                    model.installRuntime()
-                }
-                .disabled(runtimeActionsDisabled)
-
-                Button("导入本地组件", systemImage: "square.and.arrow.down") {
-                    importRuntime()
-                }
-                .disabled(runtimeActionsDisabled)
-
-                Spacer()
-
-                if model.state.runtimeOperation?.canCancel == true {
-                    Button("取消", systemImage: "xmark.circle") {
-                        model.cancelRuntimeOperation()
-                    }
-                }
-            }
-
-            runtimeOperationStatus
-
-            if let issue = model.runtimeIntegrityIssue {
-                Label(issue, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Text("自动安装会获取上游最新正式版本，并使用 Release 提供的 SHA-256 校验完整性。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            if let message = model.state.runtimeOperationError {
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
             Divider()
 
             VStack(alignment: .leading, spacing: 0) {
+                componentRow(
+                    component: .cfst,
+                    url: resolvedDisplayURL(for: .cfst),
+                    ready: componentReady(.cfst)
+                )
+                Divider()
+                    .padding(.leading, 52)
+                componentRow(
+                    component: .xray,
+                    url: resolvedDisplayURL(for: .xray),
+                    ready: componentReady(.xray)
+                )
+
+                Divider()
+
+                HStack(spacing: VisualStyle.spacing8) {
+                    Button(runtimeInstallTitle, systemImage: "arrow.down.circle") {
+                        model.installRuntime()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(runtimeActionsDisabled)
+
+                    Button("导入组件", systemImage: "square.and.arrow.down") {
+                        importRuntime()
+                    }
+                    .disabled(runtimeActionsDisabled)
+
+                    Spacer()
+
+                    if model.state.runtimeOperation?.canCancel == true {
+                        Button("取消", systemImage: "xmark.circle") {
+                            model.cancelRuntimeOperation()
+                        }
+                    }
+                }
+                .padding(.vertical, VisualStyle.spacing12)
+
+                runtimeOperationStatus
+
+                if let issue = model.runtimeIntegrityIssue {
+                    Label(issue, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, VisualStyle.spacing12)
+                }
+
+                if let message = model.state.runtimeOperationError {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, VisualStyle.spacing12)
+                }
+
+                Divider()
+
                 DisclosureControl(
                     title: "自定义可执行文件",
                     summary: "指定开发版或自行构建的组件",
@@ -142,10 +138,9 @@ struct SettingsView: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
+            .padding(.horizontal, VisualStyle.spacing16)
+            .padding(.bottom, VisualStyle.spacing12)
         }
-        .padding(22)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardStyle()
     }
 
     @ViewBuilder
@@ -164,98 +159,128 @@ struct SettingsView: View {
         }
     }
 
-    private var proxyConfigurationCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label("代理配置", systemImage: "point.3.connected.trianglepath.dotted")
-                .font(.headline)
-
-            Text("填写服务器连接参数，并按需设置本机监听端口、UDP 和协议行为。VLESS、VMess、Trojan 和 Shadowsocks 连接可以直接使用表单。")
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack(spacing: 8) {
-                Text("本地端点")
-                    .font(.caption.weight(.medium))
-                Text(model.state.proxyEndpoint.displayAddress)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-            }
-
-            HStack(spacing: 10) {
-                Button("配置服务器", systemImage: "server.rack") {
-                    showsServerEditor = true
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(
-                    proxyImportDisabled
-                        || !FileManager.default.fileExists(atPath: model.paths.serverConfig.path)
+    private var serverConfigurationCard: some View {
+        SurfaceCard {
+            CardHeader("服务器连接", systemImage: "server.rack", tone: serverStatusTone) {
+                StatusBadge(
+                    serverStatusTitle,
+                    tone: serverStatusTone,
+                    systemImage: serverStatusSystemImage
                 )
-                .help("填写服务器地址之外的远端连接参数")
+            }
+            Divider()
 
-                Button("本机代理设置", systemImage: "laptopcomputer.and.iphone") {
-                    showsLocalProxyEditor = true
-                }
-                .disabled(proxyImportDisabled)
+            VStack(alignment: .leading, spacing: 0) {
+                SettingRow(
+                    "连接方式",
+                    detail: "VLESS、VMess、Trojan、Shadowsocks",
+                    systemImage: "point.3.connected.trianglepath.dotted"
+                ) {
+                    HStack(spacing: VisualStyle.spacing8) {
+                        Button("分享链接", systemImage: "link") {
+                            presentedServerEditorMode = .shareLink
+                        }
+                        .disabled(serverEditorDisabled)
 
-                Menu {
-                    Button("高级 JSON 编辑器", systemImage: "curlybraces.square") {
-                        showsTemplateEditor = true
+                        Button("手动配置", systemImage: "slider.horizontal.3") {
+                            presentedServerEditorMode = .manual
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(serverEditorDisabled)
                     }
-                    .disabled(
-                        proxyImportDisabled
-                            || !FileManager.default.fileExists(atPath: model.paths.templateConfig.path)
-                    )
-                    Button("导入完整 Xray JSON…", systemImage: "square.and.arrow.down") {
-                        importXrayTemplate()
+                }
+
+                Divider()
+                    .padding(.leading, 52)
+
+                SettingRow(
+                    "高级配置",
+                    detail: "直接编辑或导入 Xray JSON",
+                    systemImage: "curlybraces.square"
+                ) {
+                    Menu {
+                        Button("编辑服务器 JSON", systemImage: "curlybraces.square") {
+                            showsTemplateEditor = true
+                        }
+                        .disabled(!serverConfigurationExists)
+
+                        Button("导入完整 Xray JSON…", systemImage: "square.and.arrow.down") {
+                            importXrayTemplate()
+                        }
+                    } label: {
+                        Label("高级", systemImage: "ellipsis.circle")
                     }
                     .disabled(proxyImportDisabled)
-                } label: {
-                    Label("高级", systemImage: "ellipsis.circle")
                 }
-                .disabled(proxyImportDisabled)
-            }
 
-            if let templateOperationStatus {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text(templateOperationStatus)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel(templateOperationStatus)
-            } else if let error = model.state.templateOperationError {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if let issue = model.proxyConfigurationIssue {
-                Label("代理配置尚未就绪：\(issue)", systemImage: "exclamationmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if proxyImportDisabled {
-                Text(proxyImportBlockedMessage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("服务器参数和本机代理设置会保存在应用数据目录中。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                proxyConfigurationFeedback
             }
+            .padding(.horizontal, VisualStyle.spacing16)
+            .padding(.bottom, VisualStyle.spacing12)
         }
-        .padding(22)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardStyle()
         .sheet(isPresented: $showsTemplateEditor) {
             XrayTemplateEditorView()
                 .environment(model)
         }
-        .sheet(isPresented: $showsServerEditor) {
-            ServerConfigurationEditorView()
+        .sheet(item: $presentedServerEditorMode) { mode in
+            ServerConfigurationEditorView(initialInputMode: mode)
                 .environment(model)
+        }
+    }
+
+    private var localProxyCard: some View {
+        SurfaceCard {
+            CardHeader("本机代理", systemImage: "laptopcomputer", tone: .accent) {
+                Button("编辑", systemImage: "slider.horizontal.3") {
+                    showsLocalProxyEditor = true
+                }
+                .disabled(proxyImportDisabled)
+            }
+            Divider()
+
+            VStack(spacing: 0) {
+                SettingRow(
+                    "代理模式",
+                    detail: model.state.localProxyConfiguration.routingMode.appDescription,
+                    systemImage: model.state.localProxyConfiguration.routingMode.appSystemImage
+                ) {
+                    StatusBadge(
+                        model.state.localProxyConfiguration.routingMode.displayName,
+                        tone: .accent
+                    )
+                }
+
+                Divider()
+                    .padding(.leading, 52)
+
+                SettingRow(
+                    "系统代理",
+                    detail: systemProxyConfigurationDetail,
+                    systemImage: "network"
+                ) {
+                    StatusBadge(
+                        systemProxyPresentation.text,
+                        tone: systemProxyPresentation.appTone,
+                        systemImage: systemProxyStatusSystemImage
+                    )
+                }
+
+                Divider()
+                    .padding(.leading, 52)
+
+                SettingRow(
+                    "监听端点",
+                    detail: "HTTP 与 SOCKS 共用本地 mixed 入口",
+                    systemImage: "dot.radiowaves.left.and.right"
+                ) {
+                    Text(model.state.proxyEndpoint.displayAddress)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+            .padding(.horizontal, VisualStyle.spacing16)
+            .padding(.bottom, VisualStyle.spacing12)
         }
         .sheet(isPresented: $showsLocalProxyEditor) {
             LocalProxySettingsView()
@@ -264,99 +289,186 @@ struct SettingsView: View {
     }
 
     private var dataCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label("应用与数据", systemImage: "folder")
-                .font(.headline)
-            Text(model.paths.root.path)
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
+        SurfaceCard {
+            CardHeader("应用与数据", systemImage: "folder", tone: .neutral)
+            Divider()
 
-            Button("打开数据目录", systemImage: "folder") {
-                NSWorkspace.shared.open(model.paths.root)
+            VStack(alignment: .leading, spacing: 0) {
+                SettingRow(
+                    "数据目录",
+                    detail: model.paths.root.path,
+                    systemImage: "folder"
+                ) {
+                    Button("打开", systemImage: "arrow.up.right.square") {
+                        NSWorkspace.shared.open(model.paths.root)
+                    }
+                }
+
+                Divider()
+                    .padding(.leading, 52)
+
+                SettingRow(
+                    "出口 IP 检测服务",
+                    detail: exitIPEndpointError ?? "自动检测出口地址时使用",
+                    systemImage: "location"
+                ) {
+                    HStack(spacing: VisualStyle.spacing8) {
+                        TextField(
+                            AppMetadata.defaultExitIPEndpoint,
+                            text: $exitIPEndpointDraft
+                        )
+                        .textFieldStyle(.roundedBorder)
+                        .frame(minWidth: 220, idealWidth: 320, maxWidth: 380)
+                        .accessibilityLabel("出口 IP 检测服务地址")
+                        .accessibilityHint("使用 HTTP 或 HTTPS 地址")
+                        .onChange(of: exitIPEndpointDraft) { _, value in
+                            validateAndSaveExitIPEndpoint(value)
+                        }
+
+                        Button {
+                            exitIPEndpointDraft = AppMetadata.defaultExitIPEndpoint
+                            validateAndSaveExitIPEndpoint(exitIPEndpointDraft)
+                        } label: {
+                            Image(systemName: "arrow.counterclockwise")
+                        }
+                        .buttonStyle(.borderless)
+                        .iconButtonHitTarget()
+                        .help("恢复默认检测服务")
+                        .accessibilityLabel("恢复默认检测服务")
+                        .disabled(exitIPEndpointDraft == AppMetadata.defaultExitIPEndpoint)
+                    }
+                }
+
+                Divider()
+
+                HStack(spacing: VisualStyle.spacing8) {
+                    Button("使用帮助", systemImage: "questionmark.circle") {
+                        AppDocumentOpener.open(.userGuide)
+                    }
+                    Button("第三方许可", systemImage: "doc.plaintext") {
+                        AppDocumentOpener.open(.thirdPartyNotices)
+                    }
+                    Spacer()
+                }
+                .padding(.vertical, VisualStyle.spacing12)
             }
+            .padding(.horizontal, VisualStyle.spacing16)
+            .padding(.bottom, VisualStyle.spacing12)
+        }
+    }
 
-            Text("节点列表、测速结果、偏好设置和代理配置都保存在此目录。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("出口 IP 检测服务")
-                    .font(.caption.weight(.medium))
-                HStack(spacing: 8) {
-                    TextField(
-                        AppMetadata.defaultExitIPEndpoint,
-                        text: $exitIPEndpointDraft
-                    )
-                    .textFieldStyle(.roundedBorder)
-                    .accessibilityLabel("出口 IP 检测服务地址")
-                    .accessibilityHint("使用 HTTP 或 HTTPS 地址")
-                    .onChange(of: exitIPEndpointDraft) { _, value in
-                        validateAndSaveExitIPEndpoint(value)
-                    }
-
-                    Button {
-                        exitIPEndpointDraft = AppMetadata.defaultExitIPEndpoint
-                        validateAndSaveExitIPEndpoint(exitIPEndpointDraft)
-                    } label: {
-                        Image(systemName: "arrow.counterclockwise")
-                    }
-                    .buttonStyle(.borderless)
-                    .iconButtonHitTarget()
-                    .help("恢复默认检测服务")
-                    .accessibilityLabel("恢复默认检测服务")
-                    .disabled(exitIPEndpointDraft == AppMetadata.defaultExitIPEndpoint)
-                }
-                if let exitIPEndpointError {
-                    Text(exitIPEndpointError)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Text("自动模式使用此 HTTP/HTTPS 服务；强制 IPv4 或 IPv6 时使用对应的专用检测服务。")
+    @ViewBuilder
+    private var proxyConfigurationFeedback: some View {
+        if let templateOperationStatus {
+            Divider()
+            HStack(spacing: VisualStyle.spacing8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text(templateOperationStatus)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-
+            .padding(.vertical, VisualStyle.spacing12)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(templateOperationStatus)
+        } else if let error = model.state.templateOperationError {
             Divider()
-
-            HStack {
-                Button("使用帮助", systemImage: "questionmark.circle") {
-                    AppDocumentOpener.open(.userGuide)
-                }
-                Button("第三方许可", systemImage: "doc.plaintext") {
-                    AppDocumentOpener.open(.thirdPartyNotices)
-                }
-            }
+            Label(error, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.red)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.vertical, VisualStyle.spacing12)
+        } else if let issue = model.proxyConfigurationIssue {
+            Divider()
+            Label(issue, systemImage: "exclamationmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.vertical, VisualStyle.spacing12)
+        } else if proxyImportDisabled {
+            Divider()
+            Text(proxyImportBlockedMessage)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.vertical, VisualStyle.spacing12)
         }
-        .padding(22)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardStyle()
+    }
+
+    private var serverConfigurationExists: Bool {
+        FileManager.default.fileExists(atPath: model.paths.serverConfig.path)
+    }
+
+    private var serverEditorDisabled: Bool {
+        proxyImportDisabled
+    }
+
+    private var serverStatusTitle: String {
+        if model.state.templateOperationPhase != .idle { return "处理中" }
+        if model.state.templateOperationError != nil { return "操作失败" }
+        if !serverConfigurationExists { return "未配置" }
+        if model.proxyConfigurationIssue != nil { return "需要检查" }
+        return "可用"
+    }
+
+    private var serverStatusTone: AppTone {
+        if model.state.templateOperationPhase != .idle { return .accent }
+        if model.state.templateOperationError != nil { return .negative }
+        if !serverConfigurationExists || model.proxyConfigurationIssue != nil { return .warning }
+        return .positive
+    }
+
+    private var serverStatusSystemImage: String {
+        switch serverStatusTone {
+        case .accent: "arrow.triangle.2.circlepath"
+        case .positive: "checkmark.circle.fill"
+        case .warning: "exclamationmark.circle.fill"
+        case .negative: "xmark.circle.fill"
+        case .neutral: "circle"
+        }
+    }
+
+    private var systemProxyConfigurationDetail: String {
+        model.state.localProxyConfiguration.systemProxyEnabled
+            ? "启动本地代理后接入 macOS 系统代理"
+            : "启动本地代理时不修改 macOS 系统代理"
+    }
+
+    private var systemProxyPresentation: SystemProxyStatusPresentation {
+        SystemProxyStatusPresentation(
+            phase: model.state.systemProxyPhase,
+            isRequested: model.state.localProxyConfiguration.systemProxyEnabled
+        )
+    }
+
+    private var systemProxyStatusSystemImage: String {
+        if systemProxyPresentation.isTransitioning {
+            return "hourglass"
+        }
+        return switch systemProxyPresentation.tone {
+        case .active: "checkmark.circle.fill"
+        case .error: "exclamationmark.triangle.fill"
+        case .pending: "clock.fill"
+        case .neutral: "circle"
+        }
     }
 
     private var runtimeBadge: some View {
-        let (label, color): (String, Color) =
+        let (label, tone, systemImage): (String, AppTone, String) =
             if model.state.runtimeOperation != nil {
-                ("操作中", VisualStyle.accent)
+                ("操作中", .accent, "arrow.triangle.2.circlepath")
             } else if model.state.runtimeOperationError != nil {
-                ("操作失败", .red)
+                ("操作失败", .negative, "xmark.circle.fill")
             } else if model.runtimeIntegrityIssue != nil {
-                ("需修复", .orange)
+                ("需修复", .warning, "exclamationmark.circle.fill")
             } else {
                 switch model.state.runtimePhase {
-                case .checking: ("检查中", .secondary)
-                case .missing: ("未就绪", .orange)
-                case .ready: ("已就绪", .green)
+                case .checking: ("检查中", .neutral, "arrow.triangle.2.circlepath")
+                case .missing: ("未就绪", .warning, "exclamationmark.circle.fill")
+                case .ready: ("已就绪", .positive, "checkmark.circle.fill")
                 }
             }
-        return HStack(spacing: 6) {
-            Circle()
-                .fill(color)
-                .frame(width: 6, height: 6)
-            Text(label)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-        }
+        return StatusBadge(label, tone: tone, systemImage: systemImage)
     }
 
     private var runtimeInstallTitle: String {
@@ -378,6 +490,7 @@ struct SettingsView: View {
         HStack(spacing: 12) {
             Image(systemName: ready ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
                 .foregroundStyle(ready ? .green : .orange)
+                .frame(width: 24)
             VStack(alignment: .leading, spacing: 3) {
                 Link(destination: component.repositoryURL) {
                     HStack(spacing: 6) {
@@ -398,6 +511,7 @@ struct SettingsView: View {
             }
             Spacer()
         }
+        .frame(minHeight: VisualStyle.settingsRowHeight)
     }
 
     private func executablePicker(

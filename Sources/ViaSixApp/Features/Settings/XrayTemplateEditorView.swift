@@ -68,36 +68,39 @@ struct XrayTemplateEditorView: View {
     }
 
     private var editorHeader: some View {
-        HStack(alignment: .top, spacing: 18) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text("高级服务器 JSON")
-                    .font(.title3.weight(.semibold))
-                Text("编辑 Xray 的 proxy 出站。本机监听地址、端口和路由行为可在“本机代理设置”中修改。")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        AppPageHeader("服务器 JSON", subtitle: "直接编辑 Xray 的远端 proxy 出站") {
+            HStack(spacing: VisualStyle.spacing8) {
+                Menu {
+                    Button("在访达中显示配置", systemImage: "folder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([model.paths.serverConfig])
+                    }
+                    .disabled(originalData == nil)
 
-            Spacer(minLength: 16)
-
-            Menu {
-                Button("在访达中显示配置", systemImage: "folder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([model.paths.serverConfig])
+                    Button("复制配置路径", systemImage: "doc.on.doc") {
+                        copyToPasteboard(model.paths.serverConfig.path)
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
                 }
-                .disabled(originalData == nil)
+                .menuStyle(.borderlessButton)
+                .iconButtonHitTarget()
+                .help("配置文件操作")
+                .accessibilityLabel("配置文件操作")
 
-                Button("复制配置路径", systemImage: "doc.on.doc") {
-                    copyToPasteboard(model.paths.serverConfig.path)
+                Button {
+                    requestDismiss()
+                } label: {
+                    Image(systemName: "xmark")
                 }
-            } label: {
-                Label("更多", systemImage: "ellipsis.circle")
+                .buttonStyle(.borderless)
+                .iconButtonHitTarget()
+                .help("关闭")
+                .accessibilityLabel("关闭服务器 JSON 编辑器")
+                .disabled(isSaving)
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .help("配置文件操作")
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 20)
+        .padding(.horizontal, VisualStyle.spacing20)
+        .padding(.vertical, VisualStyle.spacing4)
     }
 
     private var editorContent: some View {
@@ -135,7 +138,7 @@ struct XrayTemplateEditorView: View {
                 if let endpoint = draftAnalysis.endpoint {
                     Divider()
                         .frame(height: 16)
-                    Label(endpoint.displayAddress, systemImage: "network")
+                    Label("本机 \(endpoint.displayAddress)", systemImage: "network")
                         .font(.caption.monospaced())
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
@@ -164,7 +167,7 @@ struct XrayTemplateEditorView: View {
             }
 
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("应用节点")
+                Text("当前节点")
                     .font(.caption.weight(.medium))
                 Text(selectedIPDescription)
                     .font(.caption.monospaced())
