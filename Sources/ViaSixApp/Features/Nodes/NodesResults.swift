@@ -6,7 +6,14 @@ extension NodesView {
         VStack(alignment: .leading, spacing: 14) {
             resultsHeader
 
-            ZStack {
+            if model.state.results.isEmpty {
+                ContentUnavailableView(
+                    "暂无测速结果",
+                    systemImage: "network.slash",
+                    description: Text("配置参数后点击“开始测速”生成候选节点。")
+                )
+                .frame(maxWidth: .infinity, minHeight: 190)
+            } else {
                 Table(
                     sortedResults,
                     selection: $candidateSelection,
@@ -66,15 +73,6 @@ extension NodesView {
                 }
                 .frame(height: resultsTableHeight)
                 .accessibilityLabel("候选节点")
-
-                if model.state.results.isEmpty {
-                    ContentUnavailableView(
-                        "暂无测速结果",
-                        systemImage: "network.slash",
-                        description: Text("配置参数后点击“开始测速”生成候选节点。")
-                    )
-                    .allowsHitTesting(false)
-                }
             }
         }
         .padding(22)

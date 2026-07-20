@@ -51,6 +51,19 @@ final class AppModel {
         activeRunner != nil
     }
 
+    var isTemplateOperationBusy: Bool {
+        state.templateOperationPhase != .idle
+    }
+
+    var isProxyConfigurationReady: Bool {
+        state.proxyConfigurationPhase == .ready
+    }
+
+    var proxyConfigurationIssue: String? {
+        guard case .needsSetup(let message) = state.proxyConfigurationPhase else { return nil }
+        return message
+    }
+
     var exitIPEndpoint: String {
         get { state.preferences.exitIPEndpoint }
         set {
@@ -196,6 +209,8 @@ final class AppModel {
             !isShuttingDown,
             runtimeTask == nil,
             activeRunner == nil,
+            state.templateOperationPhase == .idle,
+            selectionTask == nil,
             activeXray == nil,
             xrayStartTask == nil,
             xrayStopTask == nil
@@ -237,6 +252,8 @@ final class AppModel {
             !isShuttingDown,
             runtimeTask == nil,
             activeRunner == nil,
+            state.templateOperationPhase == .idle,
+            selectionTask == nil,
             activeXray == nil,
             xrayStartTask == nil,
             xrayStopTask == nil,
@@ -332,7 +349,9 @@ final class AppModel {
             !isShuttingDown,
             templateImportTask == nil,
             templateSaveTask == nil,
-            state.templateOperationPhase == .idle
+            state.templateOperationPhase == .idle,
+            selectionTask == nil,
+            runtimeTask == nil
         else { return }
         switch state.xrayPhase {
         case .validating, .starting, .running, .stopping:
@@ -343,6 +362,7 @@ final class AppModel {
         }
 
         let selectedIP = state.preferences.selectedIP
+        state.templateOperationError = nil
         state.templateOperationPhase = .importing
         templateImportTask = Task { [weak self] in
             guard let self else { return }
@@ -361,9 +381,11 @@ final class AppModel {
                     from: url,
                     selectedIP: selectedIP
                 )
+                state.proxyConfigurationPhase = .ready
                 appendLog(source: .app, level: .success, message: "已导入代理连接模板")
                 showNotice("代理配置已导入", style: .success)
             } catch {
+                state.templateOperationError = error.localizedDescription
                 appendLog(source: .app, level: .error, message: "导入代理配置失败：\(error.localizedDescription)")
                 showNotice("导入失败：\(error.localizedDescription)", style: .error)
             }
@@ -378,6 +400,12 @@ final class AppModel {
         else {
             throw AppModelError.templateOperationInProgress
         }
+        guard selectionTask == nil else {
+            throw AppModelError.selectionInProgress
+        }
+        guard runtimeTask == nil else {
+            throw AppModelError.runtimeOperationInProgress
+        }
         guard !isShuttingDown else { throw CancellationError() }
         switch state.xrayPhase {
         case .validating, .starting, .running, .stopping:
@@ -387,6 +415,7 @@ final class AppModel {
         }
 
         let selectedIP = state.preferences.selectedIP
+        state.templateOperationError = nil
         state.templateOperationPhase = .saving
         let task = Task<ProxyEndpoint, Error> { [templateReplacer] in
             try Task.checkCancellation()
@@ -413,6 +442,7 @@ final class AppModel {
             try Task.checkCancellation()
             guard !isShuttingDown else { throw CancellationError() }
             state.proxyEndpoint = endpoint
+            state.proxyConfigurationPhase = .ready
             appendLog(source: .app, level: .success, message: "已保存代理连接模板")
             showNotice("代理配置已保存", style: .success)
         } catch is CancellationError {
@@ -423,8 +453,10 @@ final class AppModel {
                 level: .warning,
                 message: "代理配置在编辑期间发生变化，已阻止覆盖外部修改"
             )
+            state.templateOperationError = AppModelError.templateChangedExternally.localizedDescription
             throw AppModelError.templateChangedExternally
         } catch {
+            state.templateOperationError = error.localizedDescription
             appendLog(source: .app, level: .error, message: "保存代理配置失败：\(error.localizedDescription)")
             throw error
         }
@@ -503,7 +535,8 @@ final class AppModel {
             !isShuttingDown,
             runtimeTask == nil,
             activeRunner == nil,
-            state.templateOperationPhase == .idle
+            state.templateOperationPhase == .idle,
+            selectionTask == nil
         else { return }
         do {
             _ = try state.preferences.parameters.validated()
@@ -572,7 +605,8 @@ final class AppModel {
             !isShuttingDown,
             runtimeTask == nil,
             activeRunner == nil,
-            state.templateOperationPhase == .idle
+            state.templateOperationPhase == .idle,
+            selectionTask == nil
         else { return }
         let selectedIP = state.preferences.selectedIP
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -651,7 +685,14 @@ final class AppModel {
     }
 
     func selectIP(_ ip: String) {
-        guard selectionTask == nil, !isShuttingDown, state.templateOperationPhase == .idle else { return }
+        guard
+            selectionTask == nil,
+            !isShuttingDown,
+            state.templateOperationPhase == .idle,
+            activeRunner == nil,
+            xrayStartTask == nil,
+            xrayStopTask == nil
+        else { return }
         switchingIP = ip
         selectionTask = Task { [weak self] in
             await self?.performIPSelection(ip)
@@ -704,8 +745,14 @@ final class AppModel {
             state.templateOperationPhase == .idle,
             activeXray == nil,
             xrayStartTask == nil,
-            xrayStopTask == nil
+            xrayStopTask == nil,
+            selectionTask == nil
         else { return }
+        guard isProxyConfigurationReady else {
+            let message = proxyConfigurationIssue ?? "代理配置正在检查，请稍候"
+            showNotice(message, style: .error, action: .openSettings)
+            return
+        }
         guard
             let executableURL = resolvedExecutable(
                 preferredPath: state.preferences.xrayPath,
@@ -732,7 +779,9 @@ final class AppModel {
                     throw AppModelError.missingSelectedIP
                 }
                 let proxyEndpoint = try await bootstrapper.prepareConfigForLaunch(ip: selectedIP)
+                try Task.checkCancellation()
                 state.proxyEndpoint = proxyEndpoint
+                state.proxyConfigurationPhase = .ready
                 appendLog(source: .app, message: "已应用当前节点与代理连接配置")
 
                 var environment: [String: String] = [:]
@@ -766,9 +815,14 @@ final class AppModel {
                 )
                 showNotice("本地代理已启动", style: .success)
                 refreshExitIPAfterNetworkChangeIfNeeded()
-            } catch XrayControllerError.cancelled where xrayStopRequested {
+            } catch XrayControllerError.cancelled where xrayStopRequested || isShuttingDown {
+                state.xrayPhase = .stopped
+            } catch is CancellationError where xrayStopRequested || isShuttingDown {
                 state.xrayPhase = .stopped
             } catch {
+                if let configError = error as? ConfigTemplateError {
+                    state.proxyConfigurationPhase = .needsSetup(configError.localizedDescription)
+                }
                 state.xrayPhase = .failed(error.localizedDescription)
                 appendLog(source: .xray, level: .error, message: error.localizedDescription)
                 let recoveryAction: AppNotice.Action? =
@@ -788,7 +842,8 @@ final class AppModel {
         guard xrayStopTask == nil else { return }
         let controller = activeXray
         let startTask = xrayStartTask
-        guard controller != nil || startTask != nil else { return }
+        let pendingSelectionTask = selectionTask
+        guard controller != nil || startTask != nil || pendingSelectionTask != nil else { return }
 
         cancelExitIPDetection()
         xrayStopRequested = true
@@ -796,11 +851,15 @@ final class AppModel {
         xrayStopTask = Task { [weak self] in
             guard let self else { return }
             startTask?.cancel()
+            pendingSelectionTask?.cancel()
             if let controller {
                 await controller.stop()
             }
             if let startTask {
                 await startTask.value
+            }
+            if let pendingSelectionTask {
+                await pendingSelectionTask.value
             }
 
             activeXray = nil
@@ -819,9 +878,11 @@ final class AppModel {
             runtimeTask == nil,
             state.templateOperationPhase == .idle,
             state.isXrayRunning,
+            isProxyConfigurationReady,
             activeXray != nil,
             xrayStartTask == nil,
-            xrayStopTask == nil
+            xrayStopTask == nil,
+            selectionTask == nil
         else { return }
         cancelExitIPDetection()
         state.xrayPhase = .stopping
@@ -985,6 +1046,7 @@ final class AppModel {
 
             var configurationWarning: String?
             var proxyEndpoint = ProxyEndpoint()
+            var proxyConfigurationPhase: AppState.ProxyConfigurationPhase = .checking
             do {
                 proxyEndpoint = try await bootstrapper.currentProxyEndpoint()
                 if let configuredIP = try await bootstrapper.currentConfigIP()?
@@ -995,8 +1057,28 @@ final class AppModel {
                 } else if !preferences.selectedIP.isEmpty {
                     try await bootstrapper.ensureConfig(ip: preferences.selectedIP)
                 }
+
+                do {
+                    _ = try await bootstrapper.validateTemplateForLaunch(
+                        selectedIP: preferences.selectedIP
+                    )
+                    proxyConfigurationPhase = .ready
+                } catch {
+                    proxyConfigurationPhase = .needsSetup(error.localizedDescription)
+                    if (error as? ConfigTemplateError) == .connectionNotConfigured {
+                        appendLog(source: .app, message: "代理连接尚未配置，可在设置中导入或编辑模板")
+                    } else {
+                        configurationWarning = error.localizedDescription
+                        appendLog(
+                            source: .app,
+                            level: .warning,
+                            message: "代理配置需要修复：\(error.localizedDescription)"
+                        )
+                    }
+                }
             } catch {
                 configurationWarning = error.localizedDescription
+                proxyConfigurationPhase = .needsSetup(error.localizedDescription)
                 appendLog(source: .app, level: .warning, message: "代理配置需要修复：\(error.localizedDescription)")
             }
 
@@ -1005,6 +1087,7 @@ final class AppModel {
             state.results = loadedResults
             state.runtimeStatus = await installedStatus
             state.proxyEndpoint = proxyEndpoint
+            state.proxyConfigurationPhase = proxyConfigurationPhase
             refreshRuntimePhase()
             state.launchPhase = .ready
             if preferences != loadedPreferences || preferencesRecoveryWarning != nil {
@@ -1334,6 +1417,8 @@ final class AppModel {
 enum AppModelError: LocalizedError, Equatable {
     case missingSelectedIP
     case templateOperationInProgress
+    case selectionInProgress
+    case runtimeOperationInProgress
     case templateChangedExternally
     case xrayMustBeStopped
     case xrayNotActive
@@ -1343,6 +1428,8 @@ enum AppModelError: LocalizedError, Equatable {
         switch self {
         case .missingSelectedIP: "请先完成测速并选择一个节点"
         case .templateOperationInProgress: "另一项代理配置操作尚未完成"
+        case .selectionInProgress: "正在应用节点，请等待切换完成后再保存代理配置"
+        case .runtimeOperationInProgress: "运行组件操作进行中，请完成后再保存代理配置"
         case .templateChangedExternally: "代理配置已被其他操作修改，请重新载入后再保存"
         case .xrayMustBeStopped: "请先停止本地代理再保存连接配置"
         case .xrayNotActive: "本地代理当前未运行"

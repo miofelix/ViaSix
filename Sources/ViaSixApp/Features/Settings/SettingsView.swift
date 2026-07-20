@@ -205,8 +205,18 @@ struct SettingsView: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(templateOperationStatus)
+            } else if let error = model.state.templateOperationError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let issue = model.proxyConfigurationIssue {
+                Label("代理配置尚未就绪：\(issue)", systemImage: "exclamationmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             } else if proxyImportDisabled {
-                Text("请先停止本地代理，再导入或编辑连接配置。")
+                Text(proxyImportBlockedMessage)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -471,7 +481,12 @@ struct SettingsView: View {
 
     private var runtimeActionsDisabled: Bool {
         guard model.state.launchPhase == .ready else { return true }
-        if model.state.runtimeOperation != nil { return true }
+        if model.state.runtimeOperation != nil
+            || model.isTemplateOperationBusy
+            || model.switchingIP != nil
+        {
+            return true
+        }
         if model.isCfstBusy { return true }
 
         switch model.state.speedTest.phase {
@@ -492,12 +507,32 @@ struct SettingsView: View {
     private var proxyImportDisabled: Bool {
         guard model.state.launchPhase == .ready else { return true }
         guard model.state.templateOperationPhase == .idle else { return true }
+        guard model.switchingIP == nil else { return true }
+        guard model.state.runtimeOperation == nil else { return true }
         return switch model.state.xrayPhase {
         case .validating, .starting, .running, .stopping:
             true
         case .stopped, .failed:
             false
         }
+    }
+
+    private var proxyImportBlockedMessage: String {
+        switch model.state.launchPhase {
+        case .idle, .loading:
+            return "正在加载应用数据，完成后即可导入或编辑连接配置。"
+        case .failed(let message):
+            return "应用初始化失败：\(message)"
+        case .ready:
+            break
+        }
+        if let operation = model.state.runtimeOperation {
+            return "\(operation.description)，完成后再导入或编辑连接配置。"
+        }
+        if model.switchingIP != nil {
+            return "正在应用节点，完成后再导入或编辑连接配置。"
+        }
+        return "请先停止本地代理，再导入或编辑连接配置。"
     }
 
     private var templateOperationStatus: String? {

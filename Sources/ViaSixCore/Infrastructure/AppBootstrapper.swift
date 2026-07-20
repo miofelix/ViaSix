@@ -110,6 +110,19 @@ public actor AppBootstrapper {
         return endpoint
     }
 
+    /// Validates whether the stored template can be launched without changing
+    /// the generated runtime configuration. A documentation-only IP is used
+    /// until the user has selected a node so placeholder credentials are still
+    /// detected during bootstrap.
+    @discardableResult
+    public func validateTemplateForLaunch(selectedIP: String? = nil) throws -> ProxyEndpoint {
+        let template = try Data(contentsOf: paths.templateConfig)
+        let normalizedIP = selectedIP?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let validationIP = normalizedIP.isEmpty ? "2001:db8::2" : normalizedIP
+        let config = try ConfigTemplate.replacingAddress(in: template, with: validationIP)
+        return try ConfigTemplate.validateForLaunch(config)
+    }
+
     @discardableResult
     public func replaceTemplate(with data: Data, selectedIP: String? = nil) throws -> ProxyEndpoint {
         let endpoint = try ConfigTemplate.validateTemplate(data)

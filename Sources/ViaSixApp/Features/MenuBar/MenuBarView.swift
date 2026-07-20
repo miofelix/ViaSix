@@ -89,6 +89,7 @@ struct MenuBarView: View {
             Button("重新安装最新组件", systemImage: "arrow.clockwise") {
                 model.installRuntime()
             }
+            .disabled(runtimeActionsDisabled)
             Divider()
         }
     }
@@ -122,6 +123,8 @@ struct MenuBarView: View {
             .disabled(
                 model.state.launchPhase != .ready
                     || model.state.runtimeOperation != nil
+                    || model.isTemplateOperationBusy
+                    || model.switchingIP != nil
                     || !model.hasCfstExecutable
                     || model.isCfstBusy
                     || parameterValidationMessage != nil
@@ -207,8 +210,11 @@ struct MenuBarView: View {
             .disabled(
                 model.state.launchPhase != .ready
                     || model.state.runtimeOperation != nil
+                    || model.isTemplateOperationBusy
+                    || model.switchingIP != nil
                     || !model.hasXrayExecutable
                     || model.state.preferences.selectedIP.isEmpty
+                    || !model.isProxyConfigurationReady
             )
         case .validating, .starting:
             Button("停止本地代理", systemImage: "stop.fill") {
@@ -218,6 +224,7 @@ struct MenuBarView: View {
             Button("重启本地代理", systemImage: "arrow.clockwise") {
                 model.restartXray()
             }
+            .disabled(model.switchingIP != nil || model.isTemplateOperationBusy)
             Button("停止本地代理", systemImage: "stop.fill") {
                 model.stopXray()
             }
@@ -261,8 +268,27 @@ struct MenuBarView: View {
         }
     }
 
+    private var runtimeActionsDisabled: Bool {
+        guard model.state.launchPhase == .ready else { return true }
+        if model.state.runtimeOperation != nil
+            || model.isTemplateOperationBusy
+            || model.switchingIP != nil
+            || model.isCfstBusy
+        {
+            return true
+        }
+        switch model.state.xrayPhase {
+        case .validating, .starting, .running, .stopping:
+            return true
+        case .stopped, .failed:
+            return false
+        }
+    }
+
     private var speedTestUnavailableMessage: String? {
         guard model.state.runtimeOperation == nil else { return nil }
+        if model.isTemplateOperationBusy { return "代理配置操作进行中" }
+        if model.switchingIP != nil { return "正在应用节点，完成后即可开始测速" }
         if let parameterValidationMessage {
             return "测速设置需要检查：\(parameterValidationMessage)"
         }
@@ -272,6 +298,8 @@ struct MenuBarView: View {
 
     private var proxyUnavailableMessage: String? {
         guard model.state.runtimeOperation == nil else { return nil }
+        if model.isTemplateOperationBusy { return "代理配置操作进行中" }
+        if model.switchingIP != nil { return "正在应用节点" }
         switch model.state.xrayPhase {
         case .validating, .starting, .running, .stopping:
             return nil
@@ -280,6 +308,9 @@ struct MenuBarView: View {
         }
         if model.state.preferences.selectedIP.isEmpty {
             return "请先打开 ViaSix 选择节点"
+        }
+        if let issue = model.proxyConfigurationIssue {
+            return "请在设置中修复代理配置：\(issue)"
         }
         guard !model.hasXrayExecutable else { return nil }
         return "请在设置中安装 Xray-core"

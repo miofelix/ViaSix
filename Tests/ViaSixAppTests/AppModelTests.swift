@@ -186,10 +186,12 @@ final class AppModelTests: XCTestCase {
         try await waitUntilReady(model)
 
         XCTAssertEqual(model.state.proxyEndpoint, ProxyEndpoint(host: "127.0.0.2", port: 18_080))
+        XCTAssertTrue(model.isProxyConfigurationReady)
+        XCTAssertNil(model.proxyConfigurationIssue)
         await model.shutdown()
     }
 
-    func testXrayStartRejectsDefaultConnectionTemplateWithSettingsRecovery() async throws {
+    func testDefaultConnectionTemplateIsMarkedBeforeStartAndOffersSettingsRecovery() async throws {
         let paths = makePaths()
         defer { try? FileManager.default.removeItem(at: paths.root) }
         let store = PreferencesStore(fileURL: paths.preferences)
@@ -218,20 +220,21 @@ final class AppModelTests: XCTestCase {
         model.start()
         try await waitUntilReady(model)
         XCTAssertTrue(model.hasXrayExecutable)
+        XCTAssertEqual(
+            model.proxyConfigurationIssue,
+            ConfigTemplateError.connectionNotConfigured.localizedDescription
+        )
+        XCTAssertFalse(model.isProxyConfigurationReady)
 
         model.startXray()
-        try await waitUntil {
-            if case .failed = model.state.xrayPhase { return true }
-            return false
-        }
-
-        guard case .failed(let message) = model.state.xrayPhase else {
-            return XCTFail("Expected the placeholder connection to be rejected")
-        }
-        XCTAssertEqual(message, ConfigTemplateError.connectionNotConfigured.localizedDescription)
+        XCTAssertEqual(model.state.xrayPhase, .stopped)
         XCTAssertEqual(model.state.notice?.action, .openSettings)
         XCTAssertFalse(FileManager.default.fileExists(atPath: invocationMarkerURL.path))
-        XCTAssertTrue(model.state.logs.contains { $0.message == message })
+        XCTAssertTrue(
+            model.state.notice?.message.contains(
+                ConfigTemplateError.connectionNotConfigured.localizedDescription
+            ) == true
+        )
         await model.shutdown()
     }
 
@@ -301,6 +304,55 @@ final class AppModelTests: XCTestCase {
         try await waitUntil { model.state.templateOperationPhase == .idle }
         XCTAssertEqual(try Data(contentsOf: paths.templateConfig), importedTemplate)
         XCTAssertEqual(model.state.proxyEndpoint, ProxyEndpoint(host: "127.0.0.4", port: 18_084))
+        XCTAssertTrue(model.isProxyConfigurationReady)
+        XCTAssertNil(model.state.templateOperationError)
+        await model.shutdown()
+    }
+
+    func testFailedTemplateImportPublishesSettingsVisibleError() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let bootstrapper = AppBootstrapper(paths: paths)
+        let model = makeModel(paths: paths, bootstrapper: bootstrapper)
+        model.start()
+        try await waitUntilReady(model)
+        let originalTemplate = try Data(contentsOf: paths.templateConfig)
+        let importURL = paths.root.appendingPathComponent("invalid-template.json")
+        try Data("not json".utf8).write(to: importURL, options: .atomic)
+
+        model.importXrayTemplate(from: importURL)
+        try await waitUntil { model.state.templateOperationPhase == .idle }
+
+        XCTAssertEqual(
+            model.state.templateOperationError,
+            ConfigTemplateError.invalidJSON.localizedDescription
+        )
+        XCTAssertEqual(try Data(contentsOf: paths.templateConfig), originalTemplate)
+        XCTAssertFalse(model.isProxyConfigurationReady)
+        await model.shutdown()
+    }
+
+    func testTemplateOperationsAreRejectedWhileApplyingSelection() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let bootstrapper = AppBootstrapper(paths: paths)
+        try await bootstrapper.prepareDefaults()
+        let model = makeModel(paths: paths, bootstrapper: bootstrapper)
+        let importURL = paths.root.appendingPathComponent("imported-template.json")
+        try validTemplate().write(to: importURL, options: .atomic)
+
+        model.selectIP("2606::12")
+        model.importXrayTemplate(from: importURL)
+        XCTAssertEqual(model.state.templateOperationPhase, .idle)
+
+        do {
+            try await model.saveXrayTemplate(validTemplate(port: 11_452))
+            XCTFail("Expected saving to be rejected while a selection is being applied")
+        } catch {
+            XCTAssertEqual(error as? AppModelError, .selectionInProgress)
+        }
+
+        try await waitUntil { model.switchingIP == nil }
         await model.shutdown()
     }
 

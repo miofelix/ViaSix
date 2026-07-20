@@ -38,6 +38,43 @@ final class AppBootstrapperTests: XCTestCase {
         XCTAssertNoThrow(try ConfigTemplate.validateTemplate(template))
     }
 
+    func testLaunchReadinessCheckRejectsPlaceholderWithoutWritingGeneratedConfig() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let bootstrapper = AppBootstrapper(paths: paths)
+        try await bootstrapper.prepareDefaults()
+
+        do {
+            _ = try await bootstrapper.validateTemplateForLaunch(selectedIP: "2606::10")
+            XCTFail("Expected the neutral connection template to require setup")
+        } catch {
+            XCTAssertEqual(error as? ConfigTemplateError, .connectionNotConfigured)
+        }
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.generatedConfig.path))
+    }
+
+    func testLaunchReadinessCheckAcceptsConfiguredTemplateWithoutWritingGeneratedConfig() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let bootstrapper = AppBootstrapper(paths: paths)
+        try await bootstrapper.prepareDefaults()
+        let template = try TestConfigFixtures.connectionTemplate(
+            userID: "f4edc501-056c-4572-9da8-ad63a264a698",
+            serverName: "proxy.example.net",
+            path: "/viasix",
+            listen: "127.0.0.2",
+            port: 18_080
+        )
+        try await bootstrapper.replaceTemplate(with: template)
+        try? FileManager.default.removeItem(at: paths.generatedConfig)
+
+        let endpoint = try await bootstrapper.validateTemplateForLaunch()
+
+        XCTAssertEqual(endpoint, ProxyEndpoint(host: "127.0.0.2", port: 18_080))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.generatedConfig.path))
+    }
+
     func testPrepareDefaultsRemovesOnlyStaleSpeedTestResultsFromDataDirectory() async throws {
         let paths = makePaths()
         defer { try? FileManager.default.removeItem(at: paths.root) }

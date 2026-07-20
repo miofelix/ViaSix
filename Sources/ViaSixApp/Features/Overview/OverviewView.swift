@@ -248,6 +248,7 @@ struct OverviewView: View {
 
         if model.state.isXrayRunning {
             Button("重新连接", systemImage: "arrow.clockwise", action: model.restartXray)
+                .disabled(model.switchingIP != nil || model.isTemplateOperationBusy)
         }
     }
 
@@ -314,17 +315,11 @@ struct OverviewView: View {
 
     private var exitIPPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 12) {
-                    exitIPLabel
-                    exitIPSummary
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    exitIPLabel
-                    exitIPSummary
-                }
+            HStack(alignment: .top, spacing: 12) {
+                exitIPLabel
+                exitIPSummary
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             exitIPControls
         }
@@ -549,7 +544,12 @@ struct OverviewView: View {
 
     private var proxyEnabledBinding: Binding<Bool> {
         Binding {
-            model.state.isXrayRunning
+            switch model.state.xrayPhase {
+            case .validating, .starting, .running:
+                true
+            case .stopped, .stopping, .failed:
+                false
+            }
         } set: { enabled in
             if enabled {
                 model.startXray()
@@ -601,16 +601,42 @@ struct OverviewView: View {
     }
 
     private var proxyToggleDisabled: Bool {
-        model.state.launchPhase != .ready
-            || model.state.runtimeOperation != nil
-            || isXrayTransitioning
-            || (!model.state.isXrayRunning
-                && (selectedIP.isEmpty || !model.hasXrayExecutable))
+        guard model.state.launchPhase == .ready else { return true }
+        if model.state.runtimeOperation != nil || model.isTemplateOperationBusy { return true }
+        switch model.state.xrayPhase {
+        case .stopping:
+            return true
+        case .validating, .starting, .running:
+            return false
+        case .stopped, .failed:
+            return model.switchingIP != nil
+                || selectedIP.isEmpty
+                || !model.hasXrayExecutable
+                || !model.isProxyConfigurationReady
+        }
     }
 
     private var proxyReadinessHint: String {
+        switch model.state.xrayPhase {
+        case .validating:
+            return "正在校验代理配置，可关闭开关取消启动。"
+        case .starting:
+            return "正在启动本地代理，可关闭开关取消启动。"
+        case .stopping:
+            return "正在停止本地代理并清理网络监听。"
+        case .stopped, .failed:
+            break
+        case .running:
+            return "本地代理正在运行。"
+        }
         if model.state.runtimeOperation != nil {
             return "运行组件安装中，完成后即可启动本地代理。"
+        }
+        if model.isTemplateOperationBusy {
+            return "代理配置操作进行中，完成后即可继续。"
+        }
+        if let issue = model.proxyConfigurationIssue {
+            return "代理配置尚未就绪：\(issue)。请在设置中导入或编辑配置。"
         }
         if selectedIP.isEmpty {
             return "先选择一个节点，才能启动本地代理。"
@@ -646,7 +672,12 @@ struct OverviewView: View {
 
     private var runtimeInstallationDisabled: Bool {
         guard model.state.launchPhase == .ready else { return true }
-        if model.state.runtimeOperation != nil { return true }
+        if model.state.runtimeOperation != nil
+            || model.isTemplateOperationBusy
+            || model.switchingIP != nil
+        {
+            return true
+        }
         if model.isCfstBusy { return true }
 
         switch model.state.speedTest.phase {
@@ -691,6 +722,8 @@ struct OverviewView: View {
         if case .stopping = model.state.configurationTest.phase { return true }
         if isConfigurationTestRunning { return false }
         return model.state.runtimeOperation != nil
+            || model.isTemplateOperationBusy
+            || model.switchingIP != nil
             || selectedIP.isEmpty
             || !model.hasCfstExecutable
             || model.isCfstBusy

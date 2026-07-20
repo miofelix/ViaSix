@@ -117,6 +117,8 @@ extension NodesView {
     var canStartSpeedTest: Bool {
         model.state.launchPhase == .ready
             && model.state.runtimeOperation == nil
+            && !model.isTemplateOperationBusy
+            && model.switchingIP == nil
             && model.hasCfstExecutable
             && !model.isCfstBusy
             && parameterValidationMessage == nil
@@ -150,7 +152,7 @@ extension NodesView {
         guard model.state.speedTestResultsAreCurrent else { return true }
         guard case .idle = model.state.speedTest.phase else { return true }
         if candidateSelection == model.state.preferences.selectedIP { return true }
-        if model.switchingIP != nil || model.isCfstBusy { return true }
+        if model.switchingIP != nil || model.isCfstBusy || model.isTemplateOperationBusy { return true }
 
         switch model.state.xrayPhase {
         case .validating, .starting, .stopping:

@@ -15,6 +15,12 @@ struct AppState: Equatable, Sendable {
         case ready
     }
 
+    enum ProxyConfigurationPhase: Equatable, Sendable {
+        case checking
+        case needsSetup(String)
+        case ready
+    }
+
     enum RuntimeOperation: Equatable, Sendable {
         case installing(RuntimeInstallationStage)
         case importing
@@ -118,10 +124,12 @@ struct AppState: Equatable, Sendable {
     var runtimeStatus: RuntimeInstallationStatus?
     var runtimeOperation: RuntimeOperation?
     var runtimeOperationError: String?
+    var proxyConfigurationPhase: ProxyConfigurationPhase = .checking
     var speedTest = SpeedTestState()
     var configurationTest = ConfigurationTestState()
     var xrayPhase: XrayPhase = .stopped
     var templateOperationPhase: TemplateOperationPhase = .idle
+    var templateOperationError: String?
     var proxyEndpoint = ProxyEndpoint()
     var exit = ExitState()
     var logs: [AppLogEntry] = []

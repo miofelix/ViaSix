@@ -43,6 +43,8 @@ struct RootView: View {
                     .buttonStyle(.plain)
                     .disabled(sidebarProxyControlDisabled)
                     .help(sidebarActionHelp)
+                    .accessibilityLabel(sidebarActionHelp)
+                    .accessibilityValue(sidebarStatusTitle)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 13)
 
@@ -178,17 +180,17 @@ struct RootView: View {
     }
 
     private var sidebarProxyControlDisabled: Bool {
-        guard
-            model.state.launchPhase == .ready,
-            model.state.runtimeOperation == nil,
-            !sidebarProxyIsTransitioning
-        else { return true }
+        guard model.state.launchPhase == .ready else { return true }
+        if model.state.runtimeOperation != nil || model.isTemplateOperationBusy { return true }
         switch model.state.xrayPhase {
-        case .running:
+        case .running, .validating, .starting:
             return false
         case .stopped, .failed:
-            return !model.hasXrayExecutable || model.state.preferences.selectedIP.isEmpty
-        case .validating, .starting, .stopping:
+            return model.switchingIP != nil
+                || !model.hasXrayExecutable
+                || model.state.preferences.selectedIP.isEmpty
+                || !model.isProxyConfigurationReady
+        case .stopping:
             return true
         }
     }
@@ -206,12 +208,17 @@ struct RootView: View {
         if let operation = model.state.runtimeOperation {
             return operation.description
         }
+        if model.isTemplateOperationBusy {
+            return "代理配置操作进行中"
+        }
         return switch model.state.xrayPhase {
         case .running, .validating, .starting:
             "停止本地代理"
         case .stopped, .failed, .stopping:
             if !model.hasXrayExecutable {
                 "请先在设置中安装 Xray-core"
+            } else if let issue = model.proxyConfigurationIssue {
+                "请先在设置中修复代理配置：\(issue)"
             } else if model.state.preferences.selectedIP.isEmpty {
                 "请先选择节点"
             } else {
