@@ -12,21 +12,32 @@ struct OverviewView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
+            VStack(alignment: .leading, spacing: VisualStyle.spacing16) {
                 pageHeader
-                metricsPanel
-                proxyControlPanels
-                proxyPanel
 
-                if model.state.runtimePhase != .ready
-                    || model.state.runtimeOperation != nil
-                    || model.state.runtimeOperationError != nil
-                {
-                    runtimePanel
+                if runtimeNeedsAttention {
+                    runtimeBanner
+                }
+
+                LazyVGrid(
+                    columns: [
+                        GridItem(
+                            .adaptive(minimum: 350),
+                            spacing: VisualStyle.spacing16,
+                            alignment: .top
+                        )
+                    ],
+                    alignment: .leading,
+                    spacing: VisualStyle.spacing16
+                ) {
+                    connectionCard
+                    routingModeCard
+                    networkAccessCard
+                    exitIPCard
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.bottom, 4)
+            .padding(.bottom, VisualStyle.spacing4)
         }
         .scrollbarSafeContent()
         .onChange(of: model.state.localProxyConfiguration.routingMode) { _, mode in
@@ -42,304 +53,196 @@ struct OverviewView: View {
     }
 
     private var pageHeader: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("连接")
-                .font(.title2.weight(.semibold))
-            Text("管理本地代理、当前节点与网络出口")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var metricsPanel: some View {
-        LazyVGrid(columns: metricColumns, alignment: .leading, spacing: 18) {
-            OverviewMetric(
-                title: "当前节点",
-                value: currentNodeMetricValue,
-                detail: currentNodeMetricDetail,
-                systemImage: "network"
-            )
-            OverviewMetric(
-                title: "地区",
-                value: selectedResult?.region ?? "",
-                detail: "数据中心",
-                systemImage: "mappin"
-            )
-            OverviewMetric(
-                title: "平均延迟",
-                value: selectedResult?.latencyDisplayValue ?? "",
-                detail: speedTestProtocolLabel,
-                systemImage: "timer"
-            )
-            OverviewMetric(
-                title: "下行速度",
-                value: selectedResult?.speedDisplayValue ?? "",
-                detail: "测速结果",
-                systemImage: "arrow.down"
-            )
-        }
-        .padding(22)
-        .cardStyle()
-    }
-
-    private var proxyPanel: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            proxyHeader
-
-            Divider()
-
-            proxyEndpointRow
-            Divider()
-            detailRow(label: "协议", value: "HTTP / SOCKS")
-            Divider()
-
-            exitIPPanel
-
-            Divider()
-
-            proxyActionsRow
-
-            configurationTestStatus
-
-            if !model.state.isXrayRunning {
-                Label(proxyReadinessHint, systemImage: "info.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 8)
-            }
-
-            if case .failed(let message) = model.state.xrayPhase {
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 10)
-            }
-        }
-        .padding(22)
-        .cardStyle()
-    }
-
-    private var proxyControlPanels: some View {
-        LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: 330), spacing: 18)],
-            alignment: .leading,
-            spacing: 18
+        AppPageHeader(
+            "首页",
+            subtitle: "查看连接状态并控制本地网络代理"
         ) {
-            routingModePanel
-            networkAccessPanel
-        }
-    }
-
-    /// The three routing choices are deliberately presented as a first-class
-    /// card, matching the compact mode card used by Clash while retaining the
-    /// native macOS controls and keyboard/accessibility semantics.
-    private var routingModePanel: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline) {
-                Label("代理模式", systemImage: "point.3.connected.trianglepath.dotted")
-                    .font(.headline)
-                Spacer()
-                if model.isRoutingModeChanging {
-                    ProgressView()
-                        .controlSize(.small)
-                        .accessibilityLabel("正在切换代理模式")
-                } else {
-                    Text(displayedRoutingMode.displayName)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            ProxyRoutingModePicker(
-                selection: Binding(
-                    get: { displayedRoutingMode },
-                    set: { selectRoutingMode($0) }
-                ),
-                isDisabled: routingModePickerDisabled
+            StatusBadge(
+                proxyPresentation.statusTitle,
+                tone: proxyPresentation.tone,
+                systemImage: proxyPresentation.isBusy ? "hourglass" : nil
             )
         }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .cardStyle()
     }
 
-    private var networkAccessPanel: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline) {
-                Label("网络接入", systemImage: "macbook.and.iphone")
-                    .font(.headline)
-                Spacer()
-                systemProxyStatus
-            }
-
-            Divider()
-
-            HStack(alignment: .center, spacing: 12) {
-                Image(systemName: "desktopcomputer")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 28)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("系统代理")
-                        .font(.callout.weight(.medium))
-                    Text("让遵循 macOS 代理设置的应用自动使用本地代理")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+    private var connectionCard: some View {
+        SurfaceCard {
+            VStack(alignment: .leading, spacing: 0) {
+                CardHeader(
+                    "当前连接",
+                    systemImage: "point.3.connected.trianglepath.dotted",
+                    tone: proxyPresentation.tone
+                ) {
+                    StatusBadge(
+                        connectionStatusShortTitle,
+                        tone: proxyPresentation.tone
+                    )
                 }
 
-                Spacer(minLength: 12)
+                Divider()
 
-                Toggle("系统代理", isOn: systemProxyEnabledBinding)
-                    .labelsHidden()
-                    .toggleStyle(.switch)
-                    .disabled(systemProxyToggleDisabled)
-                    .accessibilityLabel("系统代理")
-                    .accessibilityValue(systemProxyStatusText)
+                VStack(alignment: .leading, spacing: VisualStyle.spacing16) {
+                    currentNodeSummary
+
+                    if selectedResult != nil {
+                        connectionMetrics
+                    }
+
+                    configurationTestStatus
+
+                    Divider()
+
+                    localEndpointRow
+
+                    if case .failed(let message) = model.state.xrayPhase {
+                        inlineMessage(
+                            message,
+                            systemImage: "exclamationmark.triangle.fill",
+                            tone: .negative
+                        )
+                    } else if !model.state.isXrayRunning {
+                        inlineMessage(
+                            proxyReadinessHint,
+                            systemImage: "info.circle",
+                            tone: .neutral
+                        )
+                    }
+
+                    connectionActions
+                }
+                .padding(VisualStyle.spacing16)
             }
+        }
+    }
 
-            if case .failed(let message) = model.state.systemProxyPhase {
-                Label(message, systemImage: "exclamationmark.triangle.fill")
+    private var currentNodeSummary: some View {
+        HStack(alignment: .top, spacing: VisualStyle.spacing12) {
+            Image(systemName: currentNodeIcon)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(currentNodeTone.color)
+                .frame(width: 42, height: 42)
+                .background(
+                    currentNodeTone.color.opacity(0.1),
+                    in: RoundedRectangle(
+                        cornerRadius: VisualStyle.radiusMedium,
+                        style: .continuous
+                    )
+                )
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(currentNodeTitle)
+                    .font(.title3.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Text(currentNodeDetail)
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Text("系统代理只影响遵循 macOS 代理设置的应用，不会接管全部网络流量。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: VisualStyle.spacing8)
         }
-        .padding(18)
+    }
+
+    private var connectionMetrics: some View {
+        HStack(spacing: VisualStyle.spacing8) {
+            if let region = selectedResult?.region, !region.isEmpty {
+                ConnectionMetricChip(
+                    title: region,
+                    systemImage: "mappin.and.ellipse"
+                )
+            }
+
+            if let latency = selectedResult?.latencyDisplayValue {
+                ConnectionMetricChip(
+                    title: latency,
+                    systemImage: "timer"
+                )
+            }
+
+            if let speed = selectedResult?.speedDisplayValue {
+                ConnectionMetricChip(
+                    title: speed,
+                    systemImage: "arrow.down"
+                )
+            }
+        }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .cardStyle()
     }
 
-    private var proxyHeader: some View {
+    private var localEndpointRow: some View {
+        SettingRow(
+            "本地端点",
+            detail: "HTTP / SOCKS 混合代理",
+            systemImage: "network"
+        ) {
+            HStack(spacing: 4) {
+                Text(proxyEndpoint)
+                    .font(.caption.monospaced().weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+
+                Button(action: copyProxyEndpoint) {
+                    Image(systemName: copiedEndpoint ? "checkmark" : "doc.on.doc")
+                }
+                .buttonStyle(.borderless)
+                .iconButtonHitTarget()
+                .help(copiedEndpoint ? "已复制" : "复制代理地址")
+                .accessibilityLabel(copiedEndpoint ? "已复制代理地址" : "复制代理地址")
+            }
+        }
+    }
+
+    private var connectionActions: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 9) {
-                proxyIdentity
-                Spacer(minLength: 16)
-                proxyStatus
-                proxyToggle
+            HStack(spacing: VisualStyle.spacing8) {
+                proxyPrimaryButton
+                nodeSelectionButton
+                configurationTestButton
+
+                if model.state.isXrayRunning {
+                    reconnectButton
+                }
             }
 
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 9) {
-                    proxyIdentity
-                    Spacer(minLength: 12)
-                    proxyStatus
+            VStack(alignment: .leading, spacing: VisualStyle.spacing8) {
+                HStack(spacing: VisualStyle.spacing8) {
+                    proxyPrimaryButton
+                    nodeSelectionButton
                 }
 
-                HStack {
-                    Spacer(minLength: 0)
-                    proxyToggle
+                HStack(spacing: VisualStyle.spacing8) {
+                    configurationTestButton
+                    if model.state.isXrayRunning {
+                        reconnectButton
+                    }
                 }
             }
         }
-        .padding(.bottom, 15)
     }
 
-    private var proxyIdentity: some View {
-        HStack(spacing: 9) {
-            Image(systemName: "point.3.connected.trianglepath.dotted")
-                .foregroundStyle(.secondary)
-            Text("本地代理")
-                .font(.headline)
-                .fixedSize(horizontal: true, vertical: false)
+    private var proxyPrimaryButton: some View {
+        Button {
+            performProxyPrimaryAction()
+        } label: {
+            Label(
+                proxyPresentation.actionTitle,
+                systemImage: proxyPresentation.actionSystemImage
+            )
         }
+        .buttonStyle(OverviewPrimaryActionButtonStyle())
+        .disabled(proxyPresentation.action == .none || proxyToggleDisabled)
+        .help(proxyReadinessHint)
     }
 
-    private var proxyStatus: some View {
-        HStack(spacing: 7) {
-            Circle()
-                .fill(xrayStatusColor)
-                .frame(width: 7, height: 7)
-            Text(xrayStatusText)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: true, vertical: false)
-        }
-    }
-
-    private var proxyToggle: some View {
-        Toggle("本地代理", isOn: proxyEnabledBinding)
-            .labelsHidden()
-            .toggleStyle(.switch)
-            .disabled(proxyToggleDisabled)
-            .accessibilityLabel("本地代理")
-            .accessibilityValue(xrayStatusText)
-    }
-
-    private var proxyEndpointRow: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .center, spacing: 12) {
-                proxyEndpointLabel
-                proxyEndpointValue
-                Spacer(minLength: 0)
-                copyProxyEndpointButton
-            }
-
-            VStack(alignment: .leading, spacing: 7) {
-                HStack {
-                    proxyEndpointLabel
-                    Spacer(minLength: 0)
-                    copyProxyEndpointButton
-                }
-                proxyEndpointValue
-            }
-        }
-        .padding(.vertical, 10)
-    }
-
-    private var proxyEndpointLabel: some View {
-        Text("代理地址")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: true, vertical: false)
-            .frame(width: 72, alignment: .leading)
-    }
-
-    private var proxyEndpointValue: some View {
-        Text(proxyEndpoint)
-            .font(.system(.callout, design: .monospaced).weight(.medium))
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .textSelection(.enabled)
-            .layoutPriority(1)
-    }
-
-    private var copyProxyEndpointButton: some View {
-        Button(action: copyProxyEndpoint) {
-            Image(systemName: copiedEndpoint ? "checkmark" : "doc.on.doc")
-        }
-        .buttonStyle(.borderless)
-        .iconButtonHitTarget()
-        .help(copiedEndpoint ? "已复制" : "复制代理地址")
-        .accessibilityLabel(copiedEndpoint ? "已复制代理地址" : "复制代理地址")
-    }
-
-    private var proxyActionsRow: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 9) {
-                proxyActionButtons
-                Spacer(minLength: 0)
-            }
-
-            VStack(alignment: .leading, spacing: 9) {
-                proxyActionButtons
-            }
-        }
-        .padding(.top, 14)
-    }
-
-    @ViewBuilder
-    private var proxyActionButtons: some View {
+    private var nodeSelectionButton: some View {
         Button("选择节点", systemImage: "network", action: onSelectNodes)
+    }
 
+    private var configurationTestButton: some View {
         Button(configurationTestButtonTitle, systemImage: configurationTestButtonIcon) {
             if isConfigurationTestRunning {
                 model.stopCurrentConfigurationTest()
@@ -350,31 +253,34 @@ struct OverviewView: View {
         .disabled(configurationTestButtonDisabled)
         .help(configurationTestButtonHelp)
         .accessibilityHint(configurationTestButtonHelp)
+    }
 
-        if model.state.isXrayRunning {
-            Button("重新连接", systemImage: "arrow.clockwise", action: model.restartXray)
-                .disabled(model.switchingIP != nil || model.isTemplateOperationBusy)
-        }
+    private var reconnectButton: some View {
+        Button("重新连接", systemImage: "arrow.clockwise", action: model.restartXray)
+            .disabled(model.switchingIP != nil || model.isTemplateOperationBusy)
     }
 
     @ViewBuilder
     private var configurationTestStatus: some View {
         switch model.state.configurationTest.phase {
         case .running:
-            Label(
+            inlineMessage(
                 "正在测试当前节点…",
-                systemImage: "gauge.with.dots.needle.67percent"
+                systemImage: "gauge.with.dots.needle.67percent",
+                tone: .accent
             )
-            .foregroundStyle(VisualStyle.accent)
-            .configurationTestStatusStyle()
         case .stopping:
-            Label("正在停止当前节点测速…", systemImage: "hourglass")
-                .foregroundStyle(.secondary)
-                .configurationTestStatusStyle()
+            inlineMessage(
+                "正在停止当前节点测速…",
+                systemImage: "hourglass",
+                tone: .neutral
+            )
         case .failed(let message):
-            Label("当前节点测速失败：\(message)", systemImage: "exclamationmark.circle.fill")
-                .foregroundStyle(.red)
-                .configurationTestStatusStyle()
+            inlineMessage(
+                "当前节点测速失败：\(message)",
+                systemImage: "exclamationmark.circle.fill",
+                tone: .negative
+            )
         case .idle:
             if let completedAt = model.state.configurationTest.completedAt,
                 model.state.configurationTest.result != nil
@@ -384,113 +290,226 @@ struct OverviewView: View {
                     Text("当前节点测速完成 ·")
                     Text(completedAt, style: .relative)
                 }
+                .font(.caption)
                 .foregroundStyle(.secondary)
-                .configurationTestStatusStyle()
                 .help(completedAt.formatted(date: .complete, time: .standard))
             }
         }
     }
 
-    private var runtimePanel: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) {
-                runtimeStatusSummary
-                Spacer(minLength: 16)
-                runtimeInstallButton
-            }
+    private var routingModeCard: some View {
+        SurfaceCard {
+            VStack(alignment: .leading, spacing: 0) {
+                CardHeader(
+                    "代理模式",
+                    systemImage: "point.3.connected.trianglepath.dotted"
+                ) {
+                    if model.isRoutingModeChanging {
+                        ProgressView()
+                            .controlSize(.small)
+                            .accessibilityLabel("正在切换代理模式")
+                    } else {
+                        StatusBadge(displayedRoutingMode.displayName, tone: .accent)
+                    }
+                }
 
-            VStack(alignment: .leading, spacing: 12) {
-                runtimeStatusSummary
-                runtimeInstallButton
+                Divider()
+
+                ProxyRoutingModePicker(
+                    selection: Binding(
+                        get: { displayedRoutingMode },
+                        set: { selectRoutingMode($0) }
+                    ),
+                    isDisabled: routingModePickerDisabled
+                )
+                .padding(VisualStyle.spacing16)
             }
         }
-        .padding(18)
-        .cardStyle()
     }
 
-    private var runtimeStatusSummary: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: runtimeStatusIcon)
-                .foregroundStyle(runtimeStatusColor)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(runtimeStatusTitle)
-                    .font(.callout.weight(.medium))
-                Text(runtimeStatusDetail)
-                    .font(.caption)
-                    .foregroundStyle(
-                        model.state.runtimeOperationError == nil ? Color.secondary : Color.red
+    private var networkAccessCard: some View {
+        SurfaceCard {
+            VStack(alignment: .leading, spacing: 0) {
+                CardHeader(
+                    "网络接入",
+                    systemImage: "macbook.and.iphone",
+                    tone: systemProxyPresentation.appTone
+                ) {
+                    StatusBadge(
+                        systemProxyStatusText,
+                        tone: systemProxyPresentation.appTone,
+                        systemImage: systemProxyIsTransitioning ? "hourglass" : nil
                     )
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 0) {
+                    SettingRow(
+                        "系统代理",
+                        detail: "让遵循 macOS 代理设置的应用使用 ViaSix",
+                        systemImage: "desktopcomputer"
+                    ) {
+                        Toggle("系统代理", isOn: systemProxyEnabledBinding)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .disabled(systemProxyToggleDisabled)
+                            .accessibilityLabel("系统代理")
+                            .accessibilityValue(systemProxyStatusText)
+                    }
+
+                    Divider()
+
+                    SettingRow(
+                        "本地监听",
+                        detail: "仅监听本机回环地址",
+                        systemImage: "lock.shield"
+                    ) {
+                        Text(proxyEndpoint)
+                            .font(.caption.monospaced().weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+
+                    if case .failed(let message) = model.state.systemProxyPhase {
+                        Divider()
+                        inlineMessage(
+                            message,
+                            systemImage: "exclamationmark.triangle.fill",
+                            tone: .negative
+                        )
+                        .padding(.vertical, VisualStyle.spacing12)
+                    }
+
+                    Text("系统代理不会接管不遵循 macOS 代理设置的应用流量。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, VisualStyle.spacing12)
+                }
+                .padding(.horizontal, VisualStyle.spacing16)
+                .padding(.bottom, VisualStyle.spacing16)
+            }
+        }
+    }
+
+    private var exitIPCard: some View {
+        SurfaceCard {
+            VStack(alignment: .leading, spacing: 0) {
+                CardHeader(
+                    "出口 IP",
+                    systemImage: "globe.asia.australia",
+                    tone: model.exitIPResultIsStale ? .warning : .accent
+                ) {
+                    if let family = model.state.exit.info?.addressFamily {
+                        StatusBadge(family.displayName, tone: .neutral)
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: VisualStyle.spacing12) {
+                    exitIPSummary
+                    exitIPControls
+                }
+                .padding(VisualStyle.spacing16)
+            }
+        }
+    }
+
+    private var exitIPSummary: some View {
+        VStack(alignment: .leading, spacing: VisualStyle.spacing8) {
+            HStack(alignment: .firstTextBaseline, spacing: VisualStyle.spacing8) {
+                Text(model.state.exit.info?.ip ?? "尚未检测")
+                    .font(.system(.title3, design: .monospaced).weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+
+                if model.state.exit.info != nil {
+                    Button(action: copyExitIP) {
+                        Image(systemName: copiedExitIP ? "checkmark" : "doc.on.doc")
+                    }
+                    .buttonStyle(.borderless)
+                    .iconButtonHitTarget()
+                    .help(copiedExitIP ? "已复制" : "复制出口 IP")
+                    .accessibilityLabel(copiedExitIP ? "已复制出口 IP" : "复制出口 IP")
+                }
+            }
+
+            if let info = model.state.exit.info {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if model.state.exit.isEnriching, info.location.isEmpty {
+                        ProgressView()
+                            .controlSize(.mini)
+                    } else {
+                        Image(systemName: "mappin.and.ellipse")
+                    }
+
+                    Text(
+                        model.state.exit.isEnriching && info.location.isEmpty
+                            ? "正在补充位置与网络信息…"
+                            : (info.location.isEmpty ? "位置未返回" : info.location)
+                    )
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                if !info.details.isEmpty {
+                    Label(info.details, systemImage: "building.2")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if model.state.exit.isEnriching, !info.location.isEmpty {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.mini)
+                        Text("正在补充网络信息…")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                }
+
+                exitIPMetadata
+            } else {
+                Text("检测后会显示当前出口、地址族、地区与网络服务商。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-        }
-    }
 
-    @ViewBuilder
-    private var runtimeInstallButton: some View {
-        if model.state.runtimeOperation != nil {
-            Button("取消", systemImage: "xmark.circle", action: model.cancelRuntimeOperation)
-                .disabled(model.state.runtimeOperation?.canCancel != true)
-        } else {
-            Button(runtimeInstallTitle, systemImage: "arrow.down.circle", action: model.installRuntime)
-                .disabled(runtimeInstallationDisabled)
-        }
-    }
-
-    private func detailRow(label: String, value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Text(label)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .frame(width: 72, alignment: .leading)
-            Text(value)
-                .font(.callout)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer()
-        }
-        .padding(.vertical, 10)
-    }
-
-    private var exitIPPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                exitIPLabel
-                exitIPSummary
+            if let error = model.state.exit.errorMessage {
+                inlineMessage(
+                    error,
+                    systemImage: "exclamationmark.circle.fill",
+                    tone: .negative
+                )
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            exitIPControls
         }
-        .padding(.vertical, 11)
-    }
-
-    private var exitIPLabel: some View {
-        Text("出口 IP")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
-            .frame(width: 72, alignment: .leading)
+        .accessibilityElement(children: .contain)
     }
 
     private var exitIPControls: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 9) {
-                Spacer()
-                    .frame(width: 84)
+            HStack(spacing: VisualStyle.spacing8) {
                 exitIPModePicker
                     .frame(width: 190)
                 exitIPDetectionButton
                 Spacer(minLength: 0)
             }
 
-            VStack(alignment: .leading, spacing: 9) {
+            VStack(alignment: .leading, spacing: VisualStyle.spacing8) {
                 exitIPModePicker
                     .frame(maxWidth: 320)
                 exitIPDetectionButton
             }
-            .padding(.leading, 84)
         }
     }
 
@@ -519,108 +538,19 @@ struct OverviewView: View {
         .accessibilityHint(model.state.isXrayRunning ? "通过本地代理检测出口" : "直接检测本机出口")
     }
 
-    private var exitIPSummary: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(model.state.exit.info?.ip ?? "未检测")
-                    .font(.system(.callout, design: .monospaced).weight(.medium))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .layoutPriority(1)
-
-                if let family = model.state.exit.info?.addressFamily {
-                    Text(family.displayName)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
-
-                if model.state.exit.info != nil {
-                    Button(action: copyExitIP) {
-                        Image(systemName: copiedExitIP ? "checkmark" : "doc.on.doc")
-                    }
-                    .buttonStyle(.borderless)
-                    .iconButtonHitTarget()
-                    .help(copiedExitIP ? "已复制" : "复制出口 IP")
-                    .accessibilityLabel(copiedExitIP ? "已复制出口 IP" : "复制出口 IP")
-                }
-            }
-
-            if let info = model.state.exit.info {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    if model.state.exit.isEnriching, info.location.isEmpty {
-                        ProgressView()
-                            .controlSize(.mini)
-                    } else {
-                        Image(systemName: "mappin.and.ellipse")
-                            .foregroundStyle(.secondary)
-                    }
-                    Text(
-                        model.state.exit.isEnriching && info.location.isEmpty
-                            ? "正在补充位置与网络信息…"
-                            : (info.location.isEmpty ? "位置未返回" : info.location)
-                    )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                }
-
-                if !info.details.isEmpty {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Image(systemName: "building.2")
-                            .foregroundStyle(.tertiary)
-                        Text(info.details)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-
-                if model.state.exit.isEnriching, !info.location.isEmpty {
-                    HStack(spacing: 6) {
-                        ProgressView()
-                            .controlSize(.mini)
-                        Text("正在补充网络信息…")
-                    }
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                }
-
-                exitIPMetadata
-            }
-
-            if let error = model.state.exit.errorMessage {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .contain)
-    }
-
     @ViewBuilder
     private var exitIPMetadata: some View {
         if let route = model.exitIPRouteDescription {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Image(systemName: exitIPRouteIcon)
-                    .foregroundStyle(.tertiary)
-                Text(route)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-            .font(.caption)
-            .foregroundStyle(.tertiary)
+            Label(route, systemImage: exitIPRouteIcon)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
         }
 
         if let detectedAt = model.state.exit.detectedAt {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Image(systemName: "clock")
-                    .foregroundStyle(.tertiary)
                 Text("检测于 ")
                 Text(detectedAt, style: .relative)
             }
@@ -632,7 +562,7 @@ struct OverviewView: View {
         if model.exitIPResultIsStale {
             Label("结果已过期，请重新检测", systemImage: "exclamationmark.circle.fill")
                 .font(.caption)
-                .foregroundStyle(.orange)
+                .foregroundStyle(VisualStyle.warning)
         } else if showingPreviousExitIPResult {
             Label("上次成功结果", systemImage: "clock.arrow.circlepath")
                 .font(.caption)
@@ -640,19 +570,116 @@ struct OverviewView: View {
         }
     }
 
-    private var showingPreviousExitIPResult: Bool {
-        guard model.state.exit.info != nil else { return false }
-        return model.state.exit.isDetecting || model.state.exit.errorMessage != nil
+    private var runtimeBanner: some View {
+        SurfaceCard {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: VisualStyle.spacing12) {
+                    runtimeStatusSummary
+                    Spacer(minLength: VisualStyle.spacing16)
+                    runtimeInstallButton
+                }
+
+                VStack(alignment: .leading, spacing: VisualStyle.spacing12) {
+                    runtimeStatusSummary
+                    runtimeInstallButton
+                }
+            }
+            .padding(VisualStyle.spacing16)
+        }
     }
 
-    private var exitIPRouteIcon: String {
-        guard let route = model.state.exit.context?.route else { return "arrow.left.arrow.right" }
-        switch route {
-        case .direct:
-            return "arrow.up.right"
-        case .proxy:
-            return "point.3.connected.trianglepath.dotted"
+    private var runtimeStatusSummary: some View {
+        HStack(alignment: .top, spacing: VisualStyle.spacing12) {
+            Image(systemName: runtimeStatusIcon)
+                .font(.title3)
+                .foregroundStyle(runtimeStatusTone.color)
+                .frame(width: 28)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(runtimeStatusTitle)
+                    .font(.callout.weight(.semibold))
+                Text(runtimeStatusDetail)
+                    .font(.caption)
+                    .foregroundStyle(
+                        model.state.runtimeOperationError == nil ? Color.secondary : VisualStyle.negative
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
+    }
+
+    @ViewBuilder
+    private var runtimeInstallButton: some View {
+        if model.state.runtimeOperation != nil {
+            Button("取消", systemImage: "xmark.circle", action: model.cancelRuntimeOperation)
+                .disabled(model.state.runtimeOperation?.canCancel != true)
+        } else {
+            Button(
+                runtimeInstallTitle,
+                systemImage: "arrow.down.circle",
+                action: model.installRuntime
+            )
+            .disabled(runtimeInstallationDisabled)
+        }
+    }
+
+    private func inlineMessage(
+        _ message: String,
+        systemImage: String,
+        tone: AppTone
+    ) -> some View {
+        Label(message, systemImage: systemImage)
+            .font(.caption)
+            .foregroundStyle(tone.color)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var proxyPresentation: SidebarProxyPresentation {
+        SidebarProxyPresentation(
+            launchPhase: model.state.launchPhase,
+            xrayPhase: model.state.xrayPhase,
+            endpoint: model.state.proxyEndpoint
+        )
+    }
+
+    private var connectionStatusShortTitle: String {
+        switch model.state.xrayPhase {
+        case .stopped: "未启动"
+        case .validating: "校验中"
+        case .starting: "启动中"
+        case .running: "运行中"
+        case .stopping: "停止中"
+        case .failed: "异常"
+        }
+    }
+
+    private var currentNodeTitle: String {
+        if !model.requiresSelectedNodeForProxy {
+            return "直连模式"
+        }
+        if let region = selectedResult?.region, !region.isEmpty {
+            return region
+        }
+        return selectedIP.isEmpty ? "尚未选择节点" : "当前节点"
+    }
+
+    private var currentNodeDetail: String {
+        if !model.requiresSelectedNodeForProxy {
+            return "流量直接连接，不经过代理节点"
+        }
+        if selectedIP.isEmpty {
+            return "前往节点页测速并选择一个可用地址"
+        }
+        return selectedIP
+    }
+
+    private var currentNodeIcon: String {
+        model.requiresSelectedNodeForProxy ? "network" : "arrow.up.right"
+    }
+
+    private var currentNodeTone: AppTone {
+        if !model.requiresSelectedNodeForProxy { return .neutral }
+        return selectedIP.isEmpty ? .warning : .accent
     }
 
     private var selectedResult: ViaSixCore.SpeedTestResult? {
@@ -662,49 +689,22 @@ struct OverviewView: View {
         return model.state.selectedResult
     }
 
-    private var speedTestProtocolLabel: String {
-        if let result = model.state.configurationTest.result, result.ip == selectedIP {
-            guard let parameters = model.state.configurationTest.parameters else {
-                return "当前节点测速"
-            }
-            return parameters.httping ? "HTTPing" : "TCPing"
-        }
-        guard model.state.speedTestResultsAreCurrent else { return "需重新测速" }
-        return model.parameters.httping ? "HTTPing" : "TCPing"
-    }
-
     private var selectedIP: String {
         model.state.preferences.selectedIP
-    }
-
-    private var currentNodeMetricValue: String {
-        if let ip = selectedResult?.ip { return ip }
-        if !selectedIP.isEmpty { return selectedIP }
-        return model.requiresSelectedNodeForProxy ? "" : "直连模式"
-    }
-
-    private var currentNodeMetricDetail: String {
-        model.requiresSelectedNodeForProxy ? "Cloudflare IP" : "无需选择节点"
     }
 
     private var proxyEndpoint: String {
         model.state.proxyEndpoint.displayAddress
     }
 
-    private var proxyEnabledBinding: Binding<Bool> {
-        Binding {
-            switch model.state.xrayPhase {
-            case .validating, .starting, .running:
-                true
-            case .stopped, .stopping, .failed:
-                false
-            }
-        } set: { enabled in
-            if enabled {
-                model.startXray()
-            } else {
-                model.stopXray()
-            }
+    private func performProxyPrimaryAction() {
+        switch proxyPresentation.action {
+        case .startProxy:
+            model.startXray()
+        case .stopProxy:
+            model.stopXray()
+        case .none:
+            break
         }
     }
 
@@ -767,30 +767,8 @@ struct OverviewView: View {
         }
     }
 
-    private var systemProxyStatus: some View {
-        HStack(spacing: 7) {
-            if systemProxyIsTransitioning {
-                ProgressView()
-                    .controlSize(.mini)
-            } else {
-                Circle()
-                    .fill(systemProxyStatusColor)
-                    .frame(width: 7, height: 7)
-            }
-            Text(systemProxyStatusText)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("系统代理：\(systemProxyStatusText)")
-    }
-
     private var systemProxyStatusText: String {
         systemProxyPresentation.text
-    }
-
-    private var systemProxyStatusColor: Color {
-        systemProxyPresentation.tone.color
     }
 
     private var systemProxyIsTransitioning: Bool {
@@ -812,27 +790,18 @@ struct OverviewView: View {
         }
     }
 
-    private var metricColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: 145), spacing: 22)]
+    private var showingPreviousExitIPResult: Bool {
+        guard model.state.exit.info != nil else { return false }
+        return model.state.exit.isDetecting || model.state.exit.errorMessage != nil
     }
 
-    private var xrayStatusText: String {
-        switch model.state.xrayPhase {
-        case .stopped: "未启动"
-        case .validating: "校验中"
-        case .starting: "启动中"
-        case .running: "运行中"
-        case .stopping: "停止中"
-        case .failed: "运行异常"
-        }
-    }
-
-    private var xrayStatusColor: Color {
-        switch model.state.xrayPhase {
-        case .running: .green
-        case .validating, .starting, .stopping: .orange
-        case .stopped: .secondary
-        case .failed: .red
+    private var exitIPRouteIcon: String {
+        guard let route = model.state.exit.context?.route else { return "arrow.left.arrow.right" }
+        switch route {
+        case .direct:
+            return "arrow.up.right"
+        case .proxy:
+            return "point.3.connected.trianglepath.dotted"
         }
     }
 
@@ -864,15 +833,15 @@ struct OverviewView: View {
     private var proxyReadinessHint: String {
         switch model.state.xrayPhase {
         case .validating:
-            return "正在校验代理配置，可关闭开关取消启动。"
+            return "正在校验代理配置，可取消启动。"
         case .starting:
-            return "正在启动本地代理，可关闭开关取消启动。"
+            return "正在启动本地代理，可取消启动。"
         case .stopping:
             return "正在停止本地代理并清理网络监听。"
-        case .stopped, .failed:
-            break
         case .running:
             return "本地代理正在运行。"
+        case .stopped, .failed:
+            break
         }
         if model.state.runtimeOperation != nil {
             return "运行组件安装中，完成后即可启动本地代理。"
@@ -889,7 +858,7 @@ struct OverviewView: View {
         if !model.hasXrayExecutable {
             return "尚未找到 Xray-core，请在设置中安装或指定路径。"
         }
-        return "代理已停止，打开右侧开关即可启动。"
+        return "本地代理当前未启动。"
     }
 
     private func copyProxyEndpoint() {
@@ -913,6 +882,13 @@ struct OverviewView: View {
             try? await Task.sleep(for: .seconds(1.5))
             copiedExitIP = false
         }
+    }
+
+    private var runtimeNeedsAttention: Bool {
+        model.state.runtimePhase != .ready
+            || model.state.runtimeOperation != nil
+            || model.state.runtimeOperationError != nil
+            || model.runtimeIntegrityIssue != nil
     }
 
     private var runtimeInstallationDisabled: Bool {
@@ -1020,14 +996,14 @@ struct OverviewView: View {
         return model.state.runtimePhase == .ready ? "重新安装组件" : "安装组件"
     }
 
-    private var runtimeStatusColor: Color {
-        if model.state.runtimeOperation != nil { return VisualStyle.accent }
-        if model.state.runtimeOperationError != nil { return .red }
-        if model.runtimeIntegrityIssue != nil { return .orange }
+    private var runtimeStatusTone: AppTone {
+        if model.state.runtimeOperation != nil { return .accent }
+        if model.state.runtimeOperationError != nil { return .negative }
+        if model.runtimeIntegrityIssue != nil { return .warning }
         return switch model.state.runtimePhase {
-        case .ready: .green
-        case .checking: .secondary
-        case .missing: .orange
+        case .ready: .positive
+        case .checking: .neutral
+        case .missing: .warning
         }
     }
 
@@ -1051,11 +1027,15 @@ struct SystemProxyStatusPresentation: Equatable {
         case error
 
         var color: Color {
+            appTone.color
+        }
+
+        var appTone: AppTone {
             switch self {
-            case .neutral: .secondary
-            case .pending: .orange
-            case .active: .green
-            case .error: .red
+            case .neutral: .neutral
+            case .pending: .warning
+            case .active: .positive
+            case .error: .negative
             }
         }
     }
@@ -1063,6 +1043,10 @@ struct SystemProxyStatusPresentation: Equatable {
     let text: String
     let tone: Tone
     let isTransitioning: Bool
+
+    var appTone: AppTone {
+        tone.appTone
+    }
 
     init(phase: AppState.SystemProxyPhase, isRequested: Bool) {
         switch phase {
@@ -1090,33 +1074,50 @@ struct SystemProxyStatusPresentation: Equatable {
     }
 }
 
-private struct OverviewMetric: View {
+private struct ConnectionMetricChip: View {
     let title: String
-    let value: String
-    let detail: String
     let systemImage: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Label(title, systemImage: systemImage)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(value.isEmpty ? "—" : value)
-                .font(.title3.weight(.semibold))
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Text(detail)
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        Label(title, systemImage: systemImage)
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(
+                VisualStyle.subtleFill,
+                in: Capsule(style: .continuous)
+            )
+            .lineLimit(1)
     }
 }
 
-private extension View {
-    func configurationTestStatusStyle() -> some View {
-        font(.caption)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, 8)
+private struct OverviewPrimaryActionButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.callout.weight(.semibold))
+            .foregroundStyle(isEnabled ? Color.white : Color.secondary)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 30)
+            .background(
+                isEnabled ? VisualStyle.accent : VisualStyle.subtleFill,
+                in: RoundedRectangle(
+                    cornerRadius: VisualStyle.radiusSmall,
+                    style: .continuous
+                )
+            )
+            .overlay {
+                RoundedRectangle(
+                    cornerRadius: VisualStyle.radiusSmall,
+                    style: .continuous
+                )
+                .stroke(
+                    isEnabled ? VisualStyle.accent : VisualStyle.surfaceBorder,
+                    lineWidth: 1
+                )
+            }
+            .opacity(configuration.isPressed ? 0.76 : 1)
     }
 }

@@ -23,154 +23,162 @@ struct LogsView: View {
             ids: visibleLogIDs
         )
 
-        VStack(spacing: 18) {
-            HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("活动")
-                        .font(.title2.weight(.semibold))
-                    Text("查看和筛选测速与代理运行日志")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                if isFiltering {
-                    Text("\(visibleLogs.count) / \(model.state.logs.count) 条")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-
-                filterMenu
-
-                Button {
-                    followState.toggleExplicitFollowing(
-                        latestEntryID: latestVisibleLogID,
-                        visibleTarget: visibleScrollTarget
+        VStack(alignment: .leading, spacing: VisualStyle.spacing16) {
+            AppPageHeader(
+                "日志",
+                subtitle: "实时查看本地代理与节点测速记录"
+            ) {
+                HStack(spacing: VisualStyle.spacing8) {
+                    Button {
+                        followState.toggleExplicitFollowing(
+                            latestEntryID: latestVisibleLogID,
+                            visibleTarget: visibleScrollTarget
+                        )
+                    } label: {
+                        Label(
+                            followState.followsLatest ? "暂停跟随" : "跟随最新",
+                            systemImage: followState.followsLatest
+                                ? "pause.fill"
+                                : "arrow.down.to.line"
+                        )
+                        .labelStyle(.iconOnly)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help(
+                        followState.followsLatest
+                            ? "暂停新日志到达时的自动滚动"
+                            : "滚动到最新日志并恢复自动跟随"
                     )
-                } label: {
-                    Label(
-                        followState.followsLatest ? "暂停跟随" : "跟随最新",
-                        systemImage: followState.followsLatest ? "pause" : "arrow.down.to.line"
+                    .accessibilityLabel(
+                        followState.followsLatest ? "暂停跟随" : "跟随最新"
                     )
-                }
-                .buttonStyle(.borderless)
-                .frame(minHeight: VisualStyle.controlHeight)
-                .help(
-                    followState.followsLatest
-                        ? "暂停新日志到达时的自动滚动"
-                        : "滚动到最新日志并恢复自动跟随"
-                )
-                .disabled(model.state.logs.isEmpty)
+                    .disabled(model.state.logs.isEmpty)
 
-                Button(role: .destructive) {
-                    showsClearConfirmation = true
-                } label: {
-                    Label("清空…", systemImage: "trash")
+                    Button(role: .destructive) {
+                        showsClearConfirmation = true
+                    } label: {
+                        Label("清空", systemImage: "trash")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(model.state.logs.isEmpty)
                 }
-                .buttonStyle(.borderless)
-                .frame(minHeight: VisualStyle.controlHeight)
-                .disabled(model.state.logs.isEmpty)
             }
 
-            Divider()
-
-            if model.state.logs.isEmpty {
-                ContentUnavailableView(
-                    "暂无运行记录",
-                    systemImage: "text.alignleft",
-                    description: Text("开始节点测速或启动本地代理后，记录会显示在这里。")
+            VStack(spacing: 0) {
+                compactToolbar(
+                    visibleCount: visibleLogs.count,
+                    totalCount: model.state.logs.count
                 )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if visibleLogs.isEmpty {
-                ContentUnavailableView {
-                    Label("没有匹配的运行记录", systemImage: "magnifyingglass")
-                } description: {
-                    Text("尝试更换关键词，或清除来源与级别筛选。")
-                } actions: {
-                    Button("清除筛选", action: resetFilters)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(visibleLogs) { entry in
-                                VStack(spacing: 0) {
-                                    LogRow(entry: entry)
 
-                                    if entry.id != latestVisibleLogID {
-                                        Divider()
-                                            .opacity(0.45)
+                Divider()
+
+                if model.state.logs.isEmpty {
+                    ContentUnavailableView(
+                        "暂无运行记录",
+                        systemImage: "text.alignleft",
+                        description: Text("开始节点测速或启动本地代理后，记录会显示在这里。")
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if visibleLogs.isEmpty {
+                    ContentUnavailableView {
+                        Label("没有匹配的运行记录", systemImage: "magnifyingglass")
+                    } description: {
+                        Text("尝试更换关键词，或清除来源与级别筛选。")
+                    } actions: {
+                        Button("清除筛选", action: resetFilters)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 0) {
+                                ForEach(visibleLogs) { entry in
+                                    VStack(spacing: 0) {
+                                        LogRow(entry: entry)
+
+                                        if entry.id != latestVisibleLogID {
+                                            Divider()
+                                                .opacity(0.45)
+                                        }
                                     }
+                                    .id(LogScrollTarget.entry(entry.id))
                                 }
-                                .id(LogScrollTarget.entry(entry.id))
-                            }
 
-                            if let latestVisibleLogID {
-                                Color.clear
-                                    .frame(height: 1)
-                                    .id(LogScrollTarget.bottom(latestVisibleLogID))
-                                    .accessibilityHidden(true)
+                                if let latestVisibleLogID {
+                                    Color.clear
+                                        .frame(height: 1)
+                                        .id(LogScrollTarget.bottom(latestVisibleLogID))
+                                        .accessibilityHidden(true)
+                                }
+                            }
+                            .scrollTargetLayout()
+                        }
+                        .scrollPosition(id: $visibleScrollTarget, anchor: .bottom)
+                        .scrollbarSafeContent()
+                        .overlay(alignment: .bottomTrailing) {
+                            if !followState.followsLatest {
+                                Button {
+                                    followState.resumeFollowing(
+                                        target: latestVisibleLogID,
+                                        visibleTarget: visibleScrollTarget
+                                    )
+                                } label: {
+                                    Label(
+                                        followState.pendingNewRecordCount > 0
+                                            ? "有 \(followState.pendingNewRecordCount) 条新记录"
+                                            : "回到最新",
+                                        systemImage: "arrow.down.to.line"
+                                    )
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
+                                .help("滚动到最新日志并恢复自动跟随")
+                                .padding(.trailing, VisualStyle.scrollbarClearance + 8)
+                                .padding(.bottom, 10)
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
                             }
                         }
-                        .scrollTargetLayout()
-                    }
-                    .scrollPosition(id: $visibleScrollTarget, anchor: .bottom)
-                    .scrollbarSafeContent()
-                    .overlay(alignment: .bottomTrailing) {
-                        if !followState.followsLatest {
-                            Button {
-                                followState.resumeFollowing(
-                                    target: latestVisibleLogID,
-                                    visibleTarget: visibleScrollTarget
-                                )
-                            } label: {
-                                Label(
-                                    followState.pendingNewRecordCount > 0
-                                        ? "有 \(followState.pendingNewRecordCount) 条新记录"
-                                        : "回到最新",
-                                    systemImage: "arrow.down.to.line"
-                                )
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
-                            .help("滚动到最新日志并恢复自动跟随")
-                            .padding(.trailing, VisualStyle.scrollbarClearance + 8)
-                            .padding(.bottom, 10)
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .onAppear {
+                            let shouldScroll = followState.beginMaintainingLatest(
+                                target: latestVisibleLogID,
+                                visibleTarget: visibleScrollTarget
+                            )
+                            guard shouldScroll else { return }
+                            scrollToLatest(using: proxy, latestEntryID: latestVisibleLogID)
                         }
-                    }
-                    .onAppear {
-                        let shouldScroll = followState.beginMaintainingLatest(
-                            target: latestVisibleLogID,
-                            visibleTarget: visibleScrollTarget
-                        )
-                        guard shouldScroll else { return }
-                        scrollToLatest(using: proxy, latestEntryID: latestVisibleLogID)
-                    }
-                    .onChange(of: filteredSnapshot) { _, current in
-                        let shouldMaintainLatest = followState.beginMaintainingLatest(
-                            target: current.ids.last,
-                            visibleTarget: visibleScrollTarget
-                        )
-                        guard shouldMaintainLatest else { return }
-                        scrollToLatest(using: proxy, latestEntryID: current.ids.last)
-                    }
-                    .onChange(of: visibleScrollTarget) { _, target in
-                        followState.observeVisibleTarget(
-                            target,
-                            latestEntryID: latestVisibleLogID
-                        )
-                    }
-                    .onChange(of: followState.followsLatest) { _, isFollowing in
-                        guard isFollowing else { return }
-                        scrollToLatest(using: proxy, latestEntryID: latestVisibleLogID)
+                        .onChange(of: filteredSnapshot) { _, current in
+                            let shouldMaintainLatest = followState.beginMaintainingLatest(
+                                target: current.ids.last,
+                                visibleTarget: visibleScrollTarget
+                            )
+                            guard shouldMaintainLatest else { return }
+                            scrollToLatest(using: proxy, latestEntryID: current.ids.last)
+                        }
+                        .onChange(of: visibleScrollTarget) { _, target in
+                            followState.observeVisibleTarget(
+                                target,
+                                latestEntryID: latestVisibleLogID
+                            )
+                        }
+                        .onChange(of: followState.followsLatest) { _, isFollowing in
+                            guard isFollowing else { return }
+                            scrollToLatest(using: proxy, latestEntryID: latestVisibleLogID)
+                        }
                     }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipShape(
+                RoundedRectangle(
+                    cornerRadius: VisualStyle.radiusMedium,
+                    style: .continuous
+                )
+            )
+            .cardStyle()
         }
-        .searchable(text: $searchText, placement: .toolbar, prompt: "搜索运行记录")
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onChange(of: filteredSnapshot) { previous, current in
             if previous.filter == current.filter {
                 followState.observeMatchingLogIDs(
@@ -222,6 +230,64 @@ struct LogsView: View {
             || levelFilter != .all
     }
 
+    private func compactToolbar(visibleCount: Int, totalCount: Int) -> some View {
+        HStack(spacing: VisualStyle.spacing8) {
+            filterMenu
+
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+
+                TextField("搜索运行记录", text: $searchText)
+                    .textFieldStyle(.plain)
+
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("清除搜索")
+                    .accessibilityLabel("清除搜索")
+                }
+            }
+            .padding(.horizontal, 9)
+            .frame(maxWidth: .infinity, minHeight: 28)
+            .background(
+                VisualStyle.subtleFill,
+                in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(VisualStyle.surfaceBorder, lineWidth: 1)
+            }
+
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(followState.followsLatest ? VisualStyle.positive : VisualStyle.warning)
+                    .frame(width: 6, height: 6)
+
+                Text(followState.followsLatest ? "实时" : "已暂停")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize()
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(followState.followsLatest ? "正在实时跟随" : "日志跟随已暂停")
+
+            Text(isFiltering ? "\(visibleCount) / \(totalCount) 条" : "\(totalCount) 条")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .fixedSize()
+        }
+        .padding(.horizontal, VisualStyle.spacing12)
+        .padding(.vertical, 9)
+        .background(VisualStyle.elevatedSurfaceColor.opacity(0.45))
+    }
+
     private var filterMenu: some View {
         Menu {
             Picker("来源", selection: $sourceFilter) {
@@ -245,7 +311,7 @@ struct LogsView: View {
             }
         } label: {
             Label(
-                "筛选",
+                filterMenuTitle,
                 systemImage: sourceFilter == .all && levelFilter == .all
                     ? "line.3.horizontal.decrease.circle"
                     : "line.3.horizontal.decrease.circle.fill"
@@ -254,6 +320,19 @@ struct LogsView: View {
         .menuStyle(.borderlessButton)
         .fixedSize()
         .disabled(model.state.logs.isEmpty)
+    }
+
+    private var filterMenuTitle: String {
+        switch (sourceFilter, levelFilter) {
+        case (.all, .all):
+            "筛选"
+        case (.all, let level):
+            level.title
+        case (let source, .all):
+            source.title
+        case (let source, let level):
+            "\(source.title) · \(level.title)"
+        }
     }
 
     private func resetFilters() {
@@ -477,36 +556,46 @@ private struct LogRow: View {
     let entry: AppLogEntry
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        HStack(alignment: .firstTextBaseline, spacing: 9) {
             Text(entry.date, format: .dateTime.hour().minute().second())
-                .font(.callout.monospacedDigit())
+                .font(.system(size: 11, design: .monospaced).monospacedDigit())
                 .foregroundStyle(.tertiary)
-                .frame(width: 82, alignment: .leading)
+                .frame(width: 68, alignment: .leading)
 
-            Text(entry.source.rawValue)
-                .font(.callout.weight(.medium))
-                .foregroundStyle(color)
-                .frame(width: 50, alignment: .leading)
+            CompactLogBadge(
+                title: entry.source.rawValue,
+                color: sourceColor
+            )
+            .frame(width: 43)
 
-            Text(levelTitle)
-                .font(.caption.weight(.medium))
-                .foregroundStyle(color)
-                .frame(width: 38, alignment: .leading)
+            CompactLogBadge(title: levelTitle, color: levelColor)
+                .frame(width: 43)
 
             Text(entry.message)
-                .font(.system(.callout, design: .monospaced))
+                .font(.system(size: 12, design: .monospaced))
+                .lineSpacing(2)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 11)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .frame(minHeight: 34)
     }
 
-    private var color: Color {
+    private var sourceColor: Color {
+        switch entry.source {
+        case .app: .secondary
+        case .speedTest: .purple
+        case .xray: VisualStyle.accent
+        }
+    }
+
+    private var levelColor: Color {
         switch entry.level {
-        case .info: .secondary
-        case .success: .green
-        case .warning: .orange
-        case .error: .red
+        case .info: VisualStyle.accent
+        case .success: VisualStyle.positive
+        case .warning: VisualStyle.warning
+        case .error: VisualStyle.negative
         }
     }
 
@@ -517,5 +606,28 @@ private struct LogRow: View {
         case .warning: "警告"
         case .error: "错误"
         }
+    }
+}
+
+private struct CompactLogBadge: View {
+    let title: String
+    let color: Color
+
+    var body: some View {
+        Text(title)
+            .font(.system(size: 10, weight: .semibold))
+            .lineLimit(1)
+            .foregroundStyle(color)
+            .padding(.horizontal, 6)
+            .frame(minHeight: 18)
+            .background(
+                color.opacity(0.1),
+                in: RoundedRectangle(cornerRadius: 5, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .stroke(color.opacity(0.18), lineWidth: 0.5)
+            }
+            .accessibilityElement(children: .combine)
     }
 }

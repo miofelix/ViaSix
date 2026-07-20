@@ -1,11 +1,11 @@
 import SwiftUI
 
 extension NodesView {
-    // MARK: - Test and Results
+    // MARK: - Speed-test status
 
     var speedTestCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            speedTestHeader
+        VStack(alignment: .leading, spacing: VisualStyle.spacing12) {
+            speedTestStatusHeader
 
             if isTesting {
                 Group {
@@ -23,9 +23,13 @@ extension NodesView {
 
                 progressSummary
             } else if isCfstBusyElsewhere {
-                Label("完成当前节点测速后，即可开始新的候选节点扫描。", systemImage: "info.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Label(
+                    "完成当前节点测速后，即可开始新的候选节点扫描。",
+                    systemImage: "info.circle"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             } else {
                 idleSummary
             }
@@ -33,70 +37,61 @@ extension NodesView {
             if let parameterValidationMessage {
                 Label(parameterValidationMessage, systemImage: "exclamationmark.circle.fill")
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(VisualStyle.warning)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if speedTestReadinessMessage != nil {
                 readinessSummary
             }
         }
-        .padding(20)
+        .padding(VisualStyle.spacing16)
         .cardStyle()
     }
 
-    private var speedTestHeader: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) {
-                speedTestTitle
-                Spacer(minLength: 12)
-                speedTestAction
+    private var speedTestStatusHeader: some View {
+        HStack(alignment: .center, spacing: VisualStyle.spacing12) {
+            Image(systemName: speedTestStatusSystemImage)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(speedTestStatusTone.color)
+                .frame(width: 32, height: 32)
+                .background(
+                    speedTestStatusTone.color.opacity(0.1),
+                    in: RoundedRectangle(
+                        cornerRadius: VisualStyle.radiusSmall,
+                        style: .continuous
+                    )
+                )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("测速状态")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(speedTestStatusText)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(speedTestStatusTone.color)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            VStack(alignment: .leading, spacing: 10) {
-                speedTestTitle
-                HStack {
-                    Spacer(minLength: 0)
-                    speedTestAction
-                }
-            }
-        }
-    }
+            Spacer(minLength: VisualStyle.spacing12)
 
-    private var speedTestTitle: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text("IP 测速")
-                .font(.headline)
-            Text(speedTestStatusText)
-                .font(.caption)
-                .foregroundStyle(speedTestStatusColor)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private var speedTestAction: some View {
-        Group {
             if isTesting {
-                Button(role: .destructive) {
-                    model.stopSpeedTest()
-                } label: {
-                    Label(isStopping ? "正在停止" : "停止", systemImage: "stop.fill")
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(isStopping)
-            } else {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        showsParameters = false
-                    }
-                    model.startSpeedTest()
-                } label: {
-                    Label("开始测速", systemImage: "play.fill")
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(VisualStyle.accent)
-                .disabled(!canStartSpeedTest)
+                StatusBadge(
+                    isStopping ? "停止中" : "测速中",
+                    tone: isStopping ? .warning : .accent,
+                    systemImage: isStopping ? "hourglass" : "waveform.path.ecg"
+                )
+            } else if !model.state.results.isEmpty {
+                StatusBadge(
+                    model.state.speedTestResultsAreCurrent ? "结果可用" : "结果已过期",
+                    tone: model.state.speedTestResultsAreCurrent ? .positive : .warning
+                )
             }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("测速状态")
+        .accessibilityValue(speedTestStatusText)
     }
 
     private var progressSummary: some View {
@@ -122,7 +117,7 @@ extension NodesView {
 
     private var idleSummary: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) {
+            HStack(spacing: VisualStyle.spacing12) {
                 idleSummarySource
                 Divider()
                     .frame(height: 14)

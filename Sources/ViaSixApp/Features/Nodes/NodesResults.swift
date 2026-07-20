@@ -7,12 +7,7 @@ extension NodesView {
             resultsHeader
 
             if model.state.results.isEmpty {
-                ContentUnavailableView(
-                    "暂无测速结果",
-                    systemImage: "network.slash",
-                    description: Text("配置参数后点击“开始测速”生成候选节点。")
-                )
-                .frame(maxWidth: .infinity, minHeight: 190)
+                emptyResultsView
             } else {
                 Table(
                     sortedResults,
@@ -71,12 +66,14 @@ extension NodesView {
                     }
                     .width(min: 76, ideal: 94)
                 }
-                .frame(height: resultsTableHeight)
+                .frame(maxWidth: .infinity, minHeight: 260, maxHeight: .infinity)
                 .accessibilityLabel("候选节点")
             }
         }
-        .padding(22)
+        .padding(VisualStyle.spacing16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .cardStyle()
+        .layoutPriority(1)
     }
 
     private var sortedResults: [SpeedTestResult] {
@@ -119,10 +116,10 @@ extension NodesView {
     }
 
     private var resultsCount: some View {
-        Text("\(model.state.results.count) 条")
-            .font(.caption.monospacedDigit().weight(.semibold))
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: true, vertical: false)
+        StatusBadge(
+            "\(model.state.results.count) 条",
+            tone: model.state.results.isEmpty ? .neutral : .accent
+        )
     }
 
     @ViewBuilder
@@ -161,5 +158,66 @@ extension NodesView {
         .buttonStyle(.bordered)
         .tint(VisualStyle.accent)
         .disabled(applySelectionDisabled)
+        .help(applySelectionHelp)
+        .accessibilityHint(applySelectionHelp)
+    }
+
+    private var emptyResultsView: some View {
+        ContentUnavailableView {
+            Label(
+                emptyResultsPresentation.title,
+                systemImage: emptyResultsPresentation.systemImage
+            )
+            .foregroundStyle(emptyResultsPresentation.tone.color)
+        } description: {
+            Text(emptyResultsPresentation.description)
+        } actions: {
+            emptyResultsActions
+        }
+        .frame(maxWidth: .infinity, minHeight: 260, maxHeight: .infinity)
+        .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private var emptyResultsActions: some View {
+        if emptyResultsPresentation.isBusy {
+            ProgressView()
+                .controlSize(.small)
+                .accessibilityLabel(emptyResultsPresentation.title)
+        }
+
+        switch emptyResultsPresentation.action {
+        case .none:
+            EmptyView()
+
+        case .openSettings:
+            SettingsLink {
+                Label(
+                    emptyResultsPresentation.actionTitle ?? "打开设置",
+                    systemImage: "gearshape"
+                )
+            }
+
+        case .showParameters:
+            Button {
+                showsParameters = true
+            } label: {
+                Label(
+                    emptyResultsPresentation.actionTitle ?? "检查测速参数",
+                    systemImage: "slider.horizontal.3"
+                )
+            }
+
+        case .startSpeedTest:
+            Button(action: startSpeedTest) {
+                Label(
+                    emptyResultsPresentation.actionTitle ?? "开始测速",
+                    systemImage: "play.fill"
+                )
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!canStartSpeedTest)
+            .help(speedTestStartHelp)
+        }
     }
 }

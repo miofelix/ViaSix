@@ -6,25 +6,20 @@ struct NodesView: View {
     @Environment(AppModel.self) var model
 
     @SceneStorage("nodes.expandedParameterGroups") var expandedParameterGroupIDs = ParameterGroup.source.rawValue
-    @SceneStorage("nodes.showsParameters") var showsParameters = true
     @SceneStorage("nodes.candidateSelection") var candidateSelection: SpeedTestResult.ID?
+    @State var showsParameters = false
     @State var copiedCandidateIP: String?
     @State var reconnectConfirmationIP: String?
     @State var showsResetConfirmation = false
     @State var resultSortOrder: [NodeResultSortComparator] = []
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                pageHeader
-                speedTestCard
-                resultsCard
-                parametersCard
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.bottom, 4)
+        VStack(alignment: .leading, spacing: VisualStyle.spacing16) {
+            pageHeader
+            speedTestCard
+            resultsCard
         }
-        .scrollbarSafeContent()
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
             syncCandidateSelection()
         }
@@ -33,6 +28,9 @@ struct NodesView: View {
         }
         .onChange(of: model.state.preferences.selectedIP) {
             syncCandidateSelection()
+        }
+        .sheet(isPresented: $showsParameters) {
+            parametersSheet
         }
         .confirmationDialog(
             "应用节点并重新连接？",
@@ -49,18 +47,6 @@ struct NodesView: View {
             }
         } message: {
             Text("本地代理会短暂中断，并使用所选节点重新连接。")
-        }
-        .confirmationDialog(
-            "恢复默认测速设置？",
-            isPresented: $showsResetConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("恢复默认设置", role: .destructive) {
-                model.resetParameters()
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("地址来源、测速模式、筛选条件和性能选项都会恢复默认值。")
         }
     }
 }

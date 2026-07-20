@@ -4,55 +4,68 @@ extension NodesView {
     // MARK: - Header
 
     var pageHeader: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .center, spacing: 20) {
-                pageTitle
-                Spacer(minLength: 16)
+        AppPageHeader(
+            "节点测速",
+            subtitle: "比较候选节点，确认后应用到本地代理"
+        ) {
+            HStack(spacing: VisualStyle.spacing12) {
                 currentNodeSummary
-            }
 
-            VStack(alignment: .leading, spacing: 12) {
-                pageTitle
-                compactCurrentNodeSummary
-            }
-        }
-        .padding(.vertical, 2)
-    }
+                Button {
+                    showsParameters = true
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                }
+                .buttonStyle(.bordered)
+                .iconButtonHitTarget()
+                .help("打开测速设置")
+                .accessibilityLabel("打开测速设置")
 
-    private var pageTitle: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("节点测速")
-                .font(.title2.weight(.semibold))
-            Text("比较候选节点，确认后应用到本地代理")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                primarySpeedTestAction
+            }
         }
     }
 
     private var currentNodeSummary: some View {
-        VStack(alignment: .trailing, spacing: 4) {
+        VStack(alignment: .trailing, spacing: 2) {
             Text("当前节点")
-                .font(.caption)
+                .font(.caption2)
                 .foregroundStyle(.secondary)
+
             Text(currentIPLabel)
-                .font(.system(.callout, design: .monospaced).weight(.medium))
+                .font(.system(.caption, design: .monospaced).weight(.semibold))
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .multilineTextAlignment(.trailing)
+                .textSelection(.enabled)
         }
+        .frame(minWidth: 92, maxWidth: 180, alignment: .trailing)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("当前节点")
+        .accessibilityValue(currentIPLabel)
     }
 
-    private var compactCurrentNodeSummary: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("当前节点")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(currentIPLabel)
-                .font(.system(.callout, design: .monospaced).weight(.medium))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: .infinity, alignment: .leading)
+    @ViewBuilder
+    private var primarySpeedTestAction: some View {
+        if isTesting {
+            Button(role: .destructive) {
+                model.stopSpeedTest()
+            } label: {
+                Label(
+                    isStopping ? "正在停止" : "停止测速",
+                    systemImage: isStopping ? "hourglass" : "stop.fill"
+                )
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(isStopping)
+            .help(isStopping ? "正在停止节点测速" : "停止节点测速")
+        } else {
+            Button(action: startSpeedTest) {
+                Label("开始测速", systemImage: "play.fill")
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(VisualStyle.accent)
+            .disabled(!canStartSpeedTest)
+            .help(speedTestStartHelp)
         }
     }
 }

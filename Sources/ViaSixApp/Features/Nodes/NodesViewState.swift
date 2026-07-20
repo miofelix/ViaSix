@@ -59,6 +59,12 @@ extension NodesView {
         if let operation = model.state.runtimeOperation {
             return operation.description
         }
+        if model.isTemplateOperationBusy {
+            return "正在处理代理配置"
+        }
+        if model.switchingIP != nil {
+            return "正在应用节点"
+        }
         return switch model.state.speedTest.phase {
         case .idle:
             model.state.results.isEmpty ? "准备就绪" : "上次结果可用"
@@ -71,11 +77,32 @@ extension NodesView {
         }
     }
 
-    var speedTestStatusColor: Color {
-        switch model.state.speedTest.phase {
-        case .failed: .red
-        case .running, .stopping: VisualStyle.accent
-        case .idle: .secondary
+    var speedTestStatusTone: AppTone {
+        if isCfstBusyElsewhere || model.state.runtimeOperation != nil {
+            return .accent
+        }
+        if model.isTemplateOperationBusy || model.switchingIP != nil {
+            return .warning
+        }
+        return switch model.state.speedTest.phase {
+        case .failed: .negative
+        case .running: .accent
+        case .stopping: .warning
+        case .idle: .neutral
+        }
+    }
+
+    var speedTestStatusSystemImage: String {
+        if isCfstBusyElsewhere { return "scope" }
+        if model.state.runtimeOperation != nil { return "shippingbox" }
+        if model.isTemplateOperationBusy { return "doc.badge.gearshape" }
+        if model.switchingIP != nil { return "arrow.triangle.2.circlepath" }
+
+        return switch model.state.speedTest.phase {
+        case .idle: "gauge.with.dots.needle.67percent"
+        case .running: "waveform.path.ecg"
+        case .stopping: "hourglass"
+        case .failed: "exclamationmark.triangle.fill"
         }
     }
 
@@ -115,14 +142,44 @@ extension NodesView {
         }
     }
 
+    var speedTestUnavailableReason: String? {
+        guard model.state.launchPhase == .ready else {
+            return switch model.state.launchPhase {
+            case .idle, .loading: "ViaSix 正在准备"
+            case .failed: "应用初始化失败，请先重试"
+            case .ready: nil
+            }
+        }
+        if let operation = model.state.runtimeOperation {
+            return operation.description
+        }
+        if model.isTemplateOperationBusy {
+            return "代理配置操作进行中"
+        }
+        if model.switchingIP != nil {
+            return "正在应用节点"
+        }
+        if isTesting {
+            return isStopping ? "候选节点测速正在停止" : "候选节点测速正在进行"
+        }
+        if !model.hasCfstExecutable {
+            return "请先安装 CloudflareSpeedTest"
+        }
+        if isCfstBusyElsewhere {
+            return "当前节点测速正在进行"
+        }
+        if let parameterValidationMessage {
+            return parameterValidationMessage
+        }
+        return nil
+    }
+
     var canStartSpeedTest: Bool {
-        model.state.launchPhase == .ready
-            && model.state.runtimeOperation == nil
-            && !model.isTemplateOperationBusy
-            && model.switchingIP == nil
-            && model.hasCfstExecutable
-            && !model.isCfstBusy
-            && parameterValidationMessage == nil
+        speedTestUnavailableReason == nil
+    }
+
+    var speedTestStartHelp: String {
+        speedTestUnavailableReason ?? "开始候选节点测速"
     }
 
     var speedTestReadinessMessage: String? {
@@ -132,7 +189,7 @@ extension NodesView {
 
     var resultsSubtitle: String {
         guard !model.state.results.isEmpty else {
-            return "完成测速后，候选节点会显示在这里"
+            return "按延迟、丢包率和速度比较测速结果"
         }
 
         switch model.state.speedTest.phase {
@@ -146,6 +203,18 @@ extension NodesView {
             }
             return "选择候选节点后，再点击“应用节点”"
         }
+    }
+
+    var emptyResultsPresentation: NodeResultsEmptyPresentation {
+        NodeResultsEmptyPresentation(
+            speedTestPhase: model.state.speedTest.phase,
+            runtimeOperationDescription: model.state.runtimeOperation?.description,
+            isTemplateOperationBusy: model.isTemplateOperationBusy,
+            isApplyingNode: model.switchingIP != nil,
+            isCfstBusyElsewhere: isCfstBusyElsewhere,
+            hasCfstExecutable: model.hasCfstExecutable,
+            parameterValidationMessage: parameterValidationMessage
+        )
     }
 
     var applySelectionDisabled: Bool {
@@ -170,6 +239,30 @@ extension NodesView {
         return model.state.isXrayRunning ? "应用并重连" : "应用节点"
     }
 
+    var applySelectionHelp: String {
+        guard let candidateSelection else { return "请先选择一个候选节点" }
+        guard model.state.speedTestResultsAreCurrent else { return "测速参数已变更，请重新测速" }
+        switch model.state.speedTest.phase {
+        case .running: return "候选节点测速正在进行"
+        case .stopping: return "候选节点测速正在停止"
+        case .failed: return "本次测速未完成，请重新测速"
+        case .idle: break
+        }
+        if candidateSelection == model.state.preferences.selectedIP {
+            return "所选节点已应用"
+        }
+        if model.switchingIP != nil { return "正在应用节点" }
+        if model.isCfstBusy { return "测速进行中，暂时不能应用节点" }
+        if model.isTemplateOperationBusy { return "代理配置操作进行中" }
+        switch model.state.xrayPhase {
+        case .validating: return "正在校验代理配置"
+        case .starting: return "本地代理正在启动"
+        case .stopping: return "本地代理正在停止"
+        case .stopped, .running, .failed:
+            return model.state.isXrayRunning ? "应用节点并重新连接" : "应用所选节点"
+        }
+    }
+
     var reconnectConfirmationPresented: Binding<Bool> {
         Binding {
             reconnectConfirmationIP != nil
@@ -184,11 +277,13 @@ extension NodesView {
         [GridItem(.adaptive(minimum: 220), spacing: 14)]
     }
 
-    var resultsTableHeight: CGFloat {
-        min(440, max(260, CGFloat(model.state.results.count * 30 + 48)))
-    }
-
     // MARK: - Bindings and Actions
+
+    func startSpeedTest() {
+        guard canStartSpeedTest else { return }
+        showsParameters = false
+        model.startSpeedTest()
+    }
 
     func expansionBinding(for group: ParameterGroup) -> Binding<Bool> {
         Binding {

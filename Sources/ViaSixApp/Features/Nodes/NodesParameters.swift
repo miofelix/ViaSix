@@ -6,28 +6,34 @@ import ViaSixCore
 extension NodesView {
     // MARK: - Parameters
 
-    var parametersCard: some View {
+    var parametersSheet: some View {
         VStack(spacing: 0) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) {
-                    parametersDisclosureButton
-                    resetParametersButton
-                }
+            parametersSheetHeader
+            Divider()
 
-                VStack(alignment: .leading, spacing: 8) {
-                    parametersDisclosureButton
-                    HStack {
-                        Spacer(minLength: 0)
-                        resetParametersButton
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if isTesting {
+                        Label(
+                            "测速进行中，当前参数可以查看，但暂时不能修改。",
+                            systemImage: "info.circle"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, VisualStyle.spacing20)
+                        .padding(.top, VisualStyle.spacing16)
+                    } else if let parameterValidationMessage {
+                        Label(
+                            parameterValidationMessage,
+                            systemImage: "exclamationmark.circle.fill"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(VisualStyle.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, VisualStyle.spacing20)
+                        .padding(.top, VisualStyle.spacing16)
                     }
-                }
-            }
-            .padding(20)
 
-            if showsParameters {
-                Divider()
-
-                VStack(spacing: 0) {
                     ParameterDisclosure(
                         title: "数据源",
                         subtitle: sourceSummary,
@@ -35,6 +41,7 @@ extension NodesView {
                         isExpanded: expansionBinding(for: .source)
                     ) {
                         sourceSettings
+                            .disabled(isTesting)
                     }
 
                     ParameterDisclosure(
@@ -44,6 +51,7 @@ extension NodesView {
                         isExpanded: expansionBinding(for: .mode)
                     ) {
                         modeSettings
+                            .disabled(isTesting)
                     }
 
                     ParameterDisclosure(
@@ -54,6 +62,7 @@ extension NodesView {
                         isExpanded: expansionBinding(for: .filter)
                     ) {
                         filterSettings
+                            .disabled(isTesting)
                     }
 
                     ParameterDisclosure(
@@ -64,47 +73,76 @@ extension NodesView {
                         isExpanded: expansionBinding(for: .performance)
                     ) {
                         performanceSettings
+                            .disabled(isTesting)
                     }
                 }
                 .padding(.vertical, 4)
-                .disabled(isTesting)
             }
+            .scrollbarSafeContent()
+
+            Divider()
+            parametersSheetFooter
         }
-        .cardStyle()
-        .animation(.easeInOut(duration: 0.18), value: showsParameters)
+        .frame(minWidth: 640, idealWidth: 720, minHeight: 560, idealHeight: 680)
+        .background(VisualStyle.pageBackground)
+        .confirmationDialog(
+            "恢复默认测速设置？",
+            isPresented: $showsResetConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("恢复默认设置", role: .destructive) {
+                model.resetParameters()
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("地址来源、测速模式、筛选条件和性能选项都会恢复默认值。")
+        }
     }
 
-    private var parametersDisclosureButton: some View {
-        DisclosureControl(
-            title: "测速参数",
-            summary: parameterSummary,
-            isExpanded: $showsParameters
-        ) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("测速参数")
-                    .font(.headline)
-
-                Text(parameterSummary)
-                    .font(.caption)
+    private var parametersSheetHeader: some View {
+        HStack(alignment: .top, spacing: VisualStyle.spacing16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("测速设置")
+                    .font(.title3.weight(.semibold))
+                Text("配置地址来源、测试方式、筛选条件和性能选项。")
+                    .font(.callout)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            Spacer(minLength: VisualStyle.spacing16)
+
+            Button {
+                showsParameters = false
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.plain)
+            .iconButtonHitTarget()
+            .foregroundStyle(.secondary)
+            .help("关闭测速设置")
+            .accessibilityLabel("关闭测速设置")
         }
+        .padding(VisualStyle.spacing20)
     }
 
-    private var resetParametersButton: some View {
-        Button {
-            showsResetConfirmation = true
-        } label: {
-            Image(systemName: "arrow.counterclockwise")
+    private var parametersSheetFooter: some View {
+        HStack(spacing: VisualStyle.spacing12) {
+            Button("恢复默认设置…", systemImage: "arrow.counterclockwise") {
+                showsResetConfirmation = true
+            }
+            .disabled(isTesting)
+
+            Spacer(minLength: VisualStyle.spacing16)
+
+            Button("完成") {
+                showsParameters = false
+            }
+            .buttonStyle(.borderedProminent)
+            .keyboardShortcut(.defaultAction)
         }
-        .buttonStyle(.borderless)
-        .iconButtonHitTarget()
-        .foregroundStyle(.secondary)
-        .help("恢复默认测速设置")
-        .accessibilityLabel("恢复默认测速设置")
-        .disabled(isTesting)
+        .padding(.horizontal, VisualStyle.spacing20)
+        .padding(.vertical, VisualStyle.spacing16)
     }
 
     var sourceSettings: some View {
