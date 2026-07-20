@@ -248,6 +248,82 @@ final class XrayControllerTests: XCTestCase {
         try await waitUntilOutputPipeCloses(spawned.output.fileDescriptor)
     }
 
+    func testClosingParentLifetimePipeReleasesARealTCPListener() async throws {
+        let fixture = try XrayControllerFixture(behavior: "real-listener")
+        defer { fixture.remove() }
+
+        // Reserve an ephemeral loopback port, then release it immediately so
+        // the supervised fixture can bind it. The probe below talks to the
+        // actual socket instead of a ready-file surrogate.
+        let port = try unusedLoopbackPort()
+        let spawned = try SupervisedProcess.start(
+            executableURL: fixture.executableURL,
+            arguments: ["run", "-config", fixture.configURL.path],
+            workingDirectoryURL: fixture.directoryURL,
+            environmentOverrides: ["XRAY_TEST_PORT": String(port)]
+        )
+        defer {
+            spawned.lifetime.close()
+            _ = Darwin.kill(-spawned.processGroup, SIGKILL)
+            var waitStatus: Int32 = 0
+            while Darwin.waitpid(spawned.pid, &waitStatus, 0) == -1, errno == EINTR {}
+            Darwin.close(spawned.output.fileDescriptor)
+        }
+
+        try await waitUntilFileExists(fixture.processIDsURL)
+        let processIDs = try fixture.runtimeProcessIDs()
+        XCTAssertEqual(processIDs.count, 2)
+        try await waitUntilPortIsOpen(port)
+
+        // This models a crash/force-quit: closing the app-owned descriptor is
+        // the only cleanup signal sent to the supervisor.
+        spawned.lifetime.close()
+        try await waitUntilProcessIsReaped(spawned.pid)
+        try await waitUntilPortIsClosed(port)
+
+        for processID in processIDs {
+            try await waitUntilProcessIsGone(processID)
+        }
+        try await waitUntilOutputPipeCloses(spawned.output.fileDescriptor)
+    }
+
+    func testReleasingControllerKillsItsOwnedRealTCPListener() async throws {
+        let fixture = try XrayControllerFixture(behavior: "real-listener")
+        defer { fixture.remove() }
+        let port = try unusedLoopbackPort()
+        var controller: XrayController? = XrayController(
+            executableURL: fixture.executableURL,
+            configURL: fixture.configURL,
+            workingDirectoryURL: fixture.directoryURL,
+            environment: [
+                "XRAY_LOCATION_ASSET": fixture.assetDirectoryURL.path,
+                "XRAY_TEST_PORT": String(port),
+            ],
+            port: port,
+            validationTimeout: .seconds(1),
+            startupTimeout: .seconds(2),
+            probeInterval: .milliseconds(10),
+            stopTimeout: .milliseconds(100),
+            portProbe: { host, port in
+                XrayController.probeTCPPort(host: host, port: port)
+            }
+        )
+
+        try await controller?.start()
+        try await waitUntilFileExists(fixture.processIDsURL)
+        let processIDs = try fixture.runtimeProcessIDs()
+        XCTAssertEqual(processIDs.count, 2)
+        XCTAssertTrue(XrayController.probeTCPPort(host: "127.0.0.1", port: port))
+
+        // The weak unexpected-exit watcher must not keep the controller alive;
+        // its deinit fallback owns the final group kill in this path.
+        controller = nil
+        try await waitUntilPortIsClosed(port)
+        for processID in processIDs {
+            try await waitUntilProcessIsGone(processID)
+        }
+    }
+
     func testRestartStopsOwnedProcessAndStartsAValidatedReplacement() async throws {
         let fixture = try XrayControllerFixture(behavior: "normal")
         defer { fixture.remove() }
@@ -382,6 +458,27 @@ final class XrayControllerTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(10))
         }
         XCTFail("Output pipe remained open after the supervised group exited")
+    }
+
+    private func waitUntilPortIsOpen(_ port: UInt16) async throws {
+        for _ in 0..<200 {
+            if XrayController.probeTCPPort(host: "127.0.0.1", port: port) { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTFail("Timed out waiting for TCP port \(port) to open")
+    }
+
+    private func waitUntilPortIsClosed(_ port: UInt16) async throws {
+        for _ in 0..<300 {
+            if !XrayController.probeTCPPort(host: "127.0.0.1", port: port) { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTFail("TCP port \(port) remained open after supervised group exit")
+    }
+
+    private func unusedLoopbackPort() throws -> UInt16 {
+        let listener = try LoopbackTCPListener(family: AF_INET)
+        return listener.port
     }
 }
 
@@ -602,6 +699,14 @@ private final class XrayControllerFixture: @unchecked Sendable {
           sleep 0.2
           printf 'runtime failed\n' >&2
           exit 7
+        fi
+
+        if [ "$behavior" = "real-listener" ]; then
+          /usr/bin/nc -lk 127.0.0.1 "$XRAY_TEST_PORT" >/dev/null 2>&1 &
+          child=$!
+          printf '%s %s\n' "$$" "$child" > pids.txt
+          wait "$child"
+          exit $?
         fi
 
         if [ "$behavior" = "ignore-term" ]; then

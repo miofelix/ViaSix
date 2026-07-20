@@ -28,8 +28,7 @@ final class SupervisedCommandTests: XCTestCase {
             XCTAssertEqual(error, .timedOut)
         }
 
-        try await waitUntilFileExists(fixture.processIDsURL)
-        let processIDs = try fixture.processIDs()
+        let processIDs = try await waitUntilProcessIDs(fixture)
         XCTAssertEqual(processIDs.count, 2)
         for processID in processIDs {
             try await waitUntilProcessIsGone(processID)
@@ -55,7 +54,7 @@ final class SupervisedCommandTests: XCTestCase {
                 timeout: .seconds(30)
             )
         }
-        try await waitUntilFileExists(fixture.processIDsURL)
+        let processIDs = try await waitUntilProcessIDs(fixture)
         task.cancel()
 
         do {
@@ -65,19 +64,21 @@ final class SupervisedCommandTests: XCTestCase {
             // Expected.
         }
 
-        let processIDs = try fixture.processIDs()
         XCTAssertEqual(processIDs.count, 2)
         for processID in processIDs {
             try await waitUntilProcessIsGone(processID)
         }
     }
 
-    private func waitUntilFileExists(_ url: URL) async throws {
+    private func waitUntilProcessIDs(_ fixture: CommandFixture) async throws -> [pid_t] {
         for _ in 0..<100 {
-            if FileManager.default.fileExists(atPath: url.path) { return }
+            if let processIDs = try? fixture.processIDs(), processIDs.count == 2 {
+                return processIDs
+            }
             try await Task.sleep(for: .milliseconds(20))
         }
-        XCTFail("Timed out waiting for \(url.path)")
+        XCTFail("Timed out waiting for both supervised process IDs")
+        return []
     }
 
     private func waitUntilProcessIsGone(_ pid: pid_t) async throws {

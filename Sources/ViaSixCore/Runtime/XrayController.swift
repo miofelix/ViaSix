@@ -102,6 +102,18 @@ public actor XrayController {
     private var activeProcess: ManagedXrayProcess?
     private var terminationTask: (pid: pid_t, task: Task<SupervisedProcessTermination, Never>)?
 
+    /// A controller is normally stopped explicitly by `AppModel.shutdown()`.
+    /// Keep a synchronous last-resort guard as well: callers may discard a
+    /// controller while it is running (for example, when replacing an app
+    /// model in a host or test).  The lifetime pipe is closed first, then only
+    /// this controller's own process group is signalled.  No port lookup or
+    /// global process search is performed here.
+    deinit {
+        guard let process = activeProcess, process.processGroup > 1 else { return }
+        process.lifetime.close()
+        _ = Darwin.kill(-process.processGroup, SIGKILL)
+    }
+
     public init(
         executableURL: URL,
         configURL: URL,
@@ -418,8 +430,9 @@ public actor XrayController {
         operationID id: UUID,
         handler: @escaping XrayEventHandler
     ) {
-        Task.detached {
+        Task.detached { [weak self] in
             let termination = await process.waitTask.value
+            guard let self else { return }
             await self.handleUnexpectedExit(
                 process: process,
                 termination: termination,

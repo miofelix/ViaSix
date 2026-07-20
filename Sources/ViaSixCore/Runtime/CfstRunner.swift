@@ -70,6 +70,16 @@ public actor CfstRunner {
     private let activityTimeoutOverride: Duration?
     private var activeRun: ActiveRun?
 
+    /// Explicit cancellation and the parent-lifetime watchdog cover normal
+    /// operation.  This synchronous fallback protects callers that release a
+    /// runner without awaiting its task: only the process group created by
+    /// this runner is signalled, never an arbitrary process using a port.
+    deinit {
+        guard let run = activeRun, run.processGroup > 1 else { return }
+        run.lifetime.close()
+        _ = Darwin.kill(-run.processGroup, SIGKILL)
+    }
+
     public init(
         executableURL: URL,
         resultURL: URL? = nil,
