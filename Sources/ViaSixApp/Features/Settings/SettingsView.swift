@@ -75,17 +75,20 @@ struct SettingsView: View {
 
                 Spacer()
 
-                if model.state.runtimePhase == .installing {
-                    ProgressView()
-                        .controlSize(.small)
+                if model.state.runtimeOperation?.canCancel == true {
+                    Button("取消", systemImage: "xmark.circle") {
+                        model.cancelRuntimeOperation()
+                    }
                 }
             }
+
+            runtimeOperationStatus
 
             Text("自动安装会获取上游最新正式版本，并使用 Release 提供的 SHA-256 校验完整性。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            if case .failed(let message) = model.state.runtimePhase {
+            if let message = model.state.runtimeOperationError {
                 Text(message)
                     .font(.caption)
                     .foregroundStyle(.red)
@@ -141,6 +144,22 @@ struct SettingsView: View {
         .padding(22)
         .frame(maxWidth: .infinity, alignment: .leading)
         .cardStyle()
+    }
+
+    @ViewBuilder
+    private var runtimeOperationStatus: some View {
+        if let operation = model.state.runtimeOperation {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text(operation.description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(operation.description)
+        }
     }
 
     private var proxyConfigurationCard: some View {
@@ -278,12 +297,16 @@ struct SettingsView: View {
 
     private var runtimeBadge: some View {
         let (label, color): (String, Color) =
-            switch model.state.runtimePhase {
-            case .checking: ("检查中", .secondary)
-            case .missing: ("未就绪", .orange)
-            case .installing: ("安装中", VisualStyle.accent)
-            case .ready: ("已就绪", .green)
-            case .failed: ("异常", .red)
+            if model.state.runtimeOperation != nil {
+                ("操作中", VisualStyle.accent)
+            } else if model.state.runtimeOperationError != nil {
+                ("操作失败", .red)
+            } else {
+                switch model.state.runtimePhase {
+                case .checking: ("检查中", .secondary)
+                case .missing: ("未就绪", .orange)
+                case .ready: ("已就绪", .green)
+                }
             }
         return HStack(spacing: 6) {
             Circle()
@@ -296,8 +319,10 @@ struct SettingsView: View {
     }
 
     private var runtimeInstallTitle: String {
-        if model.state.runtimePhase == .installing {
-            return "安装中…"
+        if model.state.runtimeOperationError != nil {
+            return model.hasCfstExecutable && model.hasXrayExecutable
+                ? "重试更新"
+                : "重试安装"
         }
         return model.hasCfstExecutable && model.hasXrayExecutable
             ? "重新安装组件"
@@ -387,7 +412,7 @@ struct SettingsView: View {
     }
 
     private func componentPathEditingDisabled(_ component: RuntimeComponent) -> Bool {
-        if model.state.runtimePhase == .installing { return true }
+        if model.state.runtimeOperation != nil { return true }
         return switch component {
         case .cfst:
             model.isCfstBusy
@@ -402,8 +427,8 @@ struct SettingsView: View {
     }
 
     private func componentPathEditingMessage(_ component: RuntimeComponent) -> String {
-        if model.state.runtimePhase == .installing {
-            return "运行组件安装中，完成后才能修改路径。"
+        if let operation = model.state.runtimeOperation {
+            return "\(operation.description)，完成后才能修改路径。"
         }
         return switch component {
         case .cfst: "测速进行中，停止后才能修改路径。"
@@ -446,7 +471,7 @@ struct SettingsView: View {
 
     private var runtimeActionsDisabled: Bool {
         guard model.state.launchPhase == .ready else { return true }
-        if model.state.runtimePhase == .installing { return true }
+        if model.state.runtimeOperation != nil { return true }
         if model.isCfstBusy { return true }
 
         switch model.state.speedTest.phase {

@@ -16,7 +16,10 @@ struct OverviewView: View {
                 metricsPanel
                 proxyPanel
 
-                if model.state.runtimePhase != .ready {
+                if model.state.runtimePhase != .ready
+                    || model.state.runtimeOperation != nil
+                    || model.state.runtimeOperationError != nil
+                {
                     runtimePanel
                 }
             }
@@ -273,17 +276,25 @@ struct OverviewView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(runtimeStatusTitle)
                     .font(.callout.weight(.medium))
-                Text("节点测速与本地代理需要运行组件。")
+                Text(runtimeStatusDetail)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(
+                        model.state.runtimeOperationError == nil ? Color.secondary : Color.red
+                    )
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
+    @ViewBuilder
     private var runtimeInstallButton: some View {
-        Button("安装", systemImage: "arrow.down.circle", action: model.installRuntime)
-            .disabled(runtimeInstallationDisabled)
+        if model.state.runtimeOperation != nil {
+            Button("取消", systemImage: "xmark.circle", action: model.cancelRuntimeOperation)
+                .disabled(model.state.runtimeOperation?.canCancel != true)
+        } else {
+            Button(runtimeInstallTitle, systemImage: "arrow.down.circle", action: model.installRuntime)
+                .disabled(runtimeInstallationDisabled)
+        }
     }
 
     private func detailRow(label: String, value: String) -> some View {
@@ -591,14 +602,14 @@ struct OverviewView: View {
 
     private var proxyToggleDisabled: Bool {
         model.state.launchPhase != .ready
-            || model.state.runtimePhase == .installing
+            || model.state.runtimeOperation != nil
             || isXrayTransitioning
             || (!model.state.isXrayRunning
                 && (selectedIP.isEmpty || !model.hasXrayExecutable))
     }
 
     private var proxyReadinessHint: String {
-        if model.state.runtimePhase == .installing {
+        if model.state.runtimeOperation != nil {
             return "运行组件安装中，完成后即可启动本地代理。"
         }
         if selectedIP.isEmpty {
@@ -635,7 +646,7 @@ struct OverviewView: View {
 
     private var runtimeInstallationDisabled: Bool {
         guard model.state.launchPhase == .ready else { return true }
-        if model.state.runtimePhase == .installing { return true }
+        if model.state.runtimeOperation != nil { return true }
         if model.isCfstBusy { return true }
 
         switch model.state.speedTest.phase {
@@ -679,37 +690,60 @@ struct OverviewView: View {
     private var configurationTestButtonDisabled: Bool {
         if case .stopping = model.state.configurationTest.phase { return true }
         if isConfigurationTestRunning { return false }
-        return model.state.runtimePhase == .installing
+        return model.state.runtimeOperation != nil
             || selectedIP.isEmpty
             || !model.hasCfstExecutable
             || model.isCfstBusy
     }
 
     private var runtimeStatusTitle: String {
-        switch model.state.runtimePhase {
+        if let operation = model.state.runtimeOperation {
+            return operation.description
+        }
+        if model.state.runtimeOperationError != nil {
+            return "运行组件操作失败"
+        }
+        return switch model.state.runtimePhase {
         case .ready: "运行组件已就绪"
-        case .installing: "正在安装运行组件"
         case .checking: "正在检查运行组件"
         case .missing: "运行组件未安装"
-        case .failed: "运行组件异常"
         }
     }
 
+    private var runtimeStatusDetail: String {
+        if let error = model.state.runtimeOperationError {
+            return error
+        }
+        if model.state.runtimeOperation != nil {
+            return "节点测速与本地代理会在操作完成后恢复。"
+        }
+        return "节点测速与本地代理需要运行组件。"
+    }
+
+    private var runtimeInstallTitle: String {
+        if model.state.runtimeOperationError != nil {
+            return model.state.runtimePhase == .ready ? "重试更新" : "重试安装"
+        }
+        return model.state.runtimePhase == .ready ? "重新安装组件" : "安装组件"
+    }
+
     private var runtimeStatusColor: Color {
-        switch model.state.runtimePhase {
+        if model.state.runtimeOperation != nil { return VisualStyle.accent }
+        if model.state.runtimeOperationError != nil { return .red }
+        return switch model.state.runtimePhase {
         case .ready: .green
         case .checking: .secondary
-        case .missing, .installing: .orange
-        case .failed: .red
+        case .missing: .orange
         }
     }
 
     private var runtimeStatusIcon: String {
-        switch model.state.runtimePhase {
+        if model.state.runtimeOperation != nil { return "arrow.down.circle" }
+        if model.state.runtimeOperationError != nil { return "exclamationmark.triangle.fill" }
+        return switch model.state.runtimePhase {
         case .ready: "checkmark.circle.fill"
-        case .checking, .installing: "clock"
+        case .checking: "clock"
         case .missing: "arrow.down.circle"
-        case .failed: "exclamationmark.triangle.fill"
         }
     }
 }

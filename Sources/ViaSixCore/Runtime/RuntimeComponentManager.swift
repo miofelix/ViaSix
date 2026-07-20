@@ -79,6 +79,15 @@ public struct RuntimeDownloadedFile: Equatable, Sendable {
 
 public typealias RuntimeDownloadHandler = @Sendable (URL) async throws -> RuntimeDownloadedFile
 public typealias RuntimeArchiveExtractor = @Sendable (URL, URL) async throws -> Void
+public typealias RuntimeInstallationStageHandler = @Sendable (RuntimeInstallationStage) async -> Void
+
+public enum RuntimeInstallationStage: Equatable, Sendable {
+    case resolvingLatestReleases
+    case downloading(RuntimeComponent)
+    case verifying(RuntimeComponent)
+    case extracting(RuntimeComponent)
+    case committing
+}
 
 public enum RuntimeComponentError: LocalizedError, Equatable, Sendable {
     case missingManifestAsset(RuntimeComponent, RuntimeArchitecture)
@@ -96,6 +105,7 @@ public enum RuntimeComponentError: LocalizedError, Equatable, Sendable {
     case extractionFailed(archiveName: String, status: Int32, output: String)
     case extractionTimedOut(archiveName: String)
     case invalidRuntimeDirectory(URL)
+    case operationInProgress
 
     public var errorDescription: String? {
         switch self {
@@ -130,6 +140,8 @@ public enum RuntimeComponentError: LocalizedError, Equatable, Sendable {
             return "解压 \(archiveName) 超时，已停止解压进程。"
         case .invalidRuntimeDirectory(let url):
             return "Runtime 路径已存在，但不是目录：\(url.path)"
+        case .operationInProgress:
+            return "另一项运行组件操作尚未完成。"
         }
     }
 }
@@ -147,6 +159,7 @@ public actor RuntimeComponentManager {
     private let downloadHandler: RuntimeDownloadHandler
     private let archiveExtractor: RuntimeArchiveExtractor
     private let releaseResolver: RuntimeReleaseResolver?
+    private var operationInProgress = false
 
     public init(
         runtimeDirectory: URL,
@@ -226,6 +239,8 @@ public actor RuntimeComponentManager {
 
     @discardableResult
     public func install(from sourcePaths: [URL]) throws -> RuntimeInstallationStatus {
+        try beginRuntimeOperation()
+        defer { finishRuntimeOperation() }
         try Task.checkCancellation()
         let normalizedPaths = sourcePaths.map(\.standardizedFileURL)
         let files = try Self.discoverFiles(in: normalizedPaths, using: FileManager.default)
@@ -238,8 +253,13 @@ public actor RuntimeComponentManager {
 
     @discardableResult
     public func downloadAndInstall(
-        architecture: RuntimeArchitecture = .current
+        architecture: RuntimeArchitecture = .current,
+        onStage: @escaping RuntimeInstallationStageHandler = { _ in }
     ) async throws -> RuntimeInstallationStatus {
+        try beginRuntimeOperation()
+        defer { finishRuntimeOperation() }
+        try Task.checkCancellation()
+        await onStage(.resolvingLatestReleases)
         try Task.checkCancellation()
         let assets: [RuntimeAsset]
         if let releaseResolver {
@@ -260,12 +280,21 @@ public actor RuntimeComponentManager {
         var payloadFiles: [RuntimePayloadFile: URL] = [:]
         for asset in assets {
             try Task.checkCancellation()
-            let archiveURL = try await download(asset, to: downloadsDirectory)
+            await onStage(.downloading(asset.component))
+            let archiveURL = try await download(
+                asset,
+                to: downloadsDirectory,
+                onVerification: {
+                    await onStage(.verifying(asset.component))
+                }
+            )
             try Task.checkCancellation()
             let componentDirectory =
                 extractedDirectory
                 .appendingPathComponent(asset.component.rawValue, isDirectory: true)
             try fileManager.createDirectory(at: componentDirectory, withIntermediateDirectories: true)
+            await onStage(.extracting(asset.component))
+            try Task.checkCancellation()
             try await archiveExtractor(archiveURL, componentDirectory)
             try Task.checkCancellation()
 
@@ -284,10 +313,20 @@ public actor RuntimeComponentManager {
         }
 
         try Task.checkCancellation()
+        await onStage(.committing)
+        try Task.checkCancellation()
         return try atomicallyInstall(payloadFiles)
     }
 
     public func download(_ asset: RuntimeAsset, to destinationDirectory: URL) async throws -> URL {
+        try await download(asset, to: destinationDirectory, onVerification: {})
+    }
+
+    private func download(
+        _ asset: RuntimeAsset,
+        to destinationDirectory: URL,
+        onVerification: @escaping @Sendable () async -> Void
+    ) async throws -> URL {
         try Task.checkCancellation()
         let fileManager = FileManager.default
         try fileManager.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
@@ -311,6 +350,8 @@ public actor RuntimeComponentManager {
         try fileManager.copyItem(at: downloaded.fileURL, to: archiveURL)
         try Task.checkCancellation()
 
+        await onVerification()
+        try Task.checkCancellation()
         let digest = try RuntimeSHA256.hexDigest(ofFileAt: archiveURL)
         try Task.checkCancellation()
         guard digest == asset.sha256.lowercased() else {
@@ -333,6 +374,17 @@ public actor RuntimeComponentManager {
             }
             return asset
         }
+    }
+
+    private func beginRuntimeOperation() throws {
+        guard !operationInProgress else {
+            throw RuntimeComponentError.operationInProgress
+        }
+        operationInProgress = true
+    }
+
+    private func finishRuntimeOperation() {
+        operationInProgress = false
     }
 
     private func atomicallyInstall(

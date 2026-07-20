@@ -21,6 +21,8 @@ struct MenuBarView: View {
 
         Divider()
 
+        runtimeOperationStatus
+
         if let proxyUnavailableMessage {
             Label(proxyUnavailableMessage, systemImage: "info.circle")
                 .foregroundStyle(.secondary)
@@ -70,6 +72,28 @@ struct MenuBarView: View {
     }
 
     @ViewBuilder
+    private var runtimeOperationStatus: some View {
+        if let operation = model.state.runtimeOperation {
+            Label(operation.description, systemImage: "shippingbox")
+                .foregroundStyle(.secondary)
+            if operation.canCancel {
+                Button("取消组件操作", systemImage: "xmark.circle") {
+                    model.cancelRuntimeOperation()
+                }
+            }
+            Divider()
+        } else if let error = model.state.runtimeOperationError {
+            Text("组件操作失败：\(error)")
+                .lineLimit(2)
+                .foregroundStyle(.secondary)
+            Button("重新安装最新组件", systemImage: "arrow.clockwise") {
+                model.installRuntime()
+            }
+            Divider()
+        }
+    }
+
+    @ViewBuilder
     private var speedTestAction: some View {
         if isCurrentConfigurationTestActive {
             switch model.state.configurationTest.phase {
@@ -97,7 +121,7 @@ struct MenuBarView: View {
             }
             .disabled(
                 model.state.launchPhase != .ready
-                    || model.state.runtimePhase == .installing
+                    || model.state.runtimeOperation != nil
                     || !model.hasCfstExecutable
                     || model.isCfstBusy
                     || parameterValidationMessage != nil
@@ -182,7 +206,7 @@ struct MenuBarView: View {
             }
             .disabled(
                 model.state.launchPhase != .ready
-                    || model.state.runtimePhase == .installing
+                    || model.state.runtimeOperation != nil
                     || !model.hasXrayExecutable
                     || model.state.preferences.selectedIP.isEmpty
             )
@@ -238,6 +262,7 @@ struct MenuBarView: View {
     }
 
     private var speedTestUnavailableMessage: String? {
+        guard model.state.runtimeOperation == nil else { return nil }
         if let parameterValidationMessage {
             return "测速设置需要检查：\(parameterValidationMessage)"
         }
@@ -246,6 +271,7 @@ struct MenuBarView: View {
     }
 
     private var proxyUnavailableMessage: String? {
+        guard model.state.runtimeOperation == nil else { return nil }
         switch model.state.xrayPhase {
         case .validating, .starting, .running, .stopping:
             return nil

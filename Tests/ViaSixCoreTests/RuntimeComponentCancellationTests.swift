@@ -4,6 +4,140 @@ import XCTest
 @testable import ViaSixCore
 
 final class RuntimeComponentCancellationTests: XCTestCase {
+    func testDownloadAndInstallReportsStagesInOrder() async throws {
+        let root = makeRoot()
+        let archiveURL = root.appendingPathComponent("archive-fixture")
+        let runtimeURL = root.appendingPathComponent("Runtime", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let archiveData = Data("archive fixture".utf8)
+        try archiveData.write(to: archiveURL)
+        let manifest = makeManifest(sha256: RuntimeSHA256.hexDigest(of: archiveData))
+        let recorder = RuntimeInstallationStageRecorder()
+        let manager = RuntimeComponentManager(
+            runtimeDirectory: runtimeURL,
+            manifest: manifest,
+            downloadHandler: { _ in
+                RuntimeDownloadedFile(fileURL: archiveURL, statusCode: 200)
+            },
+            archiveExtractor: { _, destinationURL in
+                try writeRuntimePayloads(to: destinationURL)
+            }
+        )
+
+        let status = try await manager.downloadAndInstall(architecture: .arm64) { stage in
+            await recorder.append(stage)
+        }
+
+        XCTAssertTrue(status.isReady)
+        let stages = await recorder.stages
+        XCTAssertEqual(
+            stages,
+            [
+                .resolvingLatestReleases,
+                .downloading(.cfst),
+                .verifying(.cfst),
+                .extracting(.cfst),
+                .downloading(.xray),
+                .verifying(.xray),
+                .extracting(.xray),
+                .committing,
+            ]
+        )
+    }
+
+    func testConcurrentRuntimeOperationIsRejectedUntilFirstCompletes() async throws {
+        let root = makeRoot()
+        let archiveURL = root.appendingPathComponent("archive-fixture")
+        let runtimeURL = root.appendingPathComponent("Runtime", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let archiveData = Data("archive fixture".utf8)
+        try archiveData.write(to: archiveURL)
+        let gate = RuntimeDownloadGate()
+        let manager = RuntimeComponentManager(
+            runtimeDirectory: runtimeURL,
+            manifest: makeManifest(sha256: RuntimeSHA256.hexDigest(of: archiveData)),
+            downloadHandler: { _ in
+                await gate.wait()
+                return RuntimeDownloadedFile(fileURL: archiveURL, statusCode: 200)
+            },
+            archiveExtractor: { _, destinationURL in
+                try writeRuntimePayloads(to: destinationURL)
+            }
+        )
+
+        let firstOperation = Task {
+            try await manager.downloadAndInstall(architecture: .arm64)
+        }
+        try await waitUntil { await gate.waiterCount > 0 }
+
+        do {
+            _ = try await manager.install(from: root)
+            XCTFail("Expected the overlapping operation to be rejected")
+        } catch let error as RuntimeComponentError {
+            XCTAssertEqual(error, .operationInProgress)
+        }
+
+        await gate.open()
+        let firstStatus = try await firstOperation.value
+        XCTAssertTrue(firstStatus.isReady)
+    }
+
+    func testFailedUpdatePreservesExistingRuntime() async throws {
+        let root = makeRoot()
+        let archiveURL = root.appendingPathComponent("archive-fixture")
+        let runtimeURL = root.appendingPathComponent("Runtime", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try FileManager.default.createDirectory(at: runtimeURL, withIntermediateDirectories: true)
+        for payload in RuntimePayloadFile.allCases {
+            try Data("existing-\(payload.rawValue)".utf8)
+                .write(to: runtimeURL.appendingPathComponent(payload.rawValue))
+        }
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: runtimeURL.appendingPathComponent(RuntimePayloadFile.cfst.rawValue).path
+        )
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: runtimeURL.appendingPathComponent(RuntimePayloadFile.xray.rawValue).path
+        )
+
+        let archiveData = Data("tampered archive".utf8)
+        try archiveData.write(to: archiveURL)
+        let manager = RuntimeComponentManager(
+            runtimeDirectory: runtimeURL,
+            manifest: makeManifest(sha256: String(repeating: "0", count: 64)),
+            downloadHandler: { _ in
+                RuntimeDownloadedFile(fileURL: archiveURL, statusCode: 200)
+            },
+            archiveExtractor: { _, _ in
+                XCTFail("Extraction must not run after checksum failure")
+            }
+        )
+
+        do {
+            _ = try await manager.downloadAndInstall(architecture: .arm64)
+            XCTFail("Expected checksum failure")
+        } catch let error as RuntimeComponentError {
+            guard case .checksumMismatch = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+
+        let status = await manager.installedStatus()
+        XCTAssertTrue(status.isReady)
+        for payload in RuntimePayloadFile.allCases {
+            XCTAssertEqual(
+                try Data(contentsOf: runtimeURL.appendingPathComponent(payload.rawValue)),
+                Data("existing-\(payload.rawValue)".utf8)
+            )
+        }
+    }
+
     func testCancellationAfterExtractorReturnsDoesNotInstallRuntime() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ViaSix-RuntimeCancellation-\(UUID().uuidString)", isDirectory: true)
@@ -82,4 +216,93 @@ final class RuntimeComponentCancellationTests: XCTestCase {
         }
         XCTFail("Timed out waiting for \(url.path)")
     }
+
+    private func waitUntil(_ predicate: @escaping @Sendable () async -> Bool) async throws {
+        for _ in 0..<100 {
+            if await predicate() { return }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTFail("Timed out waiting for runtime test condition")
+    }
+
+    private func makeRoot() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("ViaSix-RuntimeCancellation-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    private func makeManifest(sha256: String) -> RuntimeManifest {
+        RuntimeManifest(assets: [
+            RuntimeAsset(
+                component: .cfst,
+                version: "test",
+                architecture: .arm64,
+                archiveName: "cfst.zip",
+                downloadURL: URL(string: "https://example.invalid/cfst.zip")!,
+                sha256: sha256,
+                payloadFiles: [.cfst]
+            ),
+            RuntimeAsset(
+                component: .xray,
+                version: "test",
+                architecture: .arm64,
+                archiveName: "xray.zip",
+                downloadURL: URL(string: "https://example.invalid/xray.zip")!,
+                sha256: sha256,
+                payloadFiles: [.xray, .geoIP, .geoSite]
+            ),
+        ])
+    }
+}
+
+private actor RuntimeInstallationStageRecorder {
+    private(set) var stages: [RuntimeInstallationStage] = []
+
+    func append(_ stage: RuntimeInstallationStage) {
+        stages.append(stage)
+    }
+}
+
+private actor RuntimeDownloadGate {
+    private(set) var waiterCount = 0
+    private var isOpen = false
+    private var continuations: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        waiterCount += 1
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation in
+            continuations.append(continuation)
+        }
+    }
+
+    func open() {
+        isOpen = true
+        let pending = continuations
+        continuations.removeAll()
+        pending.forEach { $0.resume() }
+    }
+}
+
+private func writeRuntimePayloads(to destinationURL: URL) throws {
+    let fileManager = FileManager.default
+    let component = destinationURL.lastPathComponent
+    if component == RuntimeComponent.cfst.rawValue {
+        try Data("cfst".utf8)
+            .write(to: destinationURL.appendingPathComponent(RuntimePayloadFile.cfst.rawValue))
+    } else if component == RuntimeComponent.xray.rawValue {
+        for payload in [RuntimePayloadFile.xray, .geoIP, .geoSite] {
+            try Data(payload.rawValue.utf8)
+                .write(to: destinationURL.appendingPathComponent(payload.rawValue))
+        }
+    } else {
+        throw POSIXError(.EINVAL)
+    }
+    try fileManager.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: destinationURL.appendingPathComponent(
+            component == RuntimeComponent.cfst.rawValue
+                ? RuntimePayloadFile.cfst.rawValue
+                : RuntimePayloadFile.xray.rawValue
+        ).path
+    )
 }

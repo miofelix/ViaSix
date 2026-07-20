@@ -56,8 +56,8 @@ extension NodesView {
         if isCfstBusyElsewhere {
             return "连接页正在测试当前节点"
         }
-        if model.state.runtimePhase == .installing {
-            return "正在安装运行组件"
+        if let operation = model.state.runtimeOperation {
+            return operation.description
         }
         return switch model.state.speedTest.phase {
         case .idle:
@@ -116,7 +116,7 @@ extension NodesView {
 
     var canStartSpeedTest: Bool {
         model.state.launchPhase == .ready
-            && model.state.runtimePhase != .installing
+            && model.state.runtimeOperation == nil
             && model.hasCfstExecutable
             && !model.isCfstBusy
             && parameterValidationMessage == nil

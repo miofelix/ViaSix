@@ -126,6 +126,7 @@ final class AppModel {
 
     @ObservationIgnored private var bootstrapTask: Task<Void, Never>?
     @ObservationIgnored private var runtimeTask: Task<Void, Never>?
+    @ObservationIgnored private var activeRuntimeOperationID: UUID?
     @ObservationIgnored private var templateImportTask: Task<Void, Never>?
     @ObservationIgnored private var templateSaveTask: Task<ProxyEndpoint, Error>?
     @ObservationIgnored private var speedTestTask: Task<Void, Never>?
@@ -199,23 +200,35 @@ final class AppModel {
             xrayStartTask == nil,
             xrayStopTask == nil
         else { return }
-        state.runtimePhase = .installing
+        let operationID = UUID()
+        activeRuntimeOperationID = operationID
+        state.runtimeOperation = .installing(.resolvingLatestReleases)
+        state.runtimeOperationError = nil
         appendLog(source: .app, message: "正在下载并校验运行组件…")
 
         runtimeTask = Task { [weak self] in
             guard let self else { return }
+            defer { finishRuntimeOperation(operationID: operationID) }
             do {
-                let status = try await runtimeManager.downloadAndInstall()
+                let status = try await runtimeManager.downloadAndInstall { [weak self] stage in
+                    await self?.receiveRuntimeInstallationStage(
+                        stage,
+                        operationID: operationID
+                    )
+                }
+                guard activeRuntimeOperationID == operationID else { return }
                 state.runtimeStatus = status
+                state.runtimeOperationError = nil
                 refreshRuntimePhase()
                 appendLog(source: .app, level: .success, message: "运行组件安装完成")
                 showNotice("运行组件已安装", style: .success)
             } catch {
-                state.runtimePhase = .failed(error.localizedDescription)
-                appendLog(source: .app, level: .error, message: error.localizedDescription)
-                showNotice("安装失败：\(error.localizedDescription)", style: .error)
+                await finishRuntimeOperationFailure(
+                    error,
+                    operationID: operationID,
+                    failurePrefix: "安装失败"
+                )
             }
-            runtimeTask = nil
         }
     }
 
@@ -229,22 +242,89 @@ final class AppModel {
             xrayStopTask == nil,
             !urls.isEmpty
         else { return }
-        state.runtimePhase = .installing
+        let operationID = UUID()
+        activeRuntimeOperationID = operationID
+        state.runtimeOperation = .importing
+        state.runtimeOperationError = nil
+        appendLog(source: .app, message: "正在检查并导入本地运行组件…")
         runtimeTask = Task { [weak self] in
             guard let self else { return }
+            defer { finishRuntimeOperation(operationID: operationID) }
             do {
                 let status = try await runtimeManager.install(from: urls)
+                guard activeRuntimeOperationID == operationID else { return }
                 state.runtimeStatus = status
+                state.runtimeOperationError = nil
                 refreshRuntimePhase()
                 appendLog(source: .app, level: .success, message: "已导入本地运行组件")
                 showNotice("运行组件已导入", style: .success)
             } catch {
-                state.runtimePhase = .failed(error.localizedDescription)
-                appendLog(source: .app, level: .error, message: error.localizedDescription)
-                showNotice("导入失败：\(error.localizedDescription)", style: .error)
+                await finishRuntimeOperationFailure(
+                    error,
+                    operationID: operationID,
+                    failurePrefix: "导入失败"
+                )
             }
-            runtimeTask = nil
         }
+    }
+
+    func cancelRuntimeOperation() {
+        guard
+            !isShuttingDown,
+            runtimeTask != nil,
+            state.runtimeOperation?.canCancel == true
+        else { return }
+        state.runtimeOperation = .cancelling
+        appendLog(source: .app, level: .warning, message: "正在取消运行组件操作…")
+        runtimeTask?.cancel()
+    }
+
+    private func receiveRuntimeInstallationStage(
+        _ stage: RuntimeInstallationStage,
+        operationID: UUID
+    ) {
+        guard
+            activeRuntimeOperationID == operationID,
+            state.runtimeOperation != nil,
+            state.runtimeOperation != .cancelling
+        else { return }
+        state.runtimeOperation = .installing(stage)
+    }
+
+    private func finishRuntimeOperationFailure(
+        _ error: Error,
+        operationID: UUID,
+        failurePrefix: String
+    ) async {
+        guard activeRuntimeOperationID == operationID else { return }
+        let cancelled =
+            Task.isCancelled
+            || error is CancellationError
+            || (error as? URLError)?.code == .cancelled
+            || state.runtimeOperation == .cancelling
+        let status = await runtimeManager.installedStatus()
+        guard activeRuntimeOperationID == operationID else { return }
+
+        state.runtimeStatus = status
+        refreshRuntimePhase()
+        if cancelled {
+            state.runtimeOperationError = nil
+            guard !isShuttingDown else { return }
+            appendLog(source: .app, level: .warning, message: "运行组件操作已取消，现有组件保持不变")
+            showNotice("已取消运行组件操作，现有组件保持不变")
+            return
+        }
+
+        state.runtimeOperationError = error.localizedDescription
+        appendLog(source: .app, level: .error, message: "\(failurePrefix)：\(error.localizedDescription)")
+        showNotice("\(failurePrefix)：\(error.localizedDescription)", style: .error)
+    }
+
+    private func finishRuntimeOperation(operationID: UUID) {
+        guard activeRuntimeOperationID == operationID else { return }
+        activeRuntimeOperationID = nil
+        runtimeTask = nil
+        state.runtimeOperation = nil
     }
 
     func importXrayTemplate(from url: URL) {
@@ -413,6 +493,7 @@ final class AppModel {
         case .xray:
             state.preferences.xrayPath = path
         }
+        state.runtimeOperationError = nil
         schedulePreferencesSave()
         refreshRuntimePhase()
     }

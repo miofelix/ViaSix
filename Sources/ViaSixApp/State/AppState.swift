@@ -12,9 +12,41 @@ struct AppState: Equatable, Sendable {
     enum RuntimePhase: Equatable, Sendable {
         case checking
         case missing
-        case installing
         case ready
-        case failed(String)
+    }
+
+    enum RuntimeOperation: Equatable, Sendable {
+        case installing(RuntimeInstallationStage)
+        case importing
+        case cancelling
+
+        var description: String {
+            switch self {
+            case .installing(.resolvingLatestReleases):
+                "正在查询上游最新正式版本"
+            case .installing(.downloading(let component)):
+                "正在下载 \(component.displayName)"
+            case .installing(.verifying(let component)):
+                "正在校验 \(component.displayName) 的 SHA-256"
+            case .installing(.extracting(let component)):
+                "正在解压 \(component.displayName)"
+            case .installing(.committing):
+                "正在完成安装，现有组件会保留到成功"
+            case .importing:
+                "正在检查并导入本地组件"
+            case .cancelling:
+                "正在取消，现有组件不会被修改"
+            }
+        }
+
+        var canCancel: Bool {
+            switch self {
+            case .installing(.committing), .cancelling:
+                false
+            case .installing, .importing:
+                true
+            }
+        }
     }
 
     enum SpeedTestPhase: Equatable, Sendable {
@@ -84,6 +116,8 @@ struct AppState: Equatable, Sendable {
     var results: [SpeedTestResult] = []
     var runtimePhase: RuntimePhase = .checking
     var runtimeStatus: RuntimeInstallationStatus?
+    var runtimeOperation: RuntimeOperation?
+    var runtimeOperationError: String?
     var speedTest = SpeedTestState()
     var configurationTest = ConfigurationTestState()
     var xrayPhase: XrayPhase = .stopped

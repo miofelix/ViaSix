@@ -191,13 +191,16 @@ public enum RuntimeSHA256 {
     }
 
     public static func hexDigest(ofFileAt fileURL: URL) throws -> String {
+        try Task.checkCancellation()
         let file = try FileHandle(forReadingFrom: fileURL)
         defer { try? file.close() }
 
         var hasher = SHA256()
         while let chunk = try file.read(upToCount: 1_048_576), !chunk.isEmpty {
+            try Task.checkCancellation()
             hasher.update(data: chunk)
         }
+        try Task.checkCancellation()
         return hexString(hasher.finalize())
     }
 

@@ -180,7 +180,7 @@ struct RootView: View {
     private var sidebarProxyControlDisabled: Bool {
         guard
             model.state.launchPhase == .ready,
-            model.state.runtimePhase != .installing,
+            model.state.runtimeOperation == nil,
             !sidebarProxyIsTransitioning
         else { return true }
         switch model.state.xrayPhase {
@@ -203,8 +203,8 @@ struct RootView: View {
     }
 
     private var sidebarActionHelp: String {
-        if model.state.runtimePhase == .installing {
-            return "运行组件安装中"
+        if let operation = model.state.runtimeOperation {
+            return operation.description
         }
         return switch model.state.xrayPhase {
         case .running, .validating, .starting:
