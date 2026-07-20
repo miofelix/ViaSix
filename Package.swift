@@ -10,18 +10,44 @@ let package = Package(
     ],
     products: [
         .library(name: "ViaSixCore", targets: ["ViaSixCore"]),
+        .library(
+            name: "ViaSixPrivilegedProtocol",
+            targets: ["ViaSixPrivilegedProtocol"]
+        ),
+        .library(
+            name: "ViaSixTunHelperSupport",
+            targets: ["ViaSixTunHelperSupport"]
+        ),
         .executable(name: "ViaSix", targets: ["ViaSixApp"]),
+        .executable(name: "ViaSixTunHelper", targets: ["ViaSixTunHelper"]),
     ],
     targets: [
+        .target(
+            name: "ViaSixPrivilegedProtocol",
+            linkerSettings: [
+                .linkedFramework("Security")
+            ]
+        ),
         .target(
             name: "ViaSixCore",
             resources: [
                 .process("Resources")
             ]
         ),
+        .target(
+            name: "ViaSixTunHelperSupport",
+            dependencies: ["ViaSixPrivilegedProtocol"]
+        ),
         .executableTarget(
             name: "ViaSixApp",
-            dependencies: ["ViaSixCore"]
+            dependencies: ["ViaSixCore", "ViaSixPrivilegedProtocol"],
+            linkerSettings: [
+                .linkedFramework("ServiceManagement")
+            ]
+        ),
+        .executableTarget(
+            name: "ViaSixTunHelper",
+            dependencies: ["ViaSixPrivilegedProtocol", "ViaSixTunHelperSupport"]
         ),
         .testTarget(
             name: "ViaSixCoreTests",
@@ -30,6 +56,14 @@ let package = Package(
         .testTarget(
             name: "ViaSixAppTests",
             dependencies: ["ViaSixApp", "ViaSixCore"]
+        ),
+        .testTarget(
+            name: "ViaSixPrivilegedProtocolTests",
+            dependencies: ["ViaSixPrivilegedProtocol"]
+        ),
+        .testTarget(
+            name: "ViaSixTunHelperSupportTests",
+            dependencies: ["ViaSixTunHelperSupport"]
         ),
     ]
 )

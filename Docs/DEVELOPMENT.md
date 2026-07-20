@@ -130,10 +130,12 @@ ThirdPartyLicenses/   固定上游版本的许可证原文
 LICENSE               ViaSix 自身的 MIT License
 ```
 
-SwiftPM 定义两个主要目标：
+SwiftPM 定义四个主要目标：
 
 - `ViaSixCore`：可导入的核心库，不依赖 SwiftUI。
 - `ViaSixApp`：原生 SwiftUI macOS 可执行程序。
+- `ViaSixPrivilegedProtocol`：app/helper 共用的固定 XPC 协议与代码签名要求。
+- `ViaSixTunHelper`：由 `SMAppService` 管理的 LaunchDaemon 可执行程序。
 
 更详细的模块关系见 [架构说明](ARCHITECTURE.md)。
 
@@ -221,7 +223,7 @@ CloudflareSpeedTest 是 XIU2 维护的独立第三方项目，并非 Cloudflare 
 - `Runtime`：ViaSix 管理的第三方组件。
 - `Logs`：为未来持久日志预留；当前界面日志仅在内存中。
 
-虚拟网卡能力目前只由 `VirtualInterfaceManager` 探测，默认实现不会创建接口或修改路由/DNS。其版本、特权 helper、上游防回环和恢复要求见[虚拟网卡能力边界](VIRTUAL_NETWORK.md)；在真实后端和隔离环境回归完成前，不得增加用户可见开关。
+虚拟网卡能力目前由 `VirtualInterfaceManager` 与只读 helper 握手边界共同描述，默认实现不会创建接口或修改路由/DNS。ad-hoc 构建没有 Developer ID Team 标识，helper 必须拒绝启动/连接；只有正式签名并公证的 app 才能注册 LaunchDaemon。其版本、特权 helper、上游防回环和恢复要求见[虚拟网卡能力边界](VIRTUAL_NETWORK.md)；在真实后端和隔离环境回归完成前，不得增加用户可见开关。
 
 ViaSix 会把上述目录权限收紧为 `0700`，把偏好、地址列表和代理配置等管理文件收紧为 `0600`。新增写入路径时必须保持相同边界；不要依赖用户默认 `umask` 保护敏感配置。
 

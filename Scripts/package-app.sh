@@ -25,9 +25,14 @@ build_arguments=(
 swift build "${build_arguments[@]}"
 binary_directory=$(swift build "${build_arguments[@]}" --show-bin-path)
 binary_path="$binary_directory/ViaSix"
+helper_binary_path="$binary_directory/ViaSixTunHelper"
 
 if [[ ! -x "$binary_path" ]]; then
     print -u2 "ViaSix executable was not produced at $binary_path"
+    exit 1
+fi
+if [[ ! -x "$helper_binary_path" ]]; then
+    print -u2 "ViaSix TUN helper was not produced at $helper_binary_path"
     exit 1
 fi
 
@@ -39,9 +44,17 @@ contents_dir="$app_bundle/Contents"
 
 mkdir -p \
     "$contents_dir/MacOS" \
+    "$contents_dir/Library/HelperTools" \
+    "$contents_dir/Library/LaunchDaemons" \
     "$contents_dir/Resources/Docs" \
     "$contents_dir/Resources/ThirdPartyLicenses"
 cp "$binary_path" "$contents_dir/MacOS/ViaSix"
+cp \
+    "$helper_binary_path" \
+    "$contents_dir/Library/HelperTools/com.felix.viasix.tun-helper"
+cp \
+    "$project_root/Packaging/LaunchDaemons/com.felix.viasix.tun-helper.plist" \
+    "$contents_dir/Library/LaunchDaemons/com.felix.viasix.tun-helper.plist"
 cp "$project_root/Packaging/Info.plist" "$contents_dir/Info.plist"
 cp "$project_root/Docs/USER_GUIDE.md" "$contents_dir/Resources/Docs/USER_GUIDE.md"
 cp "$project_root/CHANGELOG.md" "$contents_dir/Resources/CHANGELOG.md"
@@ -73,18 +86,38 @@ for resource in "$resource_bundle"/*(N); do
     ditto "$resource" "$contents_dir/Resources/${resource:t}"
 done
 
-chmod 755 "$contents_dir/MacOS/ViaSix"
+helper_path="$contents_dir/Library/HelperTools/com.felix.viasix.tun-helper"
+chmod 755 "$contents_dir/MacOS/ViaSix" "$helper_path"
 if [[ "$configuration" == "release" ]]; then
-    /usr/bin/strip -S -x "$contents_dir/MacOS/ViaSix"
+    /usr/bin/strip -S -x "$contents_dir/MacOS/ViaSix" "$helper_path"
 fi
 codesign_identity=${VIASIX_CODESIGN_IDENTITY:--}
 if [[ "$codesign_identity" == "-" ]]; then
-    codesign --force --sign - "$app_bundle"
+    codesign \
+        --force \
+        --identifier com.felix.viasix.tun-helper \
+        --entitlements "$project_root/Packaging/Entitlements/ViaSixTunHelper.entitlements" \
+        --sign - \
+        "$helper_path"
+    codesign \
+        --force \
+        --entitlements "$project_root/Packaging/Entitlements/ViaSix.entitlements" \
+        --sign - \
+        "$app_bundle"
 else
     codesign \
         --force \
         --options runtime \
         --timestamp \
+        --identifier com.felix.viasix.tun-helper \
+        --entitlements "$project_root/Packaging/Entitlements/ViaSixTunHelper.entitlements" \
+        --sign "$codesign_identity" \
+        "$helper_path"
+    codesign \
+        --force \
+        --options runtime \
+        --timestamp \
+        --entitlements "$project_root/Packaging/Entitlements/ViaSix.entitlements" \
         --sign "$codesign_identity" \
         "$app_bundle"
 fi

@@ -44,7 +44,11 @@ lint-scripts:
 	@for script in $(SHELL_SCRIPTS); do /bin/zsh -n "$$script"; done
 
 lint-metadata:
-	@plutil -lint Packaging/Info.plist >/dev/null
+	@plutil -lint \
+		Packaging/Info.plist \
+		Packaging/LaunchDaemons/com.felix.viasix.tun-helper.plist \
+		Packaging/Entitlements/ViaSix.entitlements \
+		Packaging/Entitlements/ViaSixTunHelper.entitlements >/dev/null
 	@plutil -convert xml1 -o /dev/null Sources/ViaSixCore/Resources/template.json
 
 lint-docs:

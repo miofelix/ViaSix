@@ -25,6 +25,8 @@ minimum_system=$(/usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" "$in
 short_version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$info_plist")
 build_version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$info_plist")
 executable_path="$contents_dir/MacOS/$executable_name"
+helper_path="$contents_dir/Library/HelperTools/com.felix.viasix.tun-helper"
+daemon_plist="$contents_dir/Library/LaunchDaemons/com.felix.viasix.tun-helper.plist"
 short_version_pattern='^[0-9]+[.][0-9]+[.][0-9]+$'
 build_version_pattern='^[0-9]+([.][0-9]+){0,2}$'
 
@@ -36,6 +38,32 @@ build_version_pattern='^[0-9]+([.][0-9]+){0,2}$'
 [[ "$build_version" =~ $build_version_pattern ]] || fail "invalid build version: $build_version"
 [[ -x "$executable_path" ]] || fail "main executable is missing or not executable"
 file "$executable_path" | grep -q "Mach-O" || fail "main executable is not Mach-O"
+[[ -x "$helper_path" ]] || fail "TUN helper is missing or not executable"
+[[ ! -L "$helper_path" ]] || fail "TUN helper must not be a symbolic link"
+file "$helper_path" | grep -q "Mach-O" || fail "TUN helper is not Mach-O"
+[[ -f "$daemon_plist" ]] || fail "LaunchDaemon plist is missing"
+[[ ! -L "$daemon_plist" ]] || fail "LaunchDaemon plist must not be a symbolic link"
+plutil -lint "$daemon_plist" >/dev/null
+
+daemon_label=$(/usr/libexec/PlistBuddy -c "Print :Label" "$daemon_plist")
+daemon_program=$(/usr/libexec/PlistBuddy -c "Print :BundleProgram" "$daemon_plist")
+daemon_user=$(/usr/libexec/PlistBuddy -c "Print :UserName" "$daemon_plist")
+daemon_mach_service=$(
+    /usr/libexec/PlistBuddy \
+        -c "Print :MachServices:com.felix.viasix.tun-helper" \
+        "$daemon_plist"
+)
+[[ "$daemon_label" == "com.felix.viasix.tun-helper" ]] \
+    || fail "unexpected LaunchDaemon label: $daemon_label"
+[[ "$daemon_program" == "Contents/Library/HelperTools/com.felix.viasix.tun-helper" ]] \
+    || fail "unexpected LaunchDaemon BundleProgram: $daemon_program"
+[[ "$daemon_user" == "root" ]] || fail "unexpected LaunchDaemon user: $daemon_user"
+[[ "$daemon_mach_service" == "true" ]] \
+    || fail "TUN helper Mach service is not enabled"
+if /usr/libexec/PlistBuddy -c "Print :Program" "$daemon_plist" >/dev/null 2>&1 \
+    || /usr/libexec/PlistBuddy -c "Print :ProgramArguments" "$daemon_plist" >/dev/null 2>&1; then
+    fail "LaunchDaemon must use only the fixed BundleProgram"
+fi
 
 if [[ -n "${VIASIX_EXPECTED_VERSION:-}" && "$short_version" != "$VIASIX_EXPECTED_VERSION" ]]; then
     fail "expected application version $VIASIX_EXPECTED_VERSION, found $short_version"
@@ -91,9 +119,24 @@ if [[ "${VIASIX_ALLOW_LOCAL_PATHS:-0}" != "1" ]] \
     fail "local checkout path leaked into application bundle"
 fi
 
+helper_identifier=$(codesign -d --verbose=4 "$helper_path" 2>&1 | sed -n 's/^Identifier=//p')
+app_signing_identifier=$(codesign -d --verbose=4 "$app_bundle" 2>&1 | sed -n 's/^Identifier=//p')
+helper_team_identifier=$(codesign -d --verbose=4 "$helper_path" 2>&1 | sed -n 's/^TeamIdentifier=//p')
+app_team_identifier=$(codesign -d --verbose=4 "$app_bundle" 2>&1 | sed -n 's/^TeamIdentifier=//p')
+[[ "$app_signing_identifier" == "com.felix.viasix" ]] \
+    || fail "unexpected application signing identifier: $app_signing_identifier"
+[[ "$helper_identifier" == "com.felix.viasix.tun-helper" ]] \
+    || fail "unexpected TUN helper signing identifier: $helper_identifier"
+[[ "$helper_team_identifier" == "$app_team_identifier" ]] \
+    || fail "application/helper Team Identifier mismatch"
+codesign --verify --strict --verbose=2 "$helper_path"
+codesign --verify --strict --verbose=2 "$app_bundle"
 codesign --verify --deep --strict --verbose=2 "$app_bundle"
 
 architectures=$(lipo -archs "$executable_path")
+helper_architectures=$(lipo -archs "$helper_path")
+[[ "$helper_architectures" == "$architectures" ]] \
+    || fail "main/helper architecture mismatch: $architectures vs $helper_architectures"
 if [[ -n "${VIASIX_EXPECTED_ARCHITECTURE:-}" && " $architectures " != *" $VIASIX_EXPECTED_ARCHITECTURE "* ]]; then
     fail "expected architecture $VIASIX_EXPECTED_ARCHITECTURE, found $architectures"
 fi

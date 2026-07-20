@@ -19,7 +19,7 @@
 
 ## 总体结构
 
-ViaSix 由 SwiftUI 可执行目标和不依赖 SwiftUI 的核心库组成：
+ViaSix 由 SwiftUI 应用、平台无关核心、共享特权协议和 LaunchDaemon helper 组成：
 
 ```text
 ViaSixApp（SwiftUI，@MainActor）
@@ -30,13 +30,21 @@ ViaSixCore
   Models / Parsing / Configuration / Networking
   Infrastructure / Runtime / Resources / Network access capabilities
                     │
-                    ▼
-Application Support + ViaSix 自有子进程 + 第三方网络服务
+          ┌─────────┴──────────┐
+          ▼                    ▼
+Application Support      ViaSixPrivilegedProtocol
+用户数据与用户态子进程    固定 typed XPC methods
+                               │
+                               ▼
+                         ViaSixTunHelper
+                         SMAppService LaunchDaemon
 ```
 
 - `ViaSixApp`：窗口、菜单栏、用户交互和工作流编排。
 - `AppModel`：主线程上的唯一应用状态协调者，持有并取消长任务。
 - `ViaSixCore`：配置校验、持久化、解析、组件安装和进程控制。
+- `ViaSixPrivilegedProtocol`：app/helper 共用的协议版本、Mach service 常量、代码签名身份与固定 XPC 接口。
+- `ViaSixTunHelper`：最小权限 LaunchDaemon；当前仅做签名受限的探测与无状态恢复，不具备网络修改能力。
 - `CfstRunner` / `XrayController`：actor 隔离的自有进程生命周期。
 
 UI 不直接启动进程或修改运行配置；相关操作通过 `AppModel` 进入核心层。
@@ -166,7 +174,7 @@ local-proxy.json + 模式 ─┤
 
 路由模式决定“进入本地 mixed 入站之后如何出站”，系统代理决定“遵循 macOS 代理设置的应用是否自动进入该入站”。这两个维度都不会捕获忽略系统代理的进程或任意系统数据包。
 
-当前版本没有可用的虚拟网卡/TUN、默认路由接管或 DNS 重写能力，也不安装 Network Extension 或特权 helper。`VirtualInterfaceManager` 只提供后端能力探测和不可用的默认实现，不触碰系统网络；普通用户界面因此不会显示虚假的 TUN 开关。完整设计、权限边界、Xray 版本门槛和恢复顺序见 [虚拟网卡能力边界](VIRTUAL_NETWORK.md)。
+当前版本没有可用的虚拟网卡/TUN、默认路由接管或 DNS 重写能力。应用包包含一个通过 `SMAppService` 注册的特权 helper 骨架，但它只提供签名受限的能力探测，报告空能力集且不触碰系统网络；普通用户界面因此不会显示虚假的 TUN 开关。完整设计、权限边界、Xray 版本门槛和恢复顺序见 [虚拟网卡能力边界](VIRTUAL_NETWORK.md)。
 
 ## 运行组件安装
 
@@ -199,12 +207,13 @@ local-proxy.json + 模式 ─┤
 | 本地导入组件 | 用户明确选择 | 恶意或架构不兼容二进制 |
 | Xray JSON | 结构和回环监听校验 | 凭据泄露、错误服务器配置 |
 | macOS 网络代理设置 | SystemConfiguration 锁、前置状态比较和恢复快照 | 权限失败、外部并发修改、异常退出遗留 |
+| 特权 helper | 双向固定 identifier + 相同 Team ID 的代码签名要求、UID/audit session、固定 XPC methods | 非法客户端、协议混淆、特权接口过宽、恢复失败 |
 | 虚拟网卡后端能力 | Xray 版本、helper/IPC、路由/DNS/恢复能力探测 | 默认路由回环、特权操作、DNS 泄漏、外部路由修改 |
 | 自定义 IP / CIDR / URL | 参数校验后交给 CFST | 过量网络负载、不可信目标 |
 | 出口 IP 服务 | 用户可配置的 HTTP / HTTPS 响应并验证 IP 格式 | 可用性、第三方日志和错误数据 |
 
 ## 分发模型
 
-当前设计面向 Developer ID 签名、公证和非 Mac App Store 分发。应用需要在 Application Support 中运行外部网络工具，并可在用户启用后修改 macOS 网络代理设置，因此不适合现有 Mac App Store 沙盒模型。
+当前设计面向 Developer ID 签名、公证和非 Mac App Store 分发。包含 LaunchDaemon 的 app 必须公证，并建议安装到 `/Applications`；helper 或 plist 更新后必须先异步 unregister，等待完成后再 register。应用需要在 Application Support 中运行用户态网络工具，并可在用户启用后修改 macOS 网络代理设置，因此不适合现有 Mac App Store 沙盒模型。
 
 开发运行使用 SwiftPM 的 `Bundle.module` 读取资源。打包构建定义 `VIASIX_PACKAGED_APP`，只从 `Bundle.main` 读取资源并启用 dead stripping，避免把本机 SwiftPM 资源路径带入分发二进制。应用包验证会扫描本地检出路径和必需资源。
