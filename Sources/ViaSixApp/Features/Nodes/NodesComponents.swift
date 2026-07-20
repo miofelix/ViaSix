@@ -31,11 +31,11 @@ struct ParameterDisclosure<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    isExpanded.toggle()
-                }
-            } label: {
+            DisclosureControl(
+                title: title,
+                summary: subtitle,
+                isExpanded: $isExpanded
+            ) {
                 HStack(spacing: 11) {
                     Image(systemName: systemImage)
                         .foregroundStyle(VisualStyle.accent)
@@ -52,19 +52,8 @@ struct ParameterDisclosure<Content: View>: View {
                             .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-
-                    Spacer(minLength: 12)
-
-                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.callout.weight(.semibold))
-                        .foregroundStyle(.secondary)
                 }
             }
-            .buttonStyle(.plain)
-            .frame(maxWidth: .infinity, minHeight: VisualStyle.controlHeight, alignment: .leading)
-            .contentShape(Rectangle())
-            .accessibilityLabel(title)
-            .accessibilityValue(isExpanded ? "已展开，\(subtitle)" : "已收起，\(subtitle)")
 
             if isExpanded {
                 content

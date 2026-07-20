@@ -112,6 +112,46 @@ final class AppDocumentViewerTests: XCTestCase {
         XCTAssertFalse(sections[1].content.contains("代码中的标题"))
     }
 
+    func testSectionsExposeSemanticNavigationTitles() {
+        let sections = MarkdownSection.parse(
+            """
+            开场说明
+
+            ## 安装与更新
+
+            内容
+
+            ### 常见问题
+            """
+        )
+
+        XCTAssertEqual(
+            sections.compactMap(\.navigationTitle),
+            ["安装与更新", "常见问题"]
+        )
+    }
+
+    func testKnownLicenseFilesUseReadableTitles() {
+        XCTAssertEqual(
+            DocumentDisplayTitle.resolve(
+                URL(fileURLWithPath: "/tmp/ThirdPartyLicenses")
+            ),
+            "离线许可证原文"
+        )
+        XCTAssertEqual(
+            DocumentDisplayTitle.resolve(
+                URL(fileURLWithPath: "/tmp/CloudflareSpeedTest-GPL-3.0.txt")
+            ),
+            "CloudflareSpeedTest · GPL-3.0"
+        )
+        XCTAssertEqual(
+            DocumentDisplayTitle.resolve(
+                URL(fileURLWithPath: "/tmp/Xray-core-MPL-2.0.txt")
+            ),
+            "Xray-core · MPL-2.0"
+        )
+    }
+
     func testPlainTextDocumentsDoNotUseMarkdownBlockParsing() {
         XCTAssertEqual(
             DocumentContentKind(url: URL(fileURLWithPath: "/tmp/LICENSE"), isDirectory: false),
@@ -135,6 +175,21 @@ final class AppDocumentViewerTests: XCTestCase {
         let fragment = try XCTUnwrap(DocumentLinkResolver.decodedFragment(in: url))
         XCTAssertEqual(fragment, "1-认识-viasix")
         XCTAssertEqual(MarkdownSection.slug(fragment), "1-认识-viasix")
+    }
+
+    func testDocumentLinkResolverUsesFirstSectionAndRejectsUnknownAnchors() {
+        let sectionIDs = ["概览", "安装与更新"]
+        XCTAssertEqual(
+            DocumentLinkResolver.anchor(for: nil, sectionIDs: sectionIDs),
+            "概览"
+        )
+        XCTAssertEqual(
+            DocumentLinkResolver.anchor(for: "安装与更新", sectionIDs: sectionIDs),
+            "安装与更新"
+        )
+        XCTAssertNil(
+            DocumentLinkResolver.anchor(for: "不存在", sectionIDs: sectionIDs)
+        )
     }
 
     func testDocumentFilePolicyRejectsNonDocumentExtensions() {

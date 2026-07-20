@@ -55,13 +55,13 @@ struct OverviewView: View {
             )
             OverviewMetric(
                 title: "平均延迟",
-                value: selectedResult.map { "\($0.latency) ms" } ?? "",
+                value: selectedResult?.latencyDisplayValue ?? "",
                 detail: speedTestProtocolLabel,
                 systemImage: "timer"
             )
             OverviewMetric(
                 title: "下行速度",
-                value: selectedResult.map { "\($0.speed) MB/s" } ?? "",
+                value: selectedResult?.speedDisplayValue ?? "",
                 detail: "测速结果",
                 systemImage: "arrow.down"
             )
@@ -87,13 +87,7 @@ struct OverviewView: View {
 
             proxyActionsRow
 
-            if case .failed(let message) = model.state.configurationTest.phase {
-                Text("当前节点测速失败：\(message)")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 8)
-            }
+            configurationTestStatus
 
             if !model.state.isXrayRunning {
                 Label(proxyReadinessHint, systemImage: "info.circle")
@@ -245,10 +239,46 @@ struct OverviewView: View {
             }
         }
         .disabled(configurationTestButtonDisabled)
+        .help(configurationTestButtonHelp)
+        .accessibilityHint(configurationTestButtonHelp)
 
         if model.state.isXrayRunning {
             Button("重新连接", systemImage: "arrow.clockwise", action: model.restartXray)
                 .disabled(model.switchingIP != nil || model.isTemplateOperationBusy)
+        }
+    }
+
+    @ViewBuilder
+    private var configurationTestStatus: some View {
+        switch model.state.configurationTest.phase {
+        case .running:
+            Label(
+                "正在测试当前节点…",
+                systemImage: "gauge.with.dots.needle.67percent"
+            )
+            .foregroundStyle(VisualStyle.accent)
+            .configurationTestStatusStyle()
+        case .stopping:
+            Label("正在停止当前节点测速…", systemImage: "hourglass")
+                .foregroundStyle(.secondary)
+                .configurationTestStatusStyle()
+        case .failed(let message):
+            Label("当前节点测速失败：\(message)", systemImage: "exclamationmark.circle.fill")
+                .foregroundStyle(.red)
+                .configurationTestStatusStyle()
+        case .idle:
+            if let completedAt = model.state.configurationTest.completedAt,
+                model.state.configurationTest.result != nil
+            {
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    Image(systemName: "checkmark.circle.fill")
+                    Text("当前节点测速完成 ·")
+                    Text(completedAt, style: .relative)
+                }
+                .foregroundStyle(.secondary)
+                .configurationTestStatusStyle()
+                .help(completedAt.formatted(date: .complete, time: .standard))
+            }
         }
     }
 
@@ -721,12 +751,21 @@ struct OverviewView: View {
     private var configurationTestButtonDisabled: Bool {
         if case .stopping = model.state.configurationTest.phase { return true }
         if isConfigurationTestRunning { return false }
-        return model.state.runtimeOperation != nil
-            || model.isTemplateOperationBusy
-            || model.switchingIP != nil
-            || selectedIP.isEmpty
-            || !model.hasCfstExecutable
-            || model.isCfstBusy
+        return model.currentConfigurationTestUnavailableReason != nil
+    }
+
+    private var configurationTestButtonHelp: String {
+        switch model.state.configurationTest.phase {
+        case .running:
+            return "停止当前节点测速"
+        case .stopping:
+            return "正在停止当前节点测速"
+        case .idle, .failed:
+            if let reason = model.currentConfigurationTestUnavailableReason {
+                return "暂不可测速：\(reason)"
+            }
+            return "沿用当前协议、端口和下载设置；候选筛选条件不会影响本次结果。"
+        }
     }
 
     private var runtimeStatusTitle: String {
@@ -809,5 +848,13 @@ private struct OverviewMetric: View {
                 .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private extension View {
+    func configurationTestStatusStyle() -> some View {
+        font(.caption)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, 8)
     }
 }

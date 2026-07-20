@@ -8,6 +8,8 @@ struct AppDocumentViewer: View {
     @State private var pages: [DocumentPage] = []
     @State private var pendingAnchor: String?
     @State private var isLoading = true
+    @State private var loadFailure: String?
+    @State private var navigationFailure: String?
 
     private var page: DocumentPage? { pages.last }
 
@@ -22,24 +24,27 @@ struct AppDocumentViewer: View {
             } else if let page {
                 documentContent(page)
             } else {
-                ContentUnavailableView(
-                    "无法读取文档",
-                    systemImage: "doc.text.magnifyingglass",
-                    description: Text("应用包中没有找到\(document.displayName)。")
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                loadFailureView
             }
         }
         .frame(minWidth: 700, minHeight: 520)
         .background(VisualStyle.pageBackground)
         .task {
             guard pages.isEmpty else { return }
-            guard let url = AppDocumentOpener.documentURL(for: document) else {
-                isLoading = false
-                return
-            }
-            openPage(url, title: document.displayName)
-            isLoading = false
+            loadRootDocument()
+        }
+        .alert(
+            "无法打开文档链接",
+            isPresented: Binding(
+                get: { navigationFailure != nil },
+                set: { isPresented in
+                    if !isPresented { navigationFailure = nil }
+                }
+            )
+        ) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(navigationFailure ?? "请稍后再试。")
         }
     }
 
@@ -66,15 +71,37 @@ struct AppDocumentViewer: View {
             Spacer(minLength: 12)
 
             if let page {
-                Button {
-                    NSWorkspace.shared.activateFileViewerSelecting([page.url])
-                } label: {
-                    Image(systemName: "arrow.up.right.square")
+                let sections = page.sections.filter { $0.navigationTitle != nil }
+                if sections.count > 1 {
+                    Menu {
+                        ForEach(sections) { section in
+                            Button(section.navigationTitle ?? "未命名章节") {
+                                pendingAnchor = section.id
+                            }
+                        }
+                    } label: {
+                        Label("章节", systemImage: "list.bullet")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .help("跳转到文档章节")
                 }
-                .buttonStyle(.borderless)
+
+                Menu {
+                    Button("在访达中显示", systemImage: "folder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([page.url])
+                    }
+                    Button("复制文件路径", systemImage: "doc.on.doc") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(page.url.path, forType: .string)
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton)
                 .iconButtonHitTarget()
-                .help("在访达中打开当前文件")
-                .accessibilityLabel("在访达中打开当前文件")
+                .help("更多文档操作")
+                .accessibilityLabel("更多文档操作")
             }
         }
         .padding(.horizontal, 22)
@@ -121,12 +148,18 @@ struct AppDocumentViewer: View {
 
     private func openPage(_ url: URL, title: String? = nil, anchor: String? = nil) {
         let normalizedURL = fileURLWithoutFragment(url)
-        guard AppDocumentOpener.isTrustedDocumentURL(normalizedURL) else { return }
+        guard AppDocumentOpener.isTrustedDocumentURL(normalizedURL) else {
+            reportOpenFailure("此链接指向应用文档范围之外，已阻止打开。")
+            return
+        }
 
         do {
             let content: String
             let isDirectory = try normalizedURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
-            guard isDirectory || DocumentFilePolicy.isReadableDocument(normalizedURL) else { return }
+            guard isDirectory || DocumentFilePolicy.isReadableDocument(normalizedURL) else {
+                reportOpenFailure("此链接不是可在应用内查看的文档。")
+                return
+            }
             if isDirectory {
                 content = try directoryIndex(for: normalizedURL)
             } else {
@@ -135,28 +168,56 @@ struct AppDocumentViewer: View {
 
             let page = DocumentPage(
                 url: normalizedURL,
-                title: title ?? displayTitle(for: normalizedURL),
+                title: title ?? DocumentDisplayTitle.resolve(normalizedURL),
                 content: content,
                 isDirectory: isDirectory
             )
+            let resolvedAnchor: String?
+            if let anchor {
+                let anchorID = MarkdownSection.slug(anchor)
+                guard page.sections.contains(where: { $0.id == anchorID }) else {
+                    pendingAnchor = nil
+                    reportOpenFailure("文档中没有找到对应章节。")
+                    return
+                }
+                resolvedAnchor = anchorID
+            } else {
+                resolvedAnchor = nil
+            }
             pages.append(page)
-            pendingAnchor = anchor.map(MarkdownSection.slug)
+            loadFailure = nil
+            pendingAnchor = resolvedAnchor
         } catch {
-            isLoading = false
+            reportOpenFailure("读取“\(DocumentDisplayTitle.resolve(normalizedURL))”失败：\(error.localizedDescription)")
         }
     }
 
     private func handleLink(_ url: URL, from sourceURL: URL) {
-        if ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") {
-            NSWorkspace.shared.open(url)
+        let scheme = url.scheme?.lowercased() ?? ""
+        if ["http", "https", "mailto"].contains(scheme) {
+            if !NSWorkspace.shared.open(url) {
+                reportOpenFailure("系统无法打开此链接。")
+            }
             return
         }
 
-        guard url.isFileURL else { return }
+        guard url.isFileURL else {
+            reportOpenFailure("此链接类型暂不支持。")
+            return
+        }
         let target = fileURLWithoutFragment(url)
         let fragment = DocumentLinkResolver.decodedFragment(in: url)
-        if target == fileURLWithoutFragment(sourceURL), let fragment {
-            pendingAnchor = MarkdownSection.slug(fragment)
+        if target == fileURLWithoutFragment(sourceURL) {
+            guard
+                let anchor = DocumentLinkResolver.anchor(
+                    for: fragment,
+                    sectionIDs: page?.sections.map(\.id) ?? []
+                )
+            else {
+                reportOpenFailure("文档中没有找到对应章节。")
+                return
+            }
+            pendingAnchor = anchor
             return
         }
         openPage(target, anchor: fragment)
@@ -183,26 +244,69 @@ struct AppDocumentViewer: View {
         .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
 
         let links = children.map { child -> String in
-            let label = child.lastPathComponent.replacingOccurrences(of: "[", with: "\\[")
+            let label = DocumentDisplayTitle.resolve(child)
+                .replacingOccurrences(of: "[", with: "\\[")
+                .replacingOccurrences(of: "]", with: "\\]")
             let relative =
                 child.lastPathComponent.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
                 ?? child.lastPathComponent
             return "- [\(label)](\(relative))"
         }
-        return "# \(displayTitle(for: url))\n\n"
-            + (links.isEmpty ? "暂无可查看的文件。" : links.joined(separator: "\n"))
+        let title = DocumentDisplayTitle.resolve(url)
+        let content = links.isEmpty ? "暂无可查看的文档。" : links.joined(separator: "\n")
+        return "# \(title)\n\n\(content)"
     }
 
-    private func displayTitle(for url: URL) -> String {
+    private var loadFailureView: some View {
+        VStack(spacing: 16) {
+            ContentUnavailableView(
+                "无法读取文档",
+                systemImage: "doc.text.magnifyingglass",
+                description: Text(loadFailure ?? "应用包中没有找到\(document.displayName)。")
+            )
+            Button("重新读取", systemImage: "arrow.clockwise") {
+                loadRootDocument()
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(32)
+    }
+
+    private func loadRootDocument() {
+        isLoading = true
+        loadFailure = nil
+        pages.removeAll()
+        pendingAnchor = nil
+        guard let url = AppDocumentOpener.documentURL(for: document) else {
+            loadFailure = "应用包中没有找到\(document.displayName)。"
+            isLoading = false
+            return
+        }
+        openPage(url, title: document.displayName)
+        isLoading = false
+    }
+
+    private func reportOpenFailure(_ message: String) {
+        isLoading = false
+        if pages.isEmpty {
+            loadFailure = message
+        } else {
+            navigationFailure = message
+        }
+    }
+}
+
+enum DocumentDisplayTitle {
+    static func resolve(_ url: URL) -> String {
         let name = url.deletingPathExtension().lastPathComponent
         switch name {
-        case "ThirdPartyLicenses": return "第三方许可证原文"
+        case "ThirdPartyLicenses": return "离线许可证原文"
         case "CloudflareSpeedTest-GPL-3.0": return "CloudflareSpeedTest · GPL-3.0"
         case "Xray-core-MPL-2.0": return "Xray-core · MPL-2.0"
         default: return name
         }
     }
-
 }
 
 enum DocumentFilePolicy {
@@ -220,6 +324,13 @@ enum DocumentFilePolicy {
 enum DocumentLinkResolver {
     static func decodedFragment(in url: URL) -> String? {
         url.fragment(percentEncoded: false)
+    }
+
+    static func anchor(for fragment: String?, sectionIDs: [String]) -> String? {
+        guard !sectionIDs.isEmpty else { return nil }
+        guard let fragment else { return sectionIDs.first }
+        let anchor = MarkdownSection.slug(fragment)
+        return sectionIDs.contains(anchor) ? anchor : nil
     }
 }
 
@@ -263,6 +374,13 @@ enum DocumentContentKind: Equatable {
 struct MarkdownSection: Identifiable, Equatable {
     let id: String
     let content: String
+
+    var navigationTitle: String? {
+        guard let firstLine = content.split(separator: "\n", maxSplits: 1).first else {
+            return nil
+        }
+        return Self.headingText(in: String(firstLine))
+    }
 
     static func parse(_ content: String) -> [MarkdownSection] {
         let lines = content.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
@@ -823,6 +941,7 @@ private struct PlainTextDocument: View {
                 .fixedSize(horizontal: true, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .horizontalScrollbarSafeContent()
         .scrollIndicators(.automatic)
     }
 }
@@ -1033,6 +1152,7 @@ private struct MarkdownCodeBlock: View {
                     .padding(12)
                     .fixedSize(horizontal: true, vertical: true)
             }
+            .horizontalScrollbarSafeContent()
             .scrollIndicators(.automatic)
         }
         .background(
@@ -1078,6 +1198,7 @@ private struct MarkdownTable: View {
                 }
             }
         }
+        .horizontalScrollbarSafeContent()
         .scrollIndicators(.automatic)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay {

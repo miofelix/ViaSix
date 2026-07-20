@@ -28,6 +28,10 @@ final class ExitIPForcedModeTests: XCTestCase {
                 && model.state.exit.info?.location == "澳大利亚 · 昆士兰州 · 布里斯班"
                 && !model.state.exit.isEnriching
         }
+        XCTAssertEqual(
+            model.state.exit.info?.details,
+            "Example IPv4 Network · AS64504 · Australia/Brisbane"
+        )
 
         model.exitIPDetectionMode = .ipv6
         model.detectExitIP()
@@ -52,6 +56,45 @@ final class ExitIPForcedModeTests: XCTestCase {
         )
         XCTAssertNil(model.state.exit.errorMessage)
 
+        await model.shutdown()
+    }
+
+    func testAutomaticIPv6ResultAlsoReceivesDetailedGeolocation() async throws {
+        let paths = AppPaths(
+            root: FileManager.default.temporaryDirectory
+                .appendingPathComponent("ExitIPAutomaticIPv6Tests-\(UUID().uuidString)", isDirectory: true)
+        )
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+
+        let primary = ExitIPInfo(ip: "2001:db8::42")
+        let enriched = ExitIPInfo(
+            ip: primary.ip,
+            location: "日本 · 东京都 · 东京 · 邮编 100-0001",
+            details: "Example IPv6 Network · AS64506 · Asia/Tokyo"
+        )
+        let detector = ControlledAutomaticExitDetector(primary: primary)
+        let model = AppModel(
+            paths: paths,
+            preferencesStore: PreferencesStore(fileURL: paths.preferences),
+            bootstrapper: AppBootstrapper(paths: paths),
+            runtimeManager: RuntimeComponentManager(paths: paths),
+            exitDetector: detector
+        )
+
+        model.detectExitIP()
+        try await waitUntil { model.state.exit.isEnriching }
+        let pendingRequestID = await detector.enrichmentRequestID()
+        let requestID = try XCTUnwrap(pendingRequestID)
+        await detector.resolve(requestID, with: enriched)
+        try await waitUntil {
+            model.state.exit.context?.mode == .automatic
+                && model.state.exit.info == enriched
+                && !model.state.exit.isEnriching
+        }
+
+        let snapshot = await detector.snapshot()
+        XCTAssertNil(snapshot.expectedFamily)
+        XCTAssertEqual(snapshot.enrichedIP, primary.ip)
         await model.shutdown()
     }
 
@@ -129,6 +172,55 @@ private actor ForcedModeExitDetector: ExitIPDetecting {
             detectionProxies: detectionProxies,
             enrichmentProxies: enrichmentProxies
         )
+    }
+}
+
+private actor ControlledAutomaticExitDetector: ExitIPDetecting {
+    struct Snapshot: Sendable {
+        let expectedFamily: IPAddressFamily?
+        let enrichedIP: String?
+    }
+
+    private let primary: ExitIPInfo
+    private var expectedFamily: IPAddressFamily?
+    private var enrichedIP: String?
+    private var enrichmentID: UUID?
+    private var enrichmentContinuation: CheckedContinuation<ExitIPInfo, any Error>?
+
+    init(primary: ExitIPInfo) {
+        self.primary = primary
+    }
+
+    func detect(
+        proxy _: ProxyEndpoint?,
+        endpoint _: URL?,
+        expectedFamily: IPAddressFamily?
+    ) async throws -> ExitIPInfo {
+        self.expectedFamily = expectedFamily
+        return primary
+    }
+
+    func enrich(_ info: ExitIPInfo, proxy _: ProxyEndpoint?) async throws -> ExitIPInfo {
+        let id = UUID()
+        enrichedIP = info.ip
+        enrichmentID = id
+        return try await withCheckedThrowingContinuation { continuation in
+            enrichmentContinuation = continuation
+        }
+    }
+
+    func enrichmentRequestID() -> UUID? {
+        enrichmentID
+    }
+
+    func resolve(_ id: UUID, with info: ExitIPInfo) {
+        guard id == enrichmentID, let continuation = enrichmentContinuation else { return }
+        enrichmentContinuation = nil
+        continuation.resume(returning: info)
+    }
+
+    func snapshot() -> Snapshot {
+        Snapshot(expectedFamily: expectedFamily, enrichedIP: enrichedIP)
     }
 }
 

@@ -480,17 +480,198 @@ final class AppModelTests: XCTestCase {
         model.start()
         try await waitUntilReady(model)
 
+        var configuredParameters = model.parameters
+        configuredParameters.httping = false
+        configuredParameters.port = 8443
+        configuredParameters.url = "https://speed.example.test/file"
+        configuredParameters.latencyLowerBound = 900
+        configuredParameters.latencyUpperBound = 901
+        configuredParameters.lossRateUpperBound = 0
+        configuredParameters.speedLowerBound = 999
+        configuredParameters.colo = "NRT"
+        model.parameters = configuredParameters
+
         model.startCurrentConfigurationTest()
         try await waitUntil { model.state.configurationTest.result != nil }
         XCTAssertEqual(model.state.configurationTest.result?.ip, "2606::7")
         XCTAssertEqual(model.state.configurationTest.result?.latency, "18.5")
         XCTAssertEqual(model.state.configurationTest.parameters?.httping, model.parameters.httping)
+        XCTAssertEqual(model.state.configurationTest.parameters?.port, 8443)
+        XCTAssertEqual(model.state.configurationTest.parameters?.url, "https://speed.example.test/file")
+        XCTAssertEqual(model.state.configurationTest.parameters?.latencyLowerBound, 0)
+        XCTAssertEqual(model.state.configurationTest.parameters?.latencyUpperBound, 999_999)
+        XCTAssertEqual(model.state.configurationTest.parameters?.lossRateUpperBound, 1)
+        XCTAssertEqual(model.state.configurationTest.parameters?.speedLowerBound, 0)
+        XCTAssertEqual(model.state.configurationTest.parameters?.colo, "")
+        XCTAssertNotNil(model.state.configurationTest.completedAt)
 
         model.selectIP("2606::8")
         try await waitUntil {
             model.switchingIP == nil && model.state.preferences.selectedIP == "2606::8"
         }
         XCTAssertNil(model.state.configurationTest.result)
+        await model.shutdown()
+    }
+
+    func testCurrentConfigurationTestRejectsResultForAnotherIPAndClearsPreviousState() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let model = try await makeSpeedTestModel(
+            paths: paths,
+            selectedIP: "2606::12",
+            script: #"""
+                #!/bin/sh
+                output=""
+                while [ "$#" -gt 0 ]; do
+                  case "$1" in
+                    -o) output="$2"; shift 2 ;;
+                    *) shift ;;
+                  esac
+                done
+                printf 'IP,Sent,Recv,Loss,Latency,Speed,Region\n2606::12,4,4,0,18.5,12.3,SJC\n' > "$output"
+                """#
+        )
+
+        model.startCurrentConfigurationTest()
+        try await waitUntil { model.state.configurationTest.result != nil }
+        XCTAssertNotNil(model.state.configurationTest.completedAt)
+
+        let executableURL = URL(fileURLWithPath: model.state.preferences.cfstPath)
+        try #"""
+        #!/bin/sh
+        output=""
+        while [ "$#" -gt 0 ]; do
+          case "$1" in
+            -o) output="$2"; shift 2 ;;
+            *) shift ;;
+          esac
+        done
+        printf 'IP,Sent,Recv,Loss,Latency,Speed,Region\n2606::99,4,4,0,18.5,12.3,SJC\n' > "$output"
+        """#.write(to: executableURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: executableURL.path
+        )
+
+        model.startCurrentConfigurationTest()
+        XCTAssertEqual(model.state.configurationTest.phase, .running)
+        XCTAssertNil(model.state.configurationTest.result)
+        XCTAssertNil(model.state.configurationTest.completedAt)
+        try await waitUntil {
+            if case .failed = model.state.configurationTest.phase { return true }
+            return false
+        }
+
+        XCTAssertNil(model.state.configurationTest.result)
+        XCTAssertNil(model.state.configurationTest.completedAt)
+        XCTAssertTrue(model.state.notice?.message.contains("与当前配置不一致") == true)
+        XCTAssertTrue(model.state.logs.contains { $0.message.contains("当前节点测速失败") })
+        await model.shutdown()
+    }
+
+    func testCurrentConfigurationTestAcceptsEquivalentIPv6AndPreservesSelectedSpelling() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let selectedIP = "2606:0000:0000:0000:0000:0000:0000:0007"
+        let model = try await makeSpeedTestModel(
+            paths: paths,
+            selectedIP: selectedIP,
+            script: #"""
+                #!/bin/sh
+                output=""
+                while [ "$#" -gt 0 ]; do
+                  if [ "$1" = "-o" ]; then output="$2"; shift 2; else shift; fi
+                done
+                printf 'IP,Sent,Recv,Loss,Latency,Speed,Region\n2606::7,4,4,0,18.5,12.3,SJC\n' > "$output"
+                """#
+        )
+
+        model.startCurrentConfigurationTest()
+        try await waitUntil { model.state.configurationTest.result != nil }
+
+        XCTAssertEqual(model.state.configurationTest.result?.ip, selectedIP)
+        XCTAssertEqual(model.state.configurationTest.result?.latency, "18.5")
+        await model.shutdown()
+    }
+
+    func testConfigurationTestPresentationOmitsMissingUnits() {
+        let result = SpeedTestResult(ip: "2606::13", latency: "", speed: "")
+        XCTAssertNil(result.latencyDisplayValue)
+        XCTAssertNil(result.speedDisplayValue)
+        XCTAssertEqual(result.performanceSummary, "暂无有效测速指标")
+
+        let partial = SpeedTestResult(ip: "2606::13", latency: " 18.5 ", speed: "")
+        XCTAssertEqual(partial.latencyDisplayValue, "18.5 ms")
+        XCTAssertEqual(partial.performanceSummary, "18.5 ms")
+    }
+
+    func testStopCurrentConfigurationTestReturnsToCleanIdleState() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let model = try await makeSpeedTestModel(
+            paths: paths,
+            selectedIP: "2606::14",
+            script: #"""
+                #!/bin/sh
+                output=""
+                while [ "$#" -gt 0 ]; do
+                  if [ "$1" = "-o" ]; then output="$2"; shift 2; else shift; fi
+                done
+                printf 'started\n' > current-test-cancel-started.txt
+                sleep 30
+                printf 'IP,Sent,Recv,Loss,Latency,Speed,Region\n2606::14,4,4,0,12.5,24.0,SJC\n' > "$output"
+                """#
+        )
+
+        model.startCurrentConfigurationTest()
+        let markerURL = paths.root.appendingPathComponent("current-test-cancel-started.txt")
+        try await waitUntil { FileManager.default.fileExists(atPath: markerURL.path) }
+
+        model.stopCurrentConfigurationTest()
+        XCTAssertEqual(model.state.configurationTest.phase, .stopping)
+        try await waitUntil { model.state.configurationTest.phase == .idle }
+
+        XCTAssertFalse(model.isCfstBusy)
+        XCTAssertNil(model.state.configurationTest.result)
+        XCTAssertNil(model.state.configurationTest.startedAt)
+        XCTAssertNil(model.state.configurationTest.completedAt)
+        await model.shutdown()
+    }
+
+    func testChangingParametersCancelsCurrentConfigurationTestWithoutLateResult() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let model = try await makeSpeedTestModel(
+            paths: paths,
+            selectedIP: "2606::15",
+            script: #"""
+                #!/bin/sh
+                output=""
+                while [ "$#" -gt 0 ]; do
+                  if [ "$1" = "-o" ]; then output="$2"; shift 2; else shift; fi
+                done
+                printf 'started\n' > current-test-parameter-change-started.txt
+                sleep 30
+                printf 'IP,Sent,Recv,Loss,Latency,Speed,Region\n2606::15,4,4,0,12.5,24.0,SJC\n' > "$output"
+                """#
+        )
+
+        model.startCurrentConfigurationTest()
+        let markerURL = paths.root.appendingPathComponent(
+            "current-test-parameter-change-started.txt"
+        )
+        try await waitUntil { FileManager.default.fileExists(atPath: markerURL.path) }
+
+        var parameters = model.parameters
+        parameters.threads += 1
+        model.parameters = parameters
+
+        try await waitUntil { model.state.configurationTest.phase == .idle }
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertFalse(model.isCfstBusy)
+        XCTAssertNil(model.state.configurationTest.result)
+        XCTAssertNil(model.state.configurationTest.parameters)
+        XCTAssertNil(model.state.configurationTest.completedAt)
         await model.shutdown()
     }
 

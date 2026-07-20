@@ -8,9 +8,28 @@ struct MenuBarView: View {
     @State private var copyNotice: String?
 
     var body: some View {
+        // Keep the menu aligned with the most common macOS flow: open the full
+        // app first, inspect connection state, operate the proxy, then use
+        // secondary utilities and lifecycle commands.
+        Button("打开 ViaSix", systemImage: "macwindow") {
+            openMainWindow()
+        }
+        .keyboardShortcut("o")
+
+        Divider()
+
         Label(xrayStatusTitle, systemImage: xrayStatusIcon)
+            .lineLimit(1)
+            .truncationMode(.middle)
         if !model.state.preferences.selectedIP.isEmpty {
-            Text("当前节点 IP：\(model.state.preferences.selectedIP)")
+            Label {
+                Text("当前节点 \(model.state.preferences.selectedIP)")
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            } icon: {
+                Image(systemName: "network")
+            }
+            .help("当前节点：\(model.state.preferences.selectedIP)")
         }
 
         if case .failed(let message) = model.state.xrayPhase {
@@ -28,6 +47,8 @@ struct MenuBarView: View {
                 .foregroundStyle(.secondary)
         }
         xrayActions
+
+        Divider()
 
         if let speedTestUnavailableMessage {
             Label(speedTestUnavailableMessage, systemImage: "info.circle")
@@ -54,13 +75,8 @@ struct MenuBarView: View {
 
         Divider()
 
-        Button("打开 ViaSix", systemImage: "macwindow") {
-            openMainWindow()
-        }
-        .keyboardShortcut("o")
-
         SettingsLink {
-            Label("打开设置", systemImage: "gearshape")
+            Label("设置…", systemImage: "gearshape")
         }
 
         Divider()
@@ -81,7 +97,6 @@ struct MenuBarView: View {
                     model.cancelRuntimeOperation()
                 }
             }
-            Divider()
         } else if let error = model.state.runtimeOperationError {
             Text("组件操作失败：\(error)")
                 .lineLimit(2)
@@ -90,25 +105,28 @@ struct MenuBarView: View {
                 model.installRuntime()
             }
             .disabled(runtimeActionsDisabled)
-            Divider()
         }
     }
 
     @ViewBuilder
     private var speedTestAction: some View {
-        if isCurrentConfigurationTestActive {
-            switch model.state.configurationTest.phase {
-            case .running:
-                Button("停止当前节点测速", systemImage: "stop.fill") {
-                    model.stopCurrentConfigurationTest()
-                }
-            case .stopping:
-                Button("正在停止当前节点测速…", systemImage: "hourglass") {}
-                    .disabled(true)
-            case .idle, .failed:
-                EmptyView()
+        switch model.state.configurationTest.phase {
+        case .running:
+            Button("停止当前节点测速", systemImage: "stop.fill") {
+                model.stopCurrentConfigurationTest()
             }
-        } else {
+        case .stopping:
+            Button("正在停止当前节点测速…", systemImage: "hourglass") {}
+                .disabled(true)
+        case .idle, .failed:
+            if !model.state.preferences.selectedIP.isEmpty,
+                !isFullSpeedTestActive
+            {
+                Button("测试当前节点", systemImage: "scope") {
+                    model.startCurrentConfigurationTest()
+                }
+                .disabled(model.currentConfigurationTestUnavailableReason != nil)
+            }
             fullSpeedTestAction
         }
     }
@@ -175,9 +193,21 @@ struct MenuBarView: View {
             Label("正在停止测速…", systemImage: "hourglass")
                 .foregroundStyle(.secondary)
         case .failed(let message):
-            Text("测速失败：\(message)")
-                .lineLimit(2)
+            if case .failed(let currentMessage) = model.state.configurationTest.phase {
+                Text("当前节点测速失败：\(currentMessage)")
+                    .lineLimit(2)
+                    .foregroundStyle(.secondary)
+            } else if let result = model.state.configurationTest.result {
+                Label(
+                    "当前节点：\(result.performanceSummary)",
+                    systemImage: "checkmark.circle"
+                )
                 .foregroundStyle(.secondary)
+            } else {
+                Text("测速失败：\(message)")
+                    .lineLimit(2)
+                    .foregroundStyle(.secondary)
+            }
         case .idle:
             if case .failed(let message) = model.state.configurationTest.phase {
                 Text("当前节点测速失败：\(message)")
@@ -185,7 +215,7 @@ struct MenuBarView: View {
                     .foregroundStyle(.secondary)
             } else if let result = model.state.configurationTest.result {
                 Label(
-                    "当前节点：\(result.latency) ms · \(result.speed) MB/s",
+                    "当前节点：\(result.performanceSummary)",
                     systemImage: "checkmark.circle"
                 )
                 .foregroundStyle(.secondary)
@@ -195,6 +225,13 @@ struct MenuBarView: View {
 
     private var isCurrentConfigurationTestActive: Bool {
         switch model.state.configurationTest.phase {
+        case .running, .stopping: true
+        case .idle, .failed: false
+        }
+    }
+
+    private var isFullSpeedTestActive: Bool {
+        switch model.state.speedTest.phase {
         case .running, .stopping: true
         case .idle, .failed: false
         }
@@ -221,13 +258,13 @@ struct MenuBarView: View {
                 model.stopXray()
             }
         case .running:
+            Button("停止本地代理", systemImage: "stop.fill") {
+                model.stopXray()
+            }
             Button("重启本地代理", systemImage: "arrow.clockwise") {
                 model.restartXray()
             }
             .disabled(model.switchingIP != nil || model.isTemplateOperationBusy)
-            Button("停止本地代理", systemImage: "stop.fill") {
-                model.stopXray()
-            }
         case .stopping:
             Button("正在停止本地代理…", systemImage: "hourglass") {}
                 .disabled(true)
@@ -291,7 +328,7 @@ struct MenuBarView: View {
         if model.isTemplateOperationBusy { return "代理配置操作进行中" }
         if model.switchingIP != nil { return "正在应用节点，完成后即可开始测速" }
         if let parameterValidationMessage {
-            return "测速设置需要检查：\(parameterValidationMessage)"
+            return "完整测速设置需要检查：\(parameterValidationMessage)"
         }
         guard model.state.launchPhase == .ready, !model.hasCfstExecutable else { return nil }
         return "请在设置中安装 CloudflareSpeedTest"

@@ -75,36 +75,22 @@ extension NodesView {
     }
 
     private var parametersDisclosureButton: some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.18)) {
-                showsParameters.toggle()
-            }
-        } label: {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("测速参数")
-                        .font(.headline)
+        DisclosureControl(
+            title: "测速参数",
+            summary: parameterSummary,
+            isExpanded: $showsParameters
+        ) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("测速参数")
+                    .font(.headline)
 
-                    Text(parameterSummary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 12)
-
-                Image(systemName: showsParameters ? "chevron.up" : "chevron.down")
-                    .font(.callout.weight(.semibold))
+                Text(parameterSummary)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .buttonStyle(.plain)
-        .frame(maxWidth: .infinity, minHeight: VisualStyle.controlHeight, alignment: .leading)
-        .contentShape(Rectangle())
-        .help(showsParameters ? "收起测速设置" : "展开测速设置")
-        .accessibilityLabel(showsParameters ? "收起测速设置" : "展开测速设置")
-        .accessibilityValue(showsParameters ? "已展开" : "已收起")
     }
 
     private var resetParametersButton: some View {

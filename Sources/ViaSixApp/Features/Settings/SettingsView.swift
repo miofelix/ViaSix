@@ -105,26 +105,19 @@ struct SettingsView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 0) {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        showsCustomExecutables.toggle()
-                    }
-                } label: {
-                    HStack(spacing: 10) {
+                DisclosureControl(
+                    title: "自定义可执行文件",
+                    summary: "指定开发版或自行构建的组件",
+                    isExpanded: $showsCustomExecutables
+                ) {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text("自定义可执行文件")
                             .font(.subheadline.weight(.medium))
-                        Spacer(minLength: 12)
-                        Image(systemName: showsCustomExecutables ? "chevron.up" : "chevron.down")
-                            .font(.callout.weight(.semibold))
+                        Text("指定开发版或自行构建的组件")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
-                .buttonStyle(.plain)
-                .frame(maxWidth: .infinity, minHeight: VisualStyle.controlHeight, alignment: .leading)
-                .contentShape(Rectangle())
-                .help(showsCustomExecutables ? "收起自定义可执行文件" : "展开自定义可执行文件")
-                .accessibilityLabel(showsCustomExecutables ? "收起自定义可执行文件" : "展开自定义可执行文件")
-                .accessibilityValue(showsCustomExecutables ? "已展开" : "已收起")
 
                 if showsCustomExecutables {
                     VStack(alignment: .leading, spacing: 14) {
@@ -187,19 +180,22 @@ struct SettingsView: View {
                     .textSelection(.enabled)
             }
 
-            HStack {
-                Button("导入 Xray JSON…", systemImage: "square.and.arrow.down") {
-                    importXrayTemplate()
-                }
-                .disabled(proxyImportDisabled)
-
-                Button("编辑当前配置", systemImage: "doc.text") {
+            HStack(spacing: 10) {
+                Button("打开配置编辑器", systemImage: "curlybraces.square") {
                     showsTemplateEditor = true
                 }
+                .buttonStyle(.borderedProminent)
                 .disabled(
                     proxyImportDisabled
                         || !FileManager.default.fileExists(atPath: model.paths.templateConfig.path)
                 )
+                .help("在 ViaSix 中校验、格式化并编辑 Xray JSON")
+
+                Button("导入配置…", systemImage: "square.and.arrow.down") {
+                    importXrayTemplate()
+                }
+                .disabled(proxyImportDisabled)
+                .help("从本机导入一份 Xray JSON 配置")
             }
 
             if let templateOperationStatus {

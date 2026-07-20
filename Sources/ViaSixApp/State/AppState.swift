@@ -115,6 +115,8 @@ struct AppState: Equatable, Sendable {
         var phase: SpeedTestPhase = .idle
         var result: SpeedTestResult?
         var parameters: SpeedTestParameters?
+        var startedAt: Date?
+        var completedAt: Date?
     }
 
     var launchPhase: LaunchPhase = .idle
@@ -149,6 +151,39 @@ struct AppState: Equatable, Sendable {
 
     var isXrayRunning: Bool {
         xrayPhase == .running
+    }
+}
+
+extension SpeedTestResult {
+    var latencyDisplayValue: String? {
+        metricDisplayValue(latency, unit: "ms")
+    }
+
+    var speedDisplayValue: String? {
+        metricDisplayValue(speed, unit: "MB/s")
+    }
+
+    var performanceSummary: String {
+        [latencyDisplayValue, speedDisplayValue]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+            .ifEmpty("暂无有效测速指标")
+    }
+
+    private func metricDisplayValue(_ value: String, unit: String) -> String? {
+        let normalizedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard
+            !normalizedValue.isEmpty,
+            let numericValue = Double(normalizedValue),
+            numericValue.isFinite
+        else { return nil }
+        return "\(normalizedValue) \(unit)"
+    }
+}
+
+private extension String {
+    func ifEmpty(_ fallback: String) -> String {
+        isEmpty ? fallback : self
     }
 }
 
