@@ -82,11 +82,17 @@ public enum RuntimePayloadFile: String, CaseIterable, Codable, Hashable, Sendabl
     }
 }
 
+public enum RuntimeArchiveFormat: Codable, Equatable, Hashable, Sendable {
+    case zip
+    case gzip(output: RuntimePayloadFile)
+}
+
 public struct RuntimeAsset: Codable, Equatable, Hashable, Sendable {
     public let component: RuntimeComponent
     public let version: String
     public let architecture: RuntimeArchitecture
     public let archiveName: String
+    public let archiveFormat: RuntimeArchiveFormat
     public let downloadURL: URL
     public let sha256: String
     public let payloadFiles: [RuntimePayloadFile]
@@ -96,6 +102,7 @@ public struct RuntimeAsset: Codable, Equatable, Hashable, Sendable {
         version: String,
         architecture: RuntimeArchitecture,
         archiveName: String,
+        archiveFormat: RuntimeArchiveFormat,
         downloadURL: URL,
         sha256: String,
         payloadFiles: [RuntimePayloadFile]
@@ -104,6 +111,7 @@ public struct RuntimeAsset: Codable, Equatable, Hashable, Sendable {
         self.version = version
         self.architecture = architecture
         self.archiveName = archiveName
+        self.archiveFormat = archiveFormat
         self.downloadURL = downloadURL
         self.sha256 = sha256.lowercased()
         self.payloadFiles = payloadFiles
@@ -142,6 +150,7 @@ public struct RuntimeManifest: Equatable, Sendable {
                 version: cfstVersion,
                 architecture: .arm64,
                 archiveName: "cfst_darwin_arm64.zip",
+                archiveFormat: .zip,
                 downloadURL: URL(
                     string: "https://github.com/XIU2/CloudflareSpeedTest/releases/download/v2.3.5/cfst_darwin_arm64.zip"
                 )!,
@@ -153,6 +162,7 @@ public struct RuntimeManifest: Equatable, Sendable {
                 version: cfstVersion,
                 architecture: .x8664,
                 archiveName: "cfst_darwin_amd64.zip",
+                archiveFormat: .zip,
                 downloadURL: URL(
                     string: "https://github.com/XIU2/CloudflareSpeedTest/releases/download/v2.3.5/cfst_darwin_amd64.zip"
                 )!,
@@ -164,6 +174,7 @@ public struct RuntimeManifest: Equatable, Sendable {
                 version: xrayVersion,
                 architecture: .arm64,
                 archiveName: "Xray-macos-arm64-v8a.zip",
+                archiveFormat: .zip,
                 downloadURL: URL(
                     string: "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-macos-arm64-v8a.zip"
                 )!,
@@ -175,6 +186,7 @@ public struct RuntimeManifest: Equatable, Sendable {
                 version: xrayVersion,
                 architecture: .x8664,
                 archiveName: "Xray-macos-64.zip",
+                archiveFormat: .zip,
                 downloadURL: URL(
                     string: "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-macos-64.zip"
                 )!,

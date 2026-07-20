@@ -21,7 +21,7 @@ final class RuntimeComponentCancellationTests: XCTestCase {
             downloadHandler: { _ in
                 RuntimeDownloadedFile(fileURL: archiveURL, statusCode: 200)
             },
-            archiveExtractor: { _, destinationURL in
+            archiveExtractor: { _, _, destinationURL in
                 try writeRuntimePayloads(to: destinationURL)
             }
         )
@@ -64,7 +64,7 @@ final class RuntimeComponentCancellationTests: XCTestCase {
                 await gate.wait()
                 return RuntimeDownloadedFile(fileURL: archiveURL, statusCode: 200)
             },
-            archiveExtractor: { _, destinationURL in
+            archiveExtractor: { _, _, destinationURL in
                 try writeRuntimePayloads(to: destinationURL)
             }
         )
@@ -114,7 +114,7 @@ final class RuntimeComponentCancellationTests: XCTestCase {
             downloadHandler: { _ in
                 RuntimeDownloadedFile(fileURL: archiveURL, statusCode: 200)
             },
-            archiveExtractor: { _, _ in
+            archiveExtractor: { _, _, _ in
                 XCTFail("Extraction must not run after checksum failure")
             }
         )
@@ -156,6 +156,7 @@ final class RuntimeComponentCancellationTests: XCTestCase {
                 version: "test",
                 architecture: .arm64,
                 archiveName: "cfst.zip",
+                archiveFormat: .zip,
                 downloadURL: URL(string: "https://example.invalid/cfst.zip")!,
                 sha256: digest,
                 payloadFiles: [.cfst]
@@ -165,6 +166,7 @@ final class RuntimeComponentCancellationTests: XCTestCase {
                 version: "test",
                 architecture: .arm64,
                 archiveName: "xray.zip",
+                archiveFormat: .zip,
                 downloadURL: URL(string: "https://example.invalid/xray.zip")!,
                 sha256: digest,
                 payloadFiles: [.xray, .geoIP, .geoSite]
@@ -176,7 +178,7 @@ final class RuntimeComponentCancellationTests: XCTestCase {
             downloadHandler: { _ in
                 RuntimeDownloadedFile(fileURL: fixtureURL, statusCode: 200)
             },
-            archiveExtractor: { _, destinationURL in
+            archiveExtractor: { _, _, destinationURL in
                 try Data("started".utf8).write(to: extractionStartedURL, options: .atomic)
                 // Model an extractor that notices cancellation late and still
                 // returns normally. The manager must check cancellation before
@@ -237,6 +239,7 @@ final class RuntimeComponentCancellationTests: XCTestCase {
                 version: "test",
                 architecture: .arm64,
                 archiveName: "cfst.zip",
+                archiveFormat: .zip,
                 downloadURL: URL(string: "https://example.invalid/cfst.zip")!,
                 sha256: sha256,
                 payloadFiles: [.cfst]
@@ -246,6 +249,7 @@ final class RuntimeComponentCancellationTests: XCTestCase {
                 version: "test",
                 architecture: .arm64,
                 archiveName: "xray.zip",
+                archiveFormat: .zip,
                 downloadURL: URL(string: "https://example.invalid/xray.zip")!,
                 sha256: sha256,
                 payloadFiles: [.xray, .geoIP, .geoSite]

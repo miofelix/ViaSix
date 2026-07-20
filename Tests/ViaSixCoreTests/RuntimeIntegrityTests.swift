@@ -157,6 +157,7 @@ final class RuntimeIntegrityTests: XCTestCase {
                 version: "test",
                 architecture: .arm64,
                 archiveName: "cfst.zip",
+                archiveFormat: .zip,
                 downloadURL: URL(string: "https://example.invalid/cfst.zip")!,
                 sha256: digest,
                 payloadFiles: [.cfst]
@@ -166,6 +167,7 @@ final class RuntimeIntegrityTests: XCTestCase {
                 version: "test",
                 architecture: .arm64,
                 archiveName: "xray.zip",
+                archiveFormat: .zip,
                 downloadURL: URL(string: "https://example.invalid/xray.zip")!,
                 sha256: digest,
                 payloadFiles: [.xray]
@@ -177,7 +179,7 @@ final class RuntimeIntegrityTests: XCTestCase {
             downloadHandler: { _ in
                 RuntimeDownloadedFile(fileURL: archiveURL, statusCode: 200)
             },
-            archiveExtractor: { _, destinationURL in
+            archiveExtractor: { _, _, destinationURL in
                 let payload: RuntimePayloadFile =
                     destinationURL.lastPathComponent == RuntimeComponent.cfst.rawValue
                     ? .cfst

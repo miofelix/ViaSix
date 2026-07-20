@@ -95,7 +95,8 @@ public struct RuntimeDownloadedFile: Equatable, Sendable {
 }
 
 public typealias RuntimeDownloadHandler = @Sendable (URL) async throws -> RuntimeDownloadedFile
-public typealias RuntimeArchiveExtractor = @Sendable (URL, URL) async throws -> Void
+public typealias RuntimeArchiveExtractor =
+    @Sendable (RuntimeAsset, URL, URL) async throws -> Void
 public typealias RuntimeInstallationStageHandler = @Sendable (RuntimeInstallationStage) async -> Void
 
 public enum RuntimeInstallationStage: Equatable, Sendable {
@@ -188,6 +189,11 @@ public enum RuntimeComponentError: LocalizedError, Equatable, Sendable {
 
 public actor RuntimeComponentManager {
     private static let extractionTimeout: Duration = .seconds(120)
+    private static let gzipExtractionScript = #"""
+        umask 077
+        set -C
+        exec /usr/bin/gzip -dc -- "$1" > "$2"
+        """#
     private static let downloadSession = RuntimeNetworkPolicy.makeSession(
         requestTimeout: RuntimeNetworkPolicy.downloadRequestTimeout,
         resourceTimeout: RuntimeNetworkPolicy.downloadResourceTimeout
@@ -208,7 +214,7 @@ public actor RuntimeComponentManager {
         self.runtimeDirectory = runtimeDirectory.standardizedFileURL
         self.manifest = manifest
         self.downloadHandler = Self.downloadUsingURLSession
-        self.archiveExtractor = Self.extractUsingDitto
+        self.archiveExtractor = Self.extractArchive
         self.releaseResolver = RuntimeReleaseResolver()
     }
 
@@ -357,7 +363,7 @@ public actor RuntimeComponentManager {
             try fileManager.createDirectory(at: componentDirectory, withIntermediateDirectories: true)
             await onStage(.extracting(asset.component))
             try Task.checkCancellation()
-            try await archiveExtractor(archiveURL, componentDirectory)
+            try await archiveExtractor(asset, archiveURL, componentDirectory)
             try Task.checkCancellation()
 
             let discovered = try Self.discoverFiles(
@@ -708,7 +714,23 @@ public actor RuntimeComponentManager {
         return RuntimeDownloadedFile(fileURL: fileURL, statusCode: response.statusCode)
     }
 
-    private static func extractUsingDitto(_ archiveURL: URL, _ destinationURL: URL) async throws {
+    static func extractArchive(
+        _ asset: RuntimeAsset,
+        _ archiveURL: URL,
+        _ destinationURL: URL
+    ) async throws {
+        switch asset.archiveFormat {
+        case .zip:
+            try await extractZip(archiveURL, to: destinationURL)
+        case .gzip(let output):
+            try await extractGzip(
+                archiveURL,
+                to: destinationURL.appendingPathComponent(output.rawValue)
+            )
+        }
+    }
+
+    private static func extractZip(_ archiveURL: URL, to destinationURL: URL) async throws {
         let result: SupervisedCommandResult
         do {
             result = try await SupervisedCommand.run(
@@ -743,5 +765,66 @@ public actor RuntimeComponentManager {
                 output: result.output.trimmingCharacters(in: .whitespacesAndNewlines)
             )
         }
+    }
+
+    private static func extractGzip(_ archiveURL: URL, to outputURL: URL) async throws {
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: outputURL.path) {
+            try fileManager.removeItem(at: outputURL)
+        }
+
+        var extractionSucceeded = false
+        defer {
+            if !extractionSucceeded {
+                try? fileManager.removeItem(at: outputURL)
+            }
+        }
+
+        let result: SupervisedCommandResult
+        do {
+            // The fixed script receives paths only as quoted positional
+            // parameters. Decompressed stdout streams directly to the
+            // canonical payload path, so binary data never enters the
+            // command's bounded diagnostic String capture. `-c` also avoids
+            // trusting any filename stored in the gzip header.
+            result = try await SupervisedCommand.run(
+                executableURL: URL(fileURLWithPath: "/bin/sh"),
+                arguments: [
+                    "-c",
+                    gzipExtractionScript,
+                    "viasix-gzip-extractor",
+                    archiveURL.path,
+                    outputURL.path,
+                ],
+                workingDirectoryURL: outputURL.deletingLastPathComponent(),
+                timeout: extractionTimeout
+            )
+        } catch SupervisedCommandError.timedOut {
+            throw RuntimeComponentError.extractionTimedOut(archiveName: archiveURL.lastPathComponent)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw RuntimeComponentError.extractionFailed(
+                archiveName: archiveURL.lastPathComponent,
+                status: -1,
+                output: error.localizedDescription
+            )
+        }
+
+        if let readError = result.outputReadError {
+            throw RuntimeComponentError.extractionFailed(
+                archiveName: archiveURL.lastPathComponent,
+                status: result.status,
+                output: "读取解压错误输出失败：\(readError)"
+            )
+        }
+        guard result.status == 0 else {
+            throw RuntimeComponentError.extractionFailed(
+                archiveName: archiveURL.lastPathComponent,
+                status: result.status,
+                output: result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+        }
+        extractionSucceeded = true
     }
 }

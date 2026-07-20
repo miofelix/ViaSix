@@ -96,6 +96,7 @@ public struct RuntimeReleaseResolver: Sendable {
             version: version,
             architecture: architecture,
             archiveName: archiveName,
+            archiveFormat: .zip,
             downloadURL: releaseAsset.downloadURL,
             sha256: sha256,
             payloadFiles: component.payloadFiles

@@ -20,7 +20,7 @@ final class RuntimeOperationStateTests: XCTestCase {
                 try await Task.sleep(for: .seconds(30))
                 return RuntimeDownloadedFile(fileURL: archiveURL, statusCode: 200)
             },
-            archiveExtractor: { _, destinationURL in
+            archiveExtractor: { _, _, destinationURL in
                 try writeRuntimePayloads(to: destinationURL)
             }
         )
@@ -56,7 +56,7 @@ final class RuntimeOperationStateTests: XCTestCase {
             downloadHandler: { _ in
                 RuntimeDownloadedFile(fileURL: archiveURL, statusCode: 200)
             },
-            archiveExtractor: { _, _ in
+            archiveExtractor: { _, _, _ in
                 XCTFail("Extraction must not run after checksum failure")
             }
         )
@@ -106,6 +106,7 @@ final class RuntimeOperationStateTests: XCTestCase {
                 version: "test",
                 architecture: .arm64,
                 archiveName: "cfst.zip",
+                archiveFormat: .zip,
                 downloadURL: URL(string: "https://example.invalid/cfst.zip")!,
                 sha256: sha256,
                 payloadFiles: [.cfst]
@@ -115,6 +116,7 @@ final class RuntimeOperationStateTests: XCTestCase {
                 version: "test",
                 architecture: .arm64,
                 archiveName: "xray.zip",
+                archiveFormat: .zip,
                 downloadURL: URL(string: "https://example.invalid/xray.zip")!,
                 sha256: sha256,
                 payloadFiles: [.xray, .geoIP, .geoSite]

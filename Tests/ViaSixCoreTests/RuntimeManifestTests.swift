@@ -61,6 +61,7 @@ final class RuntimeManifestTests: XCTestCase {
                 )
             )
             XCTAssertEqual(asset.archiveName, expected.archiveName)
+            XCTAssertEqual(asset.archiveFormat, .zip)
             XCTAssertEqual(asset.downloadURL.absoluteString, expected.url)
             XCTAssertEqual(asset.sha256, expected.sha256)
             XCTAssertEqual(asset.payloadFiles, expected.payloadFiles)
@@ -100,6 +101,7 @@ final class RuntimeManifestTests: XCTestCase {
         let assets = try await resolver.latestAssets(for: .arm64)
         XCTAssertEqual(assets.map(\.component), [.cfst, .xray])
         XCTAssertEqual(assets.map(\.version), ["9.1.0", "10.2.0"])
+        XCTAssertEqual(assets.map(\.archiveFormat), [.zip, .zip])
         XCTAssertEqual(assets[0].sha256, String(repeating: "a", count: 64))
         XCTAssertEqual(assets[1].payloadFiles, [.xray, .geoIP, .geoSite])
     }
@@ -153,6 +155,7 @@ final class RuntimeManifestTests: XCTestCase {
         assertSendable(RuntimeArchitecture.arm64)
         assertSendable(RuntimeComponent.cfst)
         assertSendable(RuntimePayloadFile.xray)
+        assertSendable(RuntimeArchiveFormat.gzip(output: .cfst))
         assertSendable(RuntimeManifest.current)
         assertSendable(RuntimeManifest.current.assets[0])
         assertSendable(RuntimeDiscoveredFiles())
@@ -164,6 +167,13 @@ final class RuntimeManifestTests: XCTestCase {
             )
         )
         assertSendable(RuntimeComponentError.sourceNotFound(URL(fileURLWithPath: "/tmp/missing")))
+    }
+
+    func testArchiveFormatsRoundTripThroughCodable() throws {
+        for format in [RuntimeArchiveFormat.zip, .gzip(output: .cfst)] {
+            let encoded = try JSONEncoder().encode(format)
+            XCTAssertEqual(try JSONDecoder().decode(RuntimeArchiveFormat.self, from: encoded), format)
+        }
     }
 
     func testManagedXrayRequiresBothGeoAssetsBeforeItIsReady() {
@@ -254,6 +264,7 @@ final class RuntimeManifestTests: XCTestCase {
             version: "test",
             architecture: .arm64,
             archiveName: "verified.zip",
+            archiveFormat: .zip,
             downloadURL: URL(string: "https://example.invalid/verified.zip")!,
             sha256: RuntimeSHA256.hexDigest(of: archiveData),
             payloadFiles: [.cfst]
@@ -262,7 +273,7 @@ final class RuntimeManifestTests: XCTestCase {
             runtimeDirectory: root.appendingPathComponent("Runtime"),
             manifest: RuntimeManifest(assets: [asset]),
             downloadHandler: { _ in RuntimeDownloadedFile(fileURL: fixture, statusCode: 200) },
-            archiveExtractor: { _, _ in }
+            archiveExtractor: { _, _, _ in }
         )
 
         let downloadedURL = try await manager.download(asset, to: destination)
@@ -285,6 +296,7 @@ final class RuntimeManifestTests: XCTestCase {
             version: "test",
             architecture: .arm64,
             archiveName: "rejected.zip",
+            archiveFormat: .zip,
             downloadURL: URL(string: "https://example.invalid/rejected.zip")!,
             sha256: badHash,
             payloadFiles: [.cfst]
@@ -293,7 +305,7 @@ final class RuntimeManifestTests: XCTestCase {
             runtimeDirectory: root.appendingPathComponent("Runtime"),
             manifest: RuntimeManifest(assets: [asset]),
             downloadHandler: { _ in RuntimeDownloadedFile(fileURL: fixture, statusCode: 200) },
-            archiveExtractor: { _, _ in }
+            archiveExtractor: { _, _, _ in }
         )
 
         do {
