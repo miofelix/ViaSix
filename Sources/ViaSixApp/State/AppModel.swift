@@ -17,12 +17,20 @@ extension AppBootstrapper: XrayTemplateReplacing {
         expectedTemplateData: Data?
     ) throws -> ProxyEndpoint {
         if let expectedTemplateData {
-            let currentTemplateData = try? Data(contentsOf: paths.templateConfig)
+            let currentTemplateData = try Data(contentsOf: paths.templateConfig)
             guard currentTemplateData == expectedTemplateData else {
                 throw AppModelError.templateChangedExternally
             }
         }
-        return try replaceTemplate(with: data, selectedIP: selectedIP)
+        do {
+            return try replaceTemplateIfUnchanged(
+                with: data,
+                selectedIP: selectedIP,
+                expectedTemplateData: expectedTemplateData
+            )
+        } catch AppBootstrapperError.templateChangedExternally {
+            throw AppModelError.templateChangedExternally
+        }
     }
 }
 
@@ -62,6 +70,18 @@ final class AppModel {
     var proxyConfigurationIssue: String? {
         guard case .needsSetup(let message) = state.proxyConfigurationPhase else { return nil }
         return message
+    }
+
+    var runtimeIntegrityIssue: String? {
+        guard let invalidFiles = state.runtimeStatus?.invalidFiles, !invalidFiles.isEmpty else {
+            return nil
+        }
+        let names =
+            invalidFiles
+            .sorted { $0.rawValue.localizedStandardCompare($1.rawValue) == .orderedAscending }
+            .map(\.rawValue)
+            .joined(separator: "、")
+        return "检测到无法使用的运行组件（\(names)），请重新安装或导入本地组件。"
     }
 
     var exitIPEndpoint: String {
@@ -345,8 +365,12 @@ final class AppModel {
     }
 
     func importXrayTemplate(from url: URL) {
+        guard !isShuttingDown else { return }
+        guard state.launchPhase != .loading else {
+            showNotice("应用仍在准备，请稍后再试", style: .error)
+            return
+        }
         guard
-            !isShuttingDown,
             templateImportTask == nil,
             templateSaveTask == nil,
             state.templateOperationPhase == .idle,
@@ -393,6 +417,9 @@ final class AppModel {
     }
 
     func saveXrayTemplate(_ data: Data, expectedTemplateData: Data? = nil) async throws {
+        guard state.launchPhase != .loading else {
+            throw AppModelError.appNotReady
+        }
         guard
             templateImportTask == nil,
             templateSaveTask == nil,
@@ -538,6 +565,10 @@ final class AppModel {
             state.templateOperationPhase == .idle,
             selectionTask == nil
         else { return }
+        guard state.launchPhase == .ready else {
+            showNotice("应用仍在准备，请稍后再试", style: .error)
+            return
+        }
         do {
             _ = try state.preferences.parameters.validated()
         } catch {
@@ -608,6 +639,10 @@ final class AppModel {
             state.templateOperationPhase == .idle,
             selectionTask == nil
         else { return }
+        guard state.launchPhase == .ready else {
+            showNotice("应用仍在准备，请稍后再试", style: .error)
+            return
+        }
         let selectedIP = state.preferences.selectedIP
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !selectedIP.isEmpty else {
@@ -685,9 +720,13 @@ final class AppModel {
     }
 
     func selectIP(_ ip: String) {
+        guard !isShuttingDown else { return }
+        guard state.launchPhase != .loading else {
+            showNotice("应用仍在准备，请稍后再试", style: .error)
+            return
+        }
         guard
             selectionTask == nil,
-            !isShuttingDown,
             state.templateOperationPhase == .idle,
             activeRunner == nil,
             xrayStartTask == nil,
@@ -1048,33 +1087,27 @@ final class AppModel {
             var proxyEndpoint = ProxyEndpoint()
             var proxyConfigurationPhase: AppState.ProxyConfigurationPhase = .checking
             do {
-                proxyEndpoint = try await bootstrapper.currentProxyEndpoint()
-                if let configuredIP = try await bootstrapper.currentConfigIP()?
-                    .trimmingCharacters(in: .whitespacesAndNewlines),
-                    !configuredIP.isEmpty
-                {
-                    preferences.selectedIP = configuredIP
-                } else if !preferences.selectedIP.isEmpty {
-                    try await bootstrapper.ensureConfig(ip: preferences.selectedIP)
+                let configuration = try await bootstrapper.synchronizeConfiguration(
+                    selectedIP: preferences.selectedIP
+                )
+                proxyEndpoint = configuration.endpoint
+                if let effectiveIP = configuration.effectiveIP {
+                    preferences.selectedIP = effectiveIP
                 }
-
-                do {
-                    _ = try await bootstrapper.validateTemplateForLaunch(
-                        selectedIP: preferences.selectedIP
-                    )
-                    proxyConfigurationPhase = .ready
-                } catch {
-                    proxyConfigurationPhase = .needsSetup(error.localizedDescription)
-                    if (error as? ConfigTemplateError) == .connectionNotConfigured {
+                if let issue = configuration.launchIssue {
+                    proxyConfigurationPhase = .needsSetup(issue.localizedDescription)
+                    if issue == .connectionNotConfigured {
                         appendLog(source: .app, message: "代理连接尚未配置，可在设置中导入或编辑模板")
                     } else {
-                        configurationWarning = error.localizedDescription
+                        configurationWarning = issue.localizedDescription
                         appendLog(
                             source: .app,
                             level: .warning,
-                            message: "代理配置需要修复：\(error.localizedDescription)"
+                            message: "代理配置需要修复：\(issue.localizedDescription)"
                         )
                     }
+                } else {
+                    proxyConfigurationPhase = .ready
                 }
             } catch {
                 configurationWarning = error.localizedDescription
@@ -1415,6 +1448,7 @@ final class AppModel {
 }
 
 enum AppModelError: LocalizedError, Equatable {
+    case appNotReady
     case missingSelectedIP
     case templateOperationInProgress
     case selectionInProgress
@@ -1426,6 +1460,7 @@ enum AppModelError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
+        case .appNotReady: "应用仍在准备，请稍后再试"
         case .missingSelectedIP: "请先完成测速并选择一个节点"
         case .templateOperationInProgress: "另一项代理配置操作尚未完成"
         case .selectionInProgress: "正在应用节点，请等待切换完成后再保存代理配置"

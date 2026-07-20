@@ -243,7 +243,7 @@ final class AppBootstrapperTests: XCTestCase {
         XCTAssertNoThrow(try JSONSerialization.jsonObject(with: generated))
     }
 
-    func testEnsureConfigRepairsMismatchWithoutRewritingAnAlreadyMatchingConfig() async throws {
+    func testEnsureConfigValidatesTemplateEvenWhenIPMatchesAndRepairsMismatch() async throws {
         let paths = makePaths()
         defer { try? FileManager.default.removeItem(at: paths.root) }
         let bootstrapper = AppBootstrapper(paths: paths)
@@ -251,8 +251,12 @@ final class AppBootstrapperTests: XCTestCase {
         try await bootstrapper.writeConfig(ip: "2606::1")
 
         try Data("not json".utf8).write(to: paths.templateConfig, options: .atomic)
-        let unchanged = try await bootstrapper.ensureConfig(ip: " 2606::1 ")
-        XCTAssertFalse(unchanged)
+        do {
+            _ = try await bootstrapper.ensureConfig(ip: " 2606::1 ")
+            XCTFail("Expected the corrupt template to be rejected even when the IP matches")
+        } catch {
+            XCTAssertEqual(error as? ConfigTemplateError, .invalidJSON)
+        }
 
         do {
             _ = try await bootstrapper.ensureConfig(ip: "2606::2")
@@ -267,6 +271,241 @@ final class AppBootstrapperTests: XCTestCase {
         let currentIP = try await bootstrapper.currentConfigIP()
         XCTAssertTrue(repaired)
         XCTAssertEqual(currentIP, "2606::2")
+    }
+
+    func testEnsureConfigRebuildsConnectionDetailsWhenIPIsUnchanged() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let bootstrapper = AppBootstrapper(paths: paths)
+        try await bootstrapper.prepareDefaults()
+        let firstTemplate = try TestConfigFixtures.connectionTemplate(
+            userID: "f4edc501-056c-4572-9da8-ad63a264a698",
+            serverName: "first.example.net",
+            path: "/first"
+        )
+        try await bootstrapper.replaceTemplate(with: firstTemplate, selectedIP: "2606::8")
+
+        let secondTemplate = try TestConfigFixtures.connectionTemplate(
+            userID: "22de5d8d-17f7-40e8-a83f-567ae87c865a",
+            serverName: "second.example.net",
+            path: "/second"
+        )
+        try secondTemplate.write(to: paths.templateConfig, options: .atomic)
+
+        let firstRepair = try await bootstrapper.ensureConfig(ip: "2606::8")
+        let secondRepair = try await bootstrapper.ensureConfig(ip: "2606::8")
+        XCTAssertTrue(firstRepair)
+        XCTAssertFalse(secondRepair)
+        let generated = String(
+            decoding: try Data(contentsOf: paths.generatedConfig),
+            as: UTF8.self
+        )
+        XCTAssertTrue(generated.contains("22de5d8d-17f7-40e8-a83f-567ae87c865a"))
+        XCTAssertTrue(generated.contains("second.example.net"))
+        XCTAssertTrue(generated.contains("/second"))
+    }
+
+    func testTemplateReplacementRollsBackBothFilesWhenCommitFails() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let bootstrapper = AppBootstrapper(paths: paths)
+        try await bootstrapper.prepareDefaults()
+        let originalTemplate = try TestConfigFixtures.connectionTemplate(
+            userID: "f4edc501-056c-4572-9da8-ad63a264a698",
+            serverName: "first.example.net",
+            path: "/first"
+        )
+        try await bootstrapper.replaceTemplate(with: originalTemplate, selectedIP: "2606::8")
+        let originalGenerated = try Data(contentsOf: paths.generatedConfig)
+
+        let writer = FailingConfigurationWriter(failingCall: 2)
+        let failingBootstrapper = AppBootstrapper(
+            paths: paths,
+            configurationFileWriter: writer.write
+        )
+        let replacement = try TestConfigFixtures.connectionTemplate(
+            userID: "22de5d8d-17f7-40e8-a83f-567ae87c865a",
+            serverName: "second.example.net",
+            path: "/second"
+        )
+
+        do {
+            _ = try await failingBootstrapper.replaceTemplate(
+                with: replacement,
+                selectedIP: "2606::9"
+            )
+            XCTFail("Expected the injected template write failure")
+        } catch {
+            XCTAssertEqual(error as? ConfigurationWriterTestError, .injected)
+        }
+
+        XCTAssertEqual(try Data(contentsOf: paths.templateConfig), originalTemplate)
+        XCTAssertEqual(try Data(contentsOf: paths.generatedConfig), originalGenerated)
+        XCTAssertEqual(writer.callCount, 2)
+    }
+
+    func testPrepareDefaultsRecoversPreparedConfigurationTransaction() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let bootstrapper = AppBootstrapper(paths: paths)
+        try await bootstrapper.prepareDefaults()
+        let originalTemplate = try TestConfigFixtures.connectionTemplate(
+            userID: "f4edc501-056c-4572-9da8-ad63a264a698",
+            serverName: "first.example.net",
+            path: "/first"
+        )
+        try await bootstrapper.replaceTemplate(with: originalTemplate, selectedIP: "2606::8")
+        let originalGenerated = try Data(contentsOf: paths.generatedConfig)
+
+        try writePreparedConfigurationTransaction(
+            paths: paths,
+            templateBackup: originalTemplate,
+            generatedBackup: originalGenerated
+        )
+        let replacement = try TestConfigFixtures.connectionTemplate(
+            userID: "22de5d8d-17f7-40e8-a83f-567ae87c865a",
+            serverName: "second.example.net",
+            path: "/second"
+        )
+        try replacement.write(to: paths.templateConfig, options: .atomic)
+        try ConfigTemplate.replacingAddress(in: replacement, with: "2606::9")
+            .write(to: paths.generatedConfig, options: .atomic)
+
+        try await AppBootstrapper(paths: paths).prepareDefaults()
+
+        XCTAssertEqual(try Data(contentsOf: paths.templateConfig), originalTemplate)
+        XCTAssertEqual(try Data(contentsOf: paths.generatedConfig), originalGenerated)
+        XCTAssertEqual(try permissions(of: paths.templateConfig), 0o600)
+        XCTAssertEqual(try permissions(of: paths.generatedConfig), 0o600)
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: paths.data.appendingPathComponent(".configuration-transaction").path
+            )
+        )
+    }
+
+    func testRecoveryRestoresOriginallyMissingGeneratedConfiguration() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let bootstrapper = AppBootstrapper(paths: paths)
+        try await bootstrapper.prepareDefaults()
+        let originalTemplate = try Data(contentsOf: paths.templateConfig)
+        try writePreparedConfigurationTransaction(
+            paths: paths,
+            templateBackup: originalTemplate,
+            generatedBackup: nil
+        )
+        let replacement = try TestConfigFixtures.connectionTemplate(
+            userID: "22de5d8d-17f7-40e8-a83f-567ae87c865a",
+            serverName: "second.example.net",
+            path: "/second"
+        )
+        try replacement.write(to: paths.templateConfig, options: .atomic)
+        try ConfigTemplate.replacingAddress(in: replacement, with: "2606::9")
+            .write(to: paths.generatedConfig, options: .atomic)
+
+        try await AppBootstrapper(paths: paths).prepareDefaults()
+
+        XCTAssertEqual(try Data(contentsOf: paths.templateConfig), originalTemplate)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.generatedConfig.path))
+    }
+
+    func testRecoveryRejectsSymbolicLinkedTransactionDirectory() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let bootstrapper = AppBootstrapper(paths: paths)
+        try await bootstrapper.prepareDefaults()
+
+        let externalDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "AppBootstrapperExternalTransaction-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: externalDirectory) }
+        try FileManager.default.createDirectory(
+            at: externalDirectory,
+            withIntermediateDirectories: false
+        )
+        let sentinel = externalDirectory.appendingPathComponent("sentinel")
+        try Data("keep".utf8).write(to: sentinel)
+        let transactionDirectory = paths.data.appendingPathComponent(
+            ".configuration-transaction",
+            isDirectory: true
+        )
+        try FileManager.default.createSymbolicLink(
+            at: transactionDirectory,
+            withDestinationURL: externalDirectory
+        )
+
+        do {
+            try await bootstrapper.prepareDefaults()
+            XCTFail("Expected a symbolic-linked transaction directory to be rejected")
+        } catch let error as AppBootstrapperError {
+            guard case .configurationRecoveryFailed = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+        XCTAssertEqual(try Data(contentsOf: sentinel), Data("keep".utf8))
+    }
+
+    func testRecoveryRejectsSymbolicLinkedManifest() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let bootstrapper = AppBootstrapper(paths: paths)
+        try await bootstrapper.prepareDefaults()
+
+        let transactionDirectory = paths.data.appendingPathComponent(
+            ".configuration-transaction",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: transactionDirectory,
+            withIntermediateDirectories: false
+        )
+        let externalManifest = paths.root.appendingPathComponent("external-manifest.json")
+        try Data(#"{"state":"committed","templateExisted":true,"generatedExisted":false}"#.utf8)
+            .write(to: externalManifest)
+        try FileManager.default.createSymbolicLink(
+            at: transactionDirectory.appendingPathComponent("manifest.json"),
+            withDestinationURL: externalManifest
+        )
+
+        do {
+            try await bootstrapper.prepareDefaults()
+            XCTFail("Expected a symbolic-linked transaction manifest to be rejected")
+        } catch let error as AppBootstrapperError {
+            guard case .configurationRecoveryFailed = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: externalManifest.path))
+    }
+
+    func testEnsureConfigRepairsPermissionsAndRejectsSymbolicLinks() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let bootstrapper = AppBootstrapper(paths: paths)
+        try await bootstrapper.prepareDefaults()
+        try await bootstrapper.writeConfig(ip: "2606::8")
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: 0o644)],
+            ofItemAtPath: paths.generatedConfig.path
+        )
+
+        let rewritten = try await bootstrapper.ensureConfig(ip: "2606::8")
+        XCTAssertFalse(rewritten)
+        XCTAssertEqual(try permissions(of: paths.generatedConfig), 0o600)
+
+        try FileManager.default.removeItem(at: paths.generatedConfig)
+        try FileManager.default.createSymbolicLink(
+            at: paths.generatedConfig,
+            withDestinationURL: paths.templateConfig
+        )
+        do {
+            _ = try await bootstrapper.ensureConfig(ip: "2606::8")
+            XCTFail("Expected a generated-config symbolic link to be rejected")
+        } catch let error as AppBootstrapperError {
+            XCTAssertEqual(error, .invalidConfigurationFile(paths.generatedConfig))
+        }
     }
 
     func testPrepareConfigForLaunchRebuildsConnectionDetailsWhenIPIsUnchanged() async throws {
@@ -310,5 +549,70 @@ final class AppBootstrapperTests: XCTestCase {
             root: FileManager.default.temporaryDirectory
                 .appendingPathComponent("AppBootstrapperTests-\(UUID().uuidString)", isDirectory: true)
         )
+    }
+
+    private func writePreparedConfigurationTransaction(
+        paths: AppPaths,
+        templateBackup: Data,
+        generatedBackup: Data?
+    ) throws {
+        let directory = paths.data.appendingPathComponent(
+            ".configuration-transaction",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        try templateBackup.write(
+            to: directory.appendingPathComponent("template.backup.json"),
+            options: .atomic
+        )
+        if let generatedBackup {
+            try generatedBackup.write(
+                to: directory.appendingPathComponent("config.backup.json"),
+                options: .atomic
+            )
+        }
+        let manifest = try JSONSerialization.data(withJSONObject: [
+            "state": "prepared",
+            "templateExisted": true,
+            "generatedExisted": generatedBackup != nil,
+        ])
+        try manifest.write(
+            to: directory.appendingPathComponent("manifest.json"),
+            options: .atomic
+        )
+    }
+
+    private func permissions(of url: URL) throws -> Int {
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        return try XCTUnwrap(attributes[.posixPermissions] as? NSNumber).intValue & 0o777
+    }
+}
+
+private enum ConfigurationWriterTestError: Error {
+    case injected
+}
+
+private final class FailingConfigurationWriter: @unchecked Sendable {
+    private let lock = NSLock()
+    private let failingCall: Int
+    private var calls = 0
+
+    init(failingCall: Int) {
+        self.failingCall = failingCall
+    }
+
+    var callCount: Int {
+        lock.withLock { calls }
+    }
+
+    func write(_ data: Data, to url: URL) throws {
+        try lock.withLock {
+            calls += 1
+            if calls == failingCall {
+                throw ConfigurationWriterTestError.injected
+            }
+        }
+        try data.write(to: url, options: .atomic)
+        try FilePermissions.restrictFile(url)
     }
 }

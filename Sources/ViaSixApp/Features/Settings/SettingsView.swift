@@ -84,6 +84,13 @@ struct SettingsView: View {
 
             runtimeOperationStatus
 
+            if let issue = model.runtimeIntegrityIssue {
+                Label(issue, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Text("自动安装会获取上游最新正式版本，并使用 Release 提供的 SHA-256 校验完整性。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -311,6 +318,8 @@ struct SettingsView: View {
                 ("操作中", VisualStyle.accent)
             } else if model.state.runtimeOperationError != nil {
                 ("操作失败", .red)
+            } else if model.runtimeIntegrityIssue != nil {
+                ("需修复", .orange)
             } else {
                 switch model.state.runtimePhase {
                 case .checking: ("检查中", .secondary)

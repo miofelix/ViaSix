@@ -33,26 +33,42 @@ public struct RuntimeInstallationStatus: Equatable, Sendable {
     public let runtimeDirectory: URL
     public let discoveredFiles: RuntimeDiscoveredFiles
     public let executableFiles: Set<RuntimePayloadFile>
+    /// Files that exist but failed a local integrity check.  Keeping these
+    /// separate from `missingFiles` lets the UI explain that a component must
+    /// be repaired rather than merely installed.
+    public let invalidFiles: Set<RuntimePayloadFile>
 
     public init(
         runtimeDirectory: URL,
         discoveredFiles: RuntimeDiscoveredFiles,
-        executableFiles: Set<RuntimePayloadFile>
+        executableFiles: Set<RuntimePayloadFile>,
+        invalidFiles: Set<RuntimePayloadFile> = []
     ) {
         self.runtimeDirectory = runtimeDirectory
         self.discoveredFiles = discoveredFiles
         self.executableFiles = executableFiles
+        self.invalidFiles = invalidFiles
     }
 
-    public var cfstURL: URL? { discoveredFiles.cfstURL }
-    public var xrayURL: URL? { discoveredFiles.xrayURL }
-    public var geoIPURL: URL? { discoveredFiles.geoIPURL }
-    public var geoSiteURL: URL? { discoveredFiles.geoSiteURL }
+    public var cfstURL: URL? {
+        invalidFiles.contains(.cfst) ? nil : discoveredFiles.cfstURL
+    }
+    public var xrayURL: URL? {
+        invalidFiles.contains(.xray) ? nil : discoveredFiles.xrayURL
+    }
+    public var geoIPURL: URL? {
+        invalidFiles.contains(.geoIP) ? nil : discoveredFiles.geoIPURL
+    }
+    public var geoSiteURL: URL? {
+        invalidFiles.contains(.geoSite) ? nil : discoveredFiles.geoSiteURL
+    }
     public var missingFiles: Set<RuntimePayloadFile> { discoveredFiles.missingFiles }
     public var isInstalled: Bool { discoveredFiles.isComplete }
 
     public var cfstIsReady: Bool {
-        cfstURL != nil && executableFiles.contains(.cfst)
+        cfstURL != nil
+            && executableFiles.contains(.cfst)
+            && !invalidFiles.contains(.cfst)
     }
 
     public var xrayIsReady: Bool {
@@ -60,10 +76,11 @@ public struct RuntimeInstallationStatus: Equatable, Sendable {
             && geoIPURL != nil
             && geoSiteURL != nil
             && executableFiles.contains(.xray)
+            && invalidFiles.isDisjoint(with: [.xray, .geoIP, .geoSite])
     }
 
     public var isReady: Bool {
-        isInstalled && cfstIsReady && xrayIsReady
+        isInstalled && invalidFiles.isEmpty && cfstIsReady && xrayIsReady
     }
 }
 
@@ -99,6 +116,18 @@ public enum RuntimeComponentError: LocalizedError, Equatable, Sendable {
     case sourceIsNotFileOrDirectory(URL)
     case noPayloadFiles([URL])
     case missingArchivePayload(RuntimeComponent, Set<RuntimePayloadFile>)
+    case invalidPayload(RuntimePayloadFile)
+    case emptyPayload(RuntimePayloadFile)
+    case invalidExecutable(RuntimePayloadFile)
+    case incompatibleExecutableArchitecture(
+        RuntimePayloadFile,
+        expected: RuntimeArchitecture,
+        available: [RuntimeArchitecture]
+    )
+    case unsupportedInstallationArchitecture(
+        requested: RuntimeArchitecture,
+        current: RuntimeArchitecture
+    )
     case invalidDownloadResponse(URL)
     case httpStatus(Int, URL)
     case checksumMismatch(archiveName: String, expected: String, actual: String)
@@ -128,6 +157,17 @@ public enum RuntimeComponentError: LocalizedError, Equatable, Sendable {
         case .missingArchivePayload(let component, let files):
             let names = files.map(\.rawValue).sorted().joined(separator: ", ")
             return "\(component.rawValue) 压缩包缺少必要文件：\(names)"
+        case .invalidPayload(let payload):
+            return "运行组件文件 \(payload.rawValue) 不是可读取的普通文件。"
+        case .emptyPayload(let payload):
+            return "运行组件文件 \(payload.rawValue) 为空，无法使用。"
+        case .invalidExecutable(let payload):
+            return "运行组件文件 \(payload.rawValue) 不是可识别的 macOS 可执行文件。"
+        case .incompatibleExecutableArchitecture(let payload, let expected, let available):
+            let names = available.map(\.rawValue).joined(separator: ", ")
+            return "运行组件文件 \(payload.rawValue) 不支持当前 Mac 架构 \(expected.rawValue)（文件架构：\(names)）。"
+        case .unsupportedInstallationArchitecture(let requested, let current):
+            return "当前安装仅支持本机架构 \(current.rawValue)，不能安装 \(requested.rawValue) 运行组件。"
         case .invalidDownloadResponse(let url):
             return "下载响应不是有效的 HTTP 响应：\(url.absoluteString)"
         case .httpStatus(let status, let url):
@@ -196,6 +236,7 @@ public actor RuntimeComponentManager {
         let fileManager = FileManager.default
         var files: [RuntimePayloadFile: URL] = [:]
         var executableFiles = Set<RuntimePayloadFile>()
+        var invalidFiles = Set<RuntimePayloadFile>()
 
         for payload in RuntimePayloadFile.allCases {
             let fileURL = runtimeDirectory.appendingPathComponent(payload.rawValue)
@@ -206,9 +247,16 @@ public actor RuntimeComponentManager {
                 continue
             }
             files[payload] = fileURL
-            if payload.requiresExecutablePermission,
-                fileManager.isExecutableFile(atPath: fileURL.path)
-            {
+            if Self.isInvalidInstalledPayload(
+                payload,
+                fileURL: fileURL,
+                fileManager: fileManager,
+                expectedArchitecture: .current
+            ) {
+                invalidFiles.insert(payload)
+                continue
+            }
+            if payload.requiresExecutablePermission {
                 executableFiles.insert(payload)
             }
         }
@@ -216,7 +264,8 @@ public actor RuntimeComponentManager {
         return RuntimeInstallationStatus(
             runtimeDirectory: runtimeDirectory,
             discoveredFiles: RuntimeDiscoveredFiles(files: files),
-            executableFiles: executableFiles
+            executableFiles: executableFiles,
+            invalidFiles: invalidFiles
         )
     }
 
@@ -248,7 +297,7 @@ public actor RuntimeComponentManager {
         guard !files.isEmpty else {
             throw RuntimeComponentError.noPayloadFiles(normalizedPaths)
         }
-        return try atomicallyInstall(files)
+        return try atomicallyInstall(files, expectedArchitecture: .current)
     }
 
     @discardableResult
@@ -259,12 +308,25 @@ public actor RuntimeComponentManager {
         try beginRuntimeOperation()
         defer { finishRuntimeOperation() }
         try Task.checkCancellation()
+        guard architecture == .current else {
+            throw RuntimeComponentError.unsupportedInstallationArchitecture(
+                requested: architecture,
+                current: .current
+            )
+        }
         await onStage(.resolvingLatestReleases)
         try Task.checkCancellation()
         let assets: [RuntimeAsset]
         if let releaseResolver {
+            // Live managers fail closed when GitHub's latest-release metadata
+            // cannot be resolved.  Do not silently fall back to the pinned
+            // manifest: that would make the default "安装" action install an
+            // older component while presenting it as the latest release.
             assets = try await releaseResolver.latestAssets(for: architecture)
         } else {
+            // The deterministic manifest path is reserved for managers whose
+            // downloader/extractor were explicitly injected (tests/offline
+            // integration).  Production initializers always provide a resolver.
             assets = try assetsForInstallation(architecture: architecture)
         }
         try Task.checkCancellation()
@@ -302,12 +364,15 @@ public actor RuntimeComponentManager {
                 in: [componentDirectory],
                 using: fileManager
             )
-            let requiredFiles = Set(asset.payloadFiles)
+            // The component definition is authoritative.  A malformed custom
+            // manifest must not be able to make geoip.dat/geosite.dat optional
+            // for Xray by publishing a shortened payload list.
+            let requiredFiles = Set(asset.component.payloadFiles)
             let missingFiles = requiredFiles.subtracting(discovered.keys)
             guard missingFiles.isEmpty else {
                 throw RuntimeComponentError.missingArchivePayload(asset.component, missingFiles)
             }
-            for payload in asset.payloadFiles {
+            for payload in asset.component.payloadFiles {
                 payloadFiles[payload] = discovered[payload]
             }
         }
@@ -315,7 +380,7 @@ public actor RuntimeComponentManager {
         try Task.checkCancellation()
         await onStage(.committing)
         try Task.checkCancellation()
-        return try atomicallyInstall(payloadFiles)
+        return try atomicallyInstall(payloadFiles, expectedArchitecture: architecture)
     }
 
     public func download(_ asset: RuntimeAsset, to destinationDirectory: URL) async throws -> URL {
@@ -388,7 +453,8 @@ public actor RuntimeComponentManager {
     }
 
     private func atomicallyInstall(
-        _ sourceFiles: [RuntimePayloadFile: URL]
+        _ sourceFiles: [RuntimePayloadFile: URL],
+        expectedArchitecture: RuntimeArchitecture
     ) throws -> RuntimeInstallationStatus {
         try Task.checkCancellation()
         let fileManager = FileManager.default
@@ -434,6 +500,12 @@ public actor RuntimeComponentManager {
             )
         }
 
+        try validateCandidate(
+            at: candidateDirectory,
+            expectedArchitecture: expectedArchitecture,
+            fileManager: fileManager
+        )
+
         // This is the commit point. Cancellation is honored before the atomic
         // replacement; once replacement starts it must run to completion so a
         // partially installed Runtime directory is never exposed.
@@ -453,6 +525,91 @@ public actor RuntimeComponentManager {
         }
 
         return installedStatus()
+    }
+
+    private func validateCandidate(
+        at directoryURL: URL,
+        expectedArchitecture: RuntimeArchitecture,
+        fileManager: FileManager
+    ) throws {
+        for payload in RuntimePayloadFile.allCases {
+            try Task.checkCancellation()
+            let fileURL = directoryURL.appendingPathComponent(payload.rawValue)
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: fileURL.path, isDirectory: &isDirectory),
+                !isDirectory.boolValue
+            else {
+                continue
+            }
+
+            if let error = Self.validationError(
+                payload,
+                fileURL: fileURL,
+                fileManager: fileManager,
+                expectedArchitecture: expectedArchitecture
+            ) {
+                throw error
+            }
+        }
+    }
+
+    private static func isInvalidInstalledPayload(
+        _ payload: RuntimePayloadFile,
+        fileURL: URL,
+        fileManager: FileManager,
+        expectedArchitecture: RuntimeArchitecture
+    ) -> Bool {
+        validationError(
+            payload,
+            fileURL: fileURL,
+            fileManager: fileManager,
+            expectedArchitecture: expectedArchitecture
+        ) != nil
+    }
+
+    private static func validationError(
+        _ payload: RuntimePayloadFile,
+        fileURL: URL,
+        fileManager: FileManager,
+        expectedArchitecture: RuntimeArchitecture
+    ) -> RuntimeComponentError? {
+        guard
+            let values = try? fileURL.resourceValues(forKeys: [
+                .isRegularFileKey,
+                .isSymbolicLinkKey,
+                .fileSizeKey,
+            ]),
+            values.isRegularFile == true,
+            values.isSymbolicLink != true
+        else {
+            return .invalidPayload(payload)
+        }
+
+        guard (values.fileSize ?? 0) > 0 else {
+            return .emptyPayload(payload)
+        }
+
+        guard payload.requiresExecutablePermission else { return nil }
+        guard fileManager.isExecutableFile(atPath: fileURL.path) else {
+            return .invalidExecutable(payload)
+        }
+
+        let inspection = RuntimeBinaryInspector.inspect(fileAt: fileURL)
+        switch inspection {
+        case .script:
+            return nil
+        case .invalid:
+            return .invalidExecutable(payload)
+        case .machO(let architectures):
+            guard architectures.contains(expectedArchitecture) else {
+                return .incompatibleExecutableArchitecture(
+                    payload,
+                    expected: expectedArchitecture,
+                    available: architectures.sorted { $0.rawValue < $1.rawValue }
+                )
+            }
+            return nil
+        }
     }
 
     private func transactionDirectory(prefix: String) -> URL {

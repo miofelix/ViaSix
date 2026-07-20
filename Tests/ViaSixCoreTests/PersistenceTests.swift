@@ -154,6 +154,49 @@ final class PersistenceTests: XCTestCase {
         XCTAssertNil(decoded.lastSuccessfulSpeedTestParameters)
     }
 
+    func testPreferencesMigrateLegacyAndUnknownEnumValuesWithoutDiscardingOtherFields() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ViaSixTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = AppPaths(root: root)
+        try paths.prepare()
+
+        let parameters = SpeedTestParameters(ipRange: "2606:4700::/32")
+        let encodedParameters = try JSONEncoder().encode(parameters)
+        let parametersObject = try XCTUnwrap(JSONSerialization.jsonObject(with: encodedParameters))
+        let payload = try JSONSerialization.data(withJSONObject: [
+            "parameters": parametersObject,
+            "ipSourceMode": "customRange",
+            "selectedIP": "2606:4700::1",
+            "exitIPDetectionMode": "future-mode",
+        ])
+        try payload.write(to: paths.preferences)
+
+        let store = PreferencesStore(fileURL: paths.preferences)
+        let defaults = UserPreferences(parameters: .defaults(ipv6File: paths.ipv6List))
+        let loaded = try await store.load(defaults: defaults)
+
+        XCTAssertEqual(loaded.source, .persisted)
+        XCTAssertEqual(loaded.preferences.ipSourceMode, .range)
+        XCTAssertEqual(loaded.preferences.exitIPDetectionMode, .automatic)
+        XCTAssertEqual(loaded.preferences.selectedIP, "2606:4700::1")
+        XCTAssertEqual(loaded.preferences.parameters.ipRange, "2606:4700::/32")
+
+        let futurePayload = try JSONSerialization.data(withJSONObject: [
+            "parameters": parametersObject,
+            "ipSourceMode": "future-source",
+            "selectedIP": "2606:4700::2",
+            "exitIPDetectionMode": "auto",
+        ])
+        let futurePreferences = try JSONDecoder().decode(
+            UserPreferences.self,
+            from: futurePayload
+        )
+        XCTAssertEqual(futurePreferences.ipSourceMode, .ipv6)
+        XCTAssertEqual(futurePreferences.exitIPDetectionMode, .automatic)
+        XCTAssertEqual(futurePreferences.selectedIP, "2606:4700::2")
+    }
+
     private func permissions(of url: URL) throws -> Int {
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         return try XCTUnwrap(attributes[.posixPermissions] as? NSNumber).intValue & 0o777

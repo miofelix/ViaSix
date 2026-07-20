@@ -1,4 +1,5 @@
 import Foundation
+import Network
 
 public struct SpeedTestParameters: Codable, Equatable, Sendable {
     public var ipFile: String
@@ -71,6 +72,17 @@ public struct SpeedTestParameters: Codable, Equatable, Sendable {
         else {
             throw ValidationError.missingIPSource
         }
+
+        // Validate the source before handing it to CFST.  CFST otherwise
+        // starts a process and reports a rather opaque error (or exits with
+        // no results), which is especially confusing when a previously
+        // selected file was moved or deleted.
+        if ipRange.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            try Self.validateIPFile(ipFile)
+        } else {
+            try Self.validateIPRange(ipRange)
+        }
+
         guard (1...1_000).contains(threads) else {
             throw ValidationError.outOfRange("线程数应在 1 到 1000 之间")
         }
@@ -100,6 +112,9 @@ public struct SpeedTestParameters: Codable, Equatable, Sendable {
         guard httpingCode == 0 || (100...599).contains(httpingCode) else {
             throw ValidationError.outOfRange("HTTP 状态码应为 0 或 100 到 599")
         }
+        if !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            try Self.validateURL(url)
+        }
         return self
     }
 
@@ -120,7 +135,11 @@ public struct SpeedTestParameters: Codable, Equatable, Sendable {
         ]
 
         if !parameters.ipRange.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            args.append(contentsOf: ["-ip", parameters.ipRange.trimmingCharacters(in: .whitespacesAndNewlines)])
+            let range = parameters.ipRange
+                .split(separator: ",", omittingEmptySubsequences: false)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .joined(separator: ",")
+            args.append(contentsOf: ["-ip", range])
         } else {
             args.append(contentsOf: ["-f", parameters.ipFile])
         }
@@ -140,6 +159,86 @@ public struct SpeedTestParameters: Codable, Equatable, Sendable {
         if parameters.allIP { args.append("-allip") }
         if parameters.debug { args.append("-debug") }
         return args
+    }
+
+    private static func validateIPFile(_ path: String) throws {
+        let fileManager = FileManager.default
+        var isDirectory = ObjCBool(false)
+        guard fileManager.fileExists(atPath: path, isDirectory: &isDirectory) else {
+            throw ValidationError.ipFileNotFound(path)
+        }
+        guard !isDirectory.boolValue, fileManager.isReadableFile(atPath: path) else {
+            throw ValidationError.ipFileUnreadable(path)
+        }
+
+        let fileURL = URL(fileURLWithPath: path)
+        if let fileSize = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+            fileSize == 0
+        {
+            throw ValidationError.ipFileEmpty(path)
+        }
+    }
+
+    private static func validateIPRange(_ value: String) throws {
+        let entries = value.split(separator: ",", omittingEmptySubsequences: false)
+        for rawEntry in entries {
+            let entry = rawEntry.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !entry.isEmpty else {
+                throw ValidationError.invalidIPRange(value)
+            }
+
+            let pieces = entry.split(separator: "/", omittingEmptySubsequences: false)
+            guard pieces.count <= 2,
+                !pieces.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+            else {
+                throw ValidationError.invalidIPRange(entry)
+            }
+
+            let address = pieces[0].trimmingCharacters(in: .whitespacesAndNewlines)
+            let maximumPrefix: Int
+            if Self.isStrictIPv4(address) {
+                maximumPrefix = 32
+            } else if !address.contains("%"), IPv6Address(address) != nil {
+                maximumPrefix = 128
+            } else {
+                throw ValidationError.invalidIPRange(entry)
+            }
+
+            guard
+                pieces.count == 1
+                    || Int(pieces[1].trimmingCharacters(in: .whitespacesAndNewlines))
+                        .map({ (0...maximumPrefix).contains($0) }) == true
+            else {
+                throw ValidationError.invalidIPRange(entry)
+            }
+        }
+    }
+
+    private static func isStrictIPv4(_ value: String) -> Bool {
+        let octets = value.split(separator: ".", omittingEmptySubsequences: false)
+        guard octets.count == 4 else { return false }
+        return octets.allSatisfy { octet in
+            let text = String(octet)
+            guard !text.isEmpty,
+                text.unicodeScalars.allSatisfy({ (48...57).contains($0.value) }),
+                text.count == 1 || !text.hasPrefix("0"),
+                let number = Int(text)
+            else {
+                return false
+            }
+            return (0...255).contains(number)
+        }
+    }
+
+    private static func validateURL(_ value: String) throws {
+        guard let url = URL(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
+            let scheme = url.scheme?.lowercased(),
+            ["http", "https"].contains(scheme),
+            let host = url.host,
+            !host.isEmpty
+        else {
+            throw ValidationError.invalidURL
+        }
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -175,11 +274,21 @@ public struct SpeedTestParameters: Codable, Equatable, Sendable {
 
 public enum SpeedTestParameterError: LocalizedError, Equatable, Sendable {
     case missingIPSource
+    case ipFileNotFound(String)
+    case ipFileUnreadable(String)
+    case ipFileEmpty(String)
+    case invalidIPRange(String)
+    case invalidURL
     case outOfRange(String)
 
     public var errorDescription: String? {
         switch self {
         case .missingIPSource: "请选择 IP 文件或填写 IP 段"
+        case .ipFileNotFound(let path): "找不到 IP 地址文件：\(path)"
+        case .ipFileUnreadable(let path): "无法读取 IP 地址文件：\(path)"
+        case .ipFileEmpty(let path): "IP 地址文件为空：\(path)"
+        case .invalidIPRange(let value): "IP 段格式无效：\(value)"
+        case .invalidURL: "测速 URL 必须是有效的 HTTP 或 HTTPS 地址"
         case .outOfRange(let message): message
         }
     }

@@ -5,12 +5,55 @@ public enum IPSourceMode: String, Codable, CaseIterable, Sendable {
     case ipv4
     case file
     case range
+
+    /// Preferences are persisted across app versions. Keep decoding tolerant
+    /// of legacy spellings and values written by newer builds so one unknown
+    /// field does not discard the user's other settings.
+    public init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer().decode(String.self)
+        switch Self.normalized(value) {
+        case "ipv6", "v6", "ip6", "builtinipv6":
+            self = .ipv6
+        case "ipv4", "v4", "ip4", "builtinipv4":
+            self = .ipv4
+        case "file", "customfile", "custom-file", "custom_file", "path":
+            self = .file
+        case "range", "cidr", "customrange", "custom-range", "custom_range":
+            self = .range
+        default:
+            // The safest fallback is the bundled IPv6 list.  AppModel will
+            // normalize its path during bootstrap.
+            self = .ipv6
+        }
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
 }
 
 public enum ExitIPDetectionMode: String, Codable, CaseIterable, Sendable {
     case automatic
     case ipv4
     case ipv6
+
+    /// Accepts common legacy spellings and safely falls back when a newer
+    /// build writes an unknown mode.
+    public init(from decoder: Decoder) throws {
+        let value = try decoder.singleValueContainer().decode(String.self)
+        switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "automatic", "auto", "default":
+            self = .automatic
+        case "ipv4", "v4", "ip4":
+            self = .ipv4
+        case "ipv6", "v6", "ip6":
+            self = .ipv6
+        default:
+            self = .automatic
+        }
+    }
 
     public var expectedAddressFamily: IPAddressFamily? {
         switch self {

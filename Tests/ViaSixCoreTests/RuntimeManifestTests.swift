@@ -206,7 +206,7 @@ final class RuntimeManifestTests: XCTestCase {
         try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
 
         for payload in RuntimePayloadFile.allCases {
-            try Data("first-\(payload.rawValue)".utf8)
+            try runtimeFixtureData(for: payload, marker: "first")
                 .write(to: source.appendingPathComponent(payload.rawValue))
         }
 
@@ -224,13 +224,19 @@ final class RuntimeManifestTests: XCTestCase {
 
         let replacementSource = root.appendingPathComponent("Replacement", isDirectory: true)
         try FileManager.default.createDirectory(at: replacementSource, withIntermediateDirectories: true)
-        try Data("replacement-cfst".utf8)
+        try runtimeFixtureData(for: .cfst, marker: "replacement")
             .write(to: replacementSource.appendingPathComponent(RuntimePayloadFile.cfst.rawValue))
 
         let updatedStatus = try await manager.install(from: replacementSource)
         XCTAssertTrue(updatedStatus.isReady)
-        XCTAssertEqual(try Data(contentsOf: try XCTUnwrap(updatedStatus.cfstURL)), Data("replacement-cfst".utf8))
-        XCTAssertEqual(try Data(contentsOf: try XCTUnwrap(updatedStatus.xrayURL)), Data("first-xray".utf8))
+        XCTAssertEqual(
+            try Data(contentsOf: try XCTUnwrap(updatedStatus.cfstURL)),
+            runtimeFixtureData(for: .cfst, marker: "replacement")
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: try XCTUnwrap(updatedStatus.xrayURL)),
+            runtimeFixtureData(for: .xray, marker: "first")
+        )
     }
 
     func testDownloadedArchiveIsVerifiedBeforeUse() async throws {
@@ -312,5 +318,15 @@ final class RuntimeManifestTests: XCTestCase {
 
     private func assertSendable<Value: Sendable>(_ value: Value) {
         _ = value
+    }
+
+    private func runtimeFixtureData(
+        for payload: RuntimePayloadFile,
+        marker: String
+    ) -> Data {
+        if payload.requiresExecutablePermission {
+            return Data("#!/bin/sh\n# \(marker)-\(payload.rawValue)\nexit 0\n".utf8)
+        }
+        return Data("\(marker)-\(payload.rawValue)".utf8)
     }
 }

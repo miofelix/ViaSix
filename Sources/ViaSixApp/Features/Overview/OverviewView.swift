@@ -736,6 +736,9 @@ struct OverviewView: View {
         if model.state.runtimeOperationError != nil {
             return "运行组件操作失败"
         }
+        if model.runtimeIntegrityIssue != nil {
+            return "运行组件需要修复"
+        }
         return switch model.state.runtimePhase {
         case .ready: "运行组件已就绪"
         case .checking: "正在检查运行组件"
@@ -750,6 +753,9 @@ struct OverviewView: View {
         if model.state.runtimeOperation != nil {
             return "节点测速与本地代理会在操作完成后恢复。"
         }
+        if let issue = model.runtimeIntegrityIssue {
+            return issue
+        }
         return "节点测速与本地代理需要运行组件。"
     }
 
@@ -763,6 +769,7 @@ struct OverviewView: View {
     private var runtimeStatusColor: Color {
         if model.state.runtimeOperation != nil { return VisualStyle.accent }
         if model.state.runtimeOperationError != nil { return .red }
+        if model.runtimeIntegrityIssue != nil { return .orange }
         return switch model.state.runtimePhase {
         case .ready: .green
         case .checking: .secondary
@@ -773,6 +780,7 @@ struct OverviewView: View {
     private var runtimeStatusIcon: String {
         if model.state.runtimeOperation != nil { return "arrow.down.circle" }
         if model.state.runtimeOperationError != nil { return "exclamationmark.triangle.fill" }
+        if model.runtimeIntegrityIssue != nil { return "exclamationmark.triangle.fill" }
         return switch model.state.runtimePhase {
         case .ready: "checkmark.circle.fill"
         case .checking: "clock"

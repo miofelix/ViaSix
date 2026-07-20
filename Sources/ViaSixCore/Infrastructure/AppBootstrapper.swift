@@ -1,13 +1,65 @@
 import Foundation
 
+public enum AppBootstrapperError: LocalizedError, Equatable, Sendable {
+    case configurationRollbackFailed(original: String, rollback: String)
+    case configurationRecoveryFailed(String)
+    case invalidConfigurationFile(URL)
+    case templateChangedExternally
+
+    public var errorDescription: String? {
+        switch self {
+        case .configurationRollbackFailed(let original, let rollback):
+            "代理配置更新失败，恢复旧配置时也发生错误。原始错误：\(original)；恢复错误：\(rollback)"
+        case .configurationRecoveryFailed(let message):
+            "上次代理配置更新未完成，自动恢复失败：\(message)"
+        case .invalidConfigurationFile(let url):
+            "代理配置路径不是普通文件：\(url.path)"
+        case .templateChangedExternally:
+            "代理配置在编辑期间发生变化，请重新载入后再保存"
+        }
+    }
+}
+
+public struct BootstrapConfiguration: Equatable, Sendable {
+    public let endpoint: ProxyEndpoint
+    public let effectiveIP: String?
+    public let launchIssue: ConfigTemplateError?
+
+    public init(
+        endpoint: ProxyEndpoint,
+        effectiveIP: String?,
+        launchIssue: ConfigTemplateError?
+    ) {
+        self.endpoint = endpoint
+        self.effectiveIP = effectiveIP
+        self.launchIssue = launchIssue
+    }
+}
+
+typealias ConfigurationFileWriter = @Sendable (Data, URL) throws -> Void
+
 public actor AppBootstrapper {
     public let paths: AppPaths
+    private let configurationFileWriter: ConfigurationFileWriter
 
     public init(paths: AppPaths = .live()) {
         self.paths = paths
+        self.configurationFileWriter = { data, url in
+            try Self.writeRestrictedConfigurationFile(data, to: url)
+        }
+    }
+
+    init(
+        paths: AppPaths,
+        configurationFileWriter: @escaping ConfigurationFileWriter
+    ) {
+        self.paths = paths
+        self.configurationFileWriter = configurationFileWriter
     }
 
     public func prepareDefaults() throws {
+        try paths.prepare()
+        try recoverPendingConfigurationTransaction()
         try DefaultResourceInstaller.install(into: paths)
         try removeStaleSpeedTestResults()
     }
@@ -93,20 +145,17 @@ public actor AppBootstrapper {
     }
 
     public func writeConfig(ip: String) throws {
-        try ConfigTemplate.write(
-            ip: ip,
-            templateURL: paths.templateConfig,
-            destinationURL: paths.generatedConfig
-        )
+        let template = try requiredConfigurationFileData(at: paths.templateConfig)
+        let config = try ConfigTemplate.replacingAddress(in: template, with: ip)
+        try replaceSingleConfigurationFile(config, at: paths.generatedConfig)
     }
 
     @discardableResult
     public func prepareConfigForLaunch(ip: String) throws -> ProxyEndpoint {
-        let template = try Data(contentsOf: paths.templateConfig)
+        let template = try requiredConfigurationFileData(at: paths.templateConfig)
         let config = try ConfigTemplate.replacingAddress(in: template, with: ip)
         let endpoint = try ConfigTemplate.validateForLaunch(config)
-        try config.write(to: paths.generatedConfig, options: .atomic)
-        try FilePermissions.restrictFile(paths.generatedConfig)
+        try replaceSingleConfigurationFile(config, at: paths.generatedConfig)
         return endpoint
     }
 
@@ -116,7 +165,7 @@ public actor AppBootstrapper {
     /// detected during bootstrap.
     @discardableResult
     public func validateTemplateForLaunch(selectedIP: String? = nil) throws -> ProxyEndpoint {
-        let template = try Data(contentsOf: paths.templateConfig)
+        let template = try requiredConfigurationFileData(at: paths.templateConfig)
         let normalizedIP = selectedIP?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let validationIP = normalizedIP.isEmpty ? "2001:db8::2" : normalizedIP
         let config = try ConfigTemplate.replacingAddress(in: template, with: validationIP)
@@ -125,22 +174,42 @@ public actor AppBootstrapper {
 
     @discardableResult
     public func replaceTemplate(with data: Data, selectedIP: String? = nil) throws -> ProxyEndpoint {
+        try replaceTemplateTransaction(
+            with: data,
+            selectedIP: selectedIP,
+            expectedTemplateData: nil
+        )
+    }
+
+    @discardableResult
+    public func replaceTemplateIfUnchanged(
+        with data: Data,
+        selectedIP: String?,
+        expectedTemplateData: Data?
+    ) throws -> ProxyEndpoint {
+        try replaceTemplateTransaction(
+            with: data,
+            selectedIP: selectedIP,
+            expectedTemplateData: expectedTemplateData
+        )
+    }
+
+    private func replaceTemplateTransaction(
+        with data: Data,
+        selectedIP: String?,
+        expectedTemplateData: Data?
+    ) throws -> ProxyEndpoint {
         let endpoint = try ConfigTemplate.validateTemplate(data)
         let normalizedIP = selectedIP?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let validationIP = normalizedIP.isEmpty ? "2001:db8::2" : normalizedIP
         let generatedConfig = try ConfigTemplate.replacingAddress(in: data, with: validationIP)
         try ConfigTemplate.validateForLaunch(generatedConfig)
 
-        try data.write(to: paths.templateConfig, options: .atomic)
-        try FilePermissions.restrictFile(paths.templateConfig)
-        if normalizedIP.isEmpty {
-            if FileManager.default.fileExists(atPath: paths.generatedConfig.path) {
-                try FileManager.default.removeItem(at: paths.generatedConfig)
-            }
-        } else {
-            try generatedConfig.write(to: paths.generatedConfig, options: .atomic)
-            try FilePermissions.restrictFile(paths.generatedConfig)
-        }
+        try commitConfiguration(
+            template: data,
+            generated: normalizedIP.isEmpty ? nil : generatedConfig,
+            expectedTemplateData: expectedTemplateData
+        )
         return endpoint
     }
 
@@ -153,20 +222,346 @@ public actor AppBootstrapper {
     public func ensureConfig(ip: String) throws -> Bool {
         let normalizedIP = ip.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedIP.isEmpty else { return false }
-        guard try currentConfigIP() != normalizedIP else { return false }
-        try writeConfig(ip: normalizedIP)
+        let template = try requiredConfigurationFileData(at: paths.templateConfig)
+        let expectedConfig = try ConfigTemplate.replacingAddress(in: template, with: normalizedIP)
+        if try configurationFileMatches(expectedConfig, at: paths.generatedConfig) {
+            return false
+        }
+        try replaceSingleConfigurationFile(expectedConfig, at: paths.generatedConfig)
         return true
     }
 
-    public func currentConfigIP() throws -> String? {
-        guard FileManager.default.fileExists(atPath: paths.generatedConfig.path) else {
+    public func synchronizeConfiguration(selectedIP: String?) throws -> BootstrapConfiguration {
+        let template = try requiredConfigurationFileData(at: paths.templateConfig)
+        let endpoint = try ConfigTemplate.validateTemplate(template)
+        let generatedData = try regularFileDataIfPresent(at: paths.generatedConfig)
+        let configuredIP = generatedData.flatMap { ConfigTemplate.address(in: $0) }?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let selectedIP = selectedIP?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let effectiveIP = configuredIP?.isEmpty == false ? configuredIP : (selectedIP.isEmpty ? nil : selectedIP)
+        let validationIP = effectiveIP ?? "2001:db8::2"
+        let expectedConfig = try ConfigTemplate.replacingAddress(in: template, with: validationIP)
+        let launchIssue: ConfigTemplateError?
+        do {
+            _ = try ConfigTemplate.validateForLaunch(expectedConfig)
+            launchIssue = nil
+        } catch let error as ConfigTemplateError {
+            guard error == .connectionNotConfigured else { throw error }
+            launchIssue = error
+        }
+
+        if effectiveIP != nil,
+            try !configurationFileMatches(expectedConfig, at: paths.generatedConfig)
+        {
+            try replaceSingleConfigurationFile(expectedConfig, at: paths.generatedConfig)
+        }
+        return BootstrapConfiguration(
+            endpoint: endpoint,
+            effectiveIP: effectiveIP,
+            launchIssue: launchIssue
+        )
+    }
+
+    private func commitConfiguration(
+        template: Data,
+        generated: Data?,
+        expectedTemplateData: Data?
+    ) throws {
+        let fileManager = FileManager.default
+        try recoverPendingConfigurationTransaction()
+        let transaction = ConfigurationTransactionPaths(root: configurationTransactionDirectory)
+        try fileManager.createDirectory(
+            at: transaction.root,
+            withIntermediateDirectories: false
+        )
+        try FilePermissions.restrictDirectory(transaction.root, using: fileManager)
+        var keepTransactionForRecovery = false
+        defer {
+            if !keepTransactionForRecovery {
+                try? fileManager.removeItem(at: transaction.root)
+            }
+        }
+
+        try configurationFileWriter(template, transaction.stagedTemplate)
+        try Self.validateAndRestrictStagedFile(transaction.stagedTemplate, using: fileManager)
+        if let generated {
+            try configurationFileWriter(generated, transaction.stagedGenerated)
+            try Self.validateAndRestrictStagedFile(transaction.stagedGenerated, using: fileManager)
+        }
+
+        let templateSnapshot = try ConfigurationFileSnapshot.capture(
+            paths.templateConfig,
+            backupURL: transaction.templateBackup,
+            using: fileManager
+        )
+        let generatedSnapshot = try ConfigurationFileSnapshot.capture(
+            paths.generatedConfig,
+            backupURL: transaction.generatedBackup,
+            using: fileManager
+        )
+        if let expectedTemplateData, templateSnapshot.data != expectedTemplateData {
+            throw AppBootstrapperError.templateChangedExternally
+        }
+
+        let preparedManifest = ConfigurationTransactionManifest(
+            state: .prepared,
+            templateExisted: templateSnapshot.existed,
+            generatedExisted: generatedSnapshot.existed
+        )
+        try Self.writeTransactionManifest(preparedManifest, to: transaction.manifest)
+        try templateSnapshot.assertUnchanged(at: paths.templateConfig, using: fileManager)
+        try generatedSnapshot.assertUnchanged(at: paths.generatedConfig, using: fileManager)
+
+        do {
+            if generated != nil {
+                try Self.publishStagedFile(
+                    transaction.stagedGenerated,
+                    to: paths.generatedConfig,
+                    using: fileManager
+                )
+            } else {
+                try Self.removeRegularFileIfPresent(paths.generatedConfig, using: fileManager)
+            }
+            try Self.publishStagedFile(
+                transaction.stagedTemplate,
+                to: paths.templateConfig,
+                using: fileManager
+            )
+            let committedManifest = ConfigurationTransactionManifest(
+                state: .committed,
+                templateExisted: templateSnapshot.existed,
+                generatedExisted: generatedSnapshot.existed
+            )
+            try Self.writeTransactionManifest(committedManifest, to: transaction.manifest)
+        } catch {
+            let originalError = error
+            let rollbackErrors = rollbackConfiguration(
+                templateSnapshot: templateSnapshot,
+                generatedSnapshot: generatedSnapshot,
+                using: fileManager
+            )
+            if !rollbackErrors.isEmpty {
+                keepTransactionForRecovery = true
+                throw AppBootstrapperError.configurationRollbackFailed(
+                    original: originalError.localizedDescription,
+                    rollback: rollbackErrors.joined(separator: "；")
+                )
+            }
+            throw originalError
+        }
+    }
+
+    private func replaceSingleConfigurationFile(_ data: Data, at destination: URL) throws {
+        let fileManager = FileManager.default
+        let stagedURL = destination.deletingLastPathComponent().appendingPathComponent(
+            ".\(destination.lastPathComponent)-stage-\(UUID().uuidString)"
+        )
+        defer { try? fileManager.removeItem(at: stagedURL) }
+        try configurationFileWriter(data, stagedURL)
+        try Self.validateAndRestrictStagedFile(stagedURL, using: fileManager)
+        try Self.publishStagedFile(stagedURL, to: destination, using: fileManager)
+    }
+
+    private func configurationFileMatches(_ expected: Data, at url: URL) throws -> Bool {
+        guard let current = try regularFileDataIfPresent(at: url), current == expected else {
+            return false
+        }
+        try FilePermissions.restrictFile(url)
+        return true
+    }
+
+    private func regularFileDataIfPresent(at url: URL) throws -> Data? {
+        try Self.regularFileDataIfPresent(at: url, using: FileManager.default)
+    }
+
+    private func requiredConfigurationFileData(at url: URL) throws -> Data {
+        guard let data = try regularFileDataIfPresent(at: url) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        return data
+    }
+
+    private var configurationTransactionDirectory: URL {
+        paths.data.appendingPathComponent(".configuration-transaction", isDirectory: true)
+    }
+
+    private func recoverPendingConfigurationTransaction() throws {
+        let fileManager = FileManager.default
+        let transaction = ConfigurationTransactionPaths(root: configurationTransactionDirectory)
+        var isDirectory = ObjCBool(false)
+        guard fileManager.fileExists(atPath: transaction.root.path, isDirectory: &isDirectory) else {
+            return
+        }
+        guard (try? fileManager.destinationOfSymbolicLink(atPath: transaction.root.path)) == nil,
+            isDirectory.boolValue
+        else {
+            throw AppBootstrapperError.configurationRecoveryFailed(
+                "事务路径不是可信目录：\(transaction.root.path)"
+            )
+        }
+
+        let manifestData: Data
+        do {
+            guard
+                let data = try Self.regularFileDataIfPresent(
+                    at: transaction.manifest,
+                    using: fileManager
+                )
+            else {
+                try fileManager.removeItem(at: transaction.root)
+                return
+            }
+            manifestData = data
+        } catch {
+            throw AppBootstrapperError.configurationRecoveryFailed(
+                "事务记录不是可信文件：\(error.localizedDescription)"
+            )
+        }
+
+        let manifest: ConfigurationTransactionManifest
+        do {
+            manifest = try JSONDecoder().decode(
+                ConfigurationTransactionManifest.self,
+                from: manifestData
+            )
+        } catch {
+            throw AppBootstrapperError.configurationRecoveryFailed(
+                "事务记录无法解析：\(error.localizedDescription)"
+            )
+        }
+        if manifest.state == .committed {
+            try fileManager.removeItem(at: transaction.root)
+            return
+        }
+
+        let templateSnapshot = ConfigurationFileSnapshot(
+            existed: manifest.templateExisted,
+            data: nil,
+            backupURL: transaction.templateBackup
+        )
+        let generatedSnapshot = ConfigurationFileSnapshot(
+            existed: manifest.generatedExisted,
+            data: nil,
+            backupURL: transaction.generatedBackup
+        )
+        let errors = rollbackConfiguration(
+            templateSnapshot: templateSnapshot,
+            generatedSnapshot: generatedSnapshot,
+            using: fileManager
+        )
+        guard errors.isEmpty else {
+            throw AppBootstrapperError.configurationRecoveryFailed(
+                errors.joined(separator: "；")
+            )
+        }
+        try fileManager.removeItem(at: transaction.root)
+    }
+
+    private func rollbackConfiguration(
+        templateSnapshot: ConfigurationFileSnapshot,
+        generatedSnapshot: ConfigurationFileSnapshot,
+        using fileManager: FileManager
+    ) -> [String] {
+        var errors: [String] = []
+        for (label, snapshot, destination) in [
+            ("template.json", templateSnapshot, paths.templateConfig),
+            ("config.json", generatedSnapshot, paths.generatedConfig),
+        ] {
+            do {
+                try snapshot.restore(to: destination, using: fileManager)
+            } catch {
+                errors.append("\(label)：\(error.localizedDescription)")
+            }
+        }
+        return errors
+    }
+
+    private static func writeRestrictedConfigurationFile(_ data: Data, to url: URL) throws {
+        try data.write(to: url, options: .atomic)
+        try FilePermissions.restrictFile(url)
+    }
+
+    private static func writeTransactionManifest(
+        _ manifest: ConfigurationTransactionManifest,
+        to url: URL
+    ) throws {
+        try writeRestrictedConfigurationFile(try JSONEncoder().encode(manifest), to: url)
+    }
+
+    private static func validateAndRestrictStagedFile(
+        _ url: URL,
+        using fileManager: FileManager
+    ) throws {
+        guard try regularFileDataIfPresent(at: url, using: fileManager) != nil else {
+            throw AppBootstrapperError.invalidConfigurationFile(url)
+        }
+        try FilePermissions.restrictFile(url, using: fileManager)
+    }
+
+    private static func publishStagedFile(
+        _ stagedURL: URL,
+        to destination: URL,
+        using fileManager: FileManager
+    ) throws {
+        if try regularFileDataIfPresent(at: destination, using: fileManager) != nil {
+            _ = try fileManager.replaceItemAt(
+                destination,
+                withItemAt: stagedURL,
+                backupItemName: nil,
+                options: []
+            )
+        } else {
+            try fileManager.moveItem(at: stagedURL, to: destination)
+        }
+    }
+
+    fileprivate static func regularFileDataIfPresent(
+        at url: URL,
+        using fileManager: FileManager
+    ) throws -> Data? {
+        if (try? fileManager.destinationOfSymbolicLink(atPath: url.path)) != nil {
+            throw AppBootstrapperError.invalidConfigurationFile(url)
+        }
+        var isDirectory = ObjCBool(false)
+        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
             return nil
         }
-        return ConfigTemplate.address(in: try Data(contentsOf: paths.generatedConfig))
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+        guard !isDirectory.boolValue,
+            values.isRegularFile == true,
+            values.isSymbolicLink != true
+        else {
+            throw AppBootstrapperError.invalidConfigurationFile(url)
+        }
+        return try Data(contentsOf: url)
+    }
+
+    fileprivate static func removeRegularFileIfPresent(
+        _ url: URL,
+        using fileManager: FileManager
+    ) throws {
+        if (try? fileManager.destinationOfSymbolicLink(atPath: url.path)) != nil {
+            throw AppBootstrapperError.invalidConfigurationFile(url)
+        }
+        var isDirectory = ObjCBool(false)
+        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) else { return }
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+        guard !isDirectory.boolValue,
+            values.isRegularFile == true,
+            values.isSymbolicLink != true
+        else {
+            throw AppBootstrapperError.invalidConfigurationFile(url)
+        }
+        try fileManager.removeItem(at: url)
+    }
+
+    public func currentConfigIP() throws -> String? {
+        guard let data = try regularFileDataIfPresent(at: paths.generatedConfig) else { return nil }
+        return ConfigTemplate.address(in: data)
     }
 
     public func currentProxyEndpoint() throws -> ProxyEndpoint {
-        try ConfigTemplate.proxyEndpoint(in: Data(contentsOf: paths.templateConfig))
+        try ConfigTemplate.proxyEndpoint(in: requiredConfigurationFileData(at: paths.templateConfig))
     }
 
     public func resultForSelectedIP(_ selectedIP: String? = nil) throws -> SpeedTestResult? {
@@ -183,6 +578,99 @@ public actor AppBootstrapper {
         }
         return try loadResults().first {
             $0.ip.trimmingCharacters(in: .whitespacesAndNewlines) == targetIP
+        }
+    }
+}
+
+private struct ConfigurationTransactionPaths {
+    let root: URL
+    let manifest: URL
+    let stagedTemplate: URL
+    let stagedGenerated: URL
+    let templateBackup: URL
+    let generatedBackup: URL
+
+    init(root: URL) {
+        self.root = root
+        manifest = root.appendingPathComponent("manifest.json")
+        stagedTemplate = root.appendingPathComponent("template.stage.json")
+        stagedGenerated = root.appendingPathComponent("config.stage.json")
+        templateBackup = root.appendingPathComponent("template.backup.json")
+        generatedBackup = root.appendingPathComponent("config.backup.json")
+    }
+}
+
+private struct ConfigurationTransactionManifest: Codable, Sendable {
+    enum State: String, Codable, Sendable {
+        case prepared
+        case committed
+    }
+
+    let state: State
+    let templateExisted: Bool
+    let generatedExisted: Bool
+}
+
+private struct ConfigurationFileSnapshot: Sendable {
+    let existed: Bool
+    let data: Data?
+    let backupURL: URL
+
+    static func capture(
+        _ url: URL,
+        backupURL: URL,
+        using fileManager: FileManager
+    ) throws -> Self {
+        guard
+            let data = try AppBootstrapper.regularFileDataIfPresent(
+                at: url,
+                using: fileManager
+            )
+        else {
+            return Self(existed: false, data: nil, backupURL: backupURL)
+        }
+        try data.write(to: backupURL, options: .atomic)
+        try FilePermissions.restrictFile(backupURL, using: fileManager)
+        return Self(existed: true, data: data, backupURL: backupURL)
+    }
+
+    func assertUnchanged(at url: URL, using fileManager: FileManager) throws {
+        let current = try AppBootstrapper.regularFileDataIfPresent(at: url, using: fileManager)
+        guard current == data else {
+            throw AppBootstrapperError.templateChangedExternally
+        }
+    }
+
+    func restore(to url: URL, using fileManager: FileManager) throws {
+        if !existed {
+            try AppBootstrapper.removeRegularFileIfPresent(url, using: fileManager)
+            return
+        }
+        guard
+            let backupData = try AppBootstrapper.regularFileDataIfPresent(
+                at: backupURL,
+                using: fileManager
+            )
+        else {
+            throw AppBootstrapperError.configurationRecoveryFailed(
+                "缺少备份文件：\(backupURL.path)"
+            )
+        }
+        let restoreURL = backupURL.deletingLastPathComponent().appendingPathComponent(
+            ".restore-\(UUID().uuidString).json"
+        )
+        defer { try? fileManager.removeItem(at: restoreURL) }
+        try backupData.write(to: restoreURL, options: .atomic)
+        try FilePermissions.restrictFile(restoreURL, using: fileManager)
+        if try AppBootstrapper.regularFileDataIfPresent(at: url, using: fileManager) != nil {
+            _ = try fileManager.replaceItemAt(
+                url,
+                withItemAt: restoreURL,
+                backupItemName: nil,
+                options: []
+            )
+        } else {
+            try fileManager.moveItem(at: restoreURL, to: url)
         }
     }
 }

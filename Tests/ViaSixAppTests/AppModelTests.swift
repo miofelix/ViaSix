@@ -191,6 +191,44 @@ final class AppModelTests: XCTestCase {
         await model.shutdown()
     }
 
+    func testBootstrapRebuildsGeneratedConfigWhenTemplateDetailsChanged() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let bootstrapper = AppBootstrapper(paths: paths)
+        try await bootstrapper.prepareDefaults()
+        let firstTemplate = validTemplate(
+            host: "127.0.0.2",
+            port: 18_080,
+            userID: "f4edc501-056c-4572-9da8-ad63a264a698",
+            serverName: "first.example.net",
+            path: "/first"
+        )
+        try await bootstrapper.replaceTemplate(with: firstTemplate, selectedIP: "2606::5")
+        let secondTemplate = validTemplate(
+            host: "127.0.0.3",
+            port: 18_081,
+            userID: "22de5d8d-17f7-40e8-a83f-567ae87c865a",
+            serverName: "second.example.net",
+            path: "/second"
+        )
+        try secondTemplate.write(to: paths.templateConfig, options: .atomic)
+
+        let model = makeModel(paths: paths, bootstrapper: bootstrapper)
+        model.start()
+        try await waitUntilReady(model)
+
+        let generated = String(
+            decoding: try Data(contentsOf: paths.generatedConfig),
+            as: UTF8.self
+        )
+        XCTAssertEqual(model.state.proxyEndpoint, ProxyEndpoint(host: "127.0.0.3", port: 18_081))
+        XCTAssertTrue(generated.contains("22de5d8d-17f7-40e8-a83f-567ae87c865a"))
+        XCTAssertTrue(generated.contains("second.example.net"))
+        XCTAssertTrue(generated.contains("/second"))
+        XCTAssertFalse(generated.contains("f4edc501-056c-4572-9da8-ad63a264a698"))
+        await model.shutdown()
+    }
+
     func testDefaultConnectionTemplateIsMarkedBeforeStartAndOffersSettingsRecovery() async throws {
         let paths = makePaths()
         defer { try? FileManager.default.removeItem(at: paths.root) }
@@ -486,6 +524,62 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.state.runtimePhase, .checking)
         let requestCount = await detector.requestCount
         XCTAssertEqual(requestCount, 0)
+    }
+
+    func testSpeedTestEntryPointsRejectRequestsBeforeBootstrapIsReady() async {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let model = makeModel(paths: paths)
+        model.start()
+
+        model.startSpeedTest()
+        XCTAssertEqual(model.state.notice?.message, "应用仍在准备，请稍后再试")
+        XCTAssertFalse(model.isCfstBusy)
+        XCTAssertEqual(model.state.speedTest.phase, .idle)
+
+        model.startCurrentConfigurationTest()
+        XCTAssertEqual(model.state.notice?.message, "应用仍在准备，请稍后再试")
+        XCTAssertFalse(model.isCfstBusy)
+        XCTAssertEqual(model.state.configurationTest.phase, .idle)
+
+        model.importXrayTemplate(
+            from: paths.root.appendingPathComponent("not-ready-template.json")
+        )
+        XCTAssertEqual(model.state.notice?.message, "应用仍在准备，请稍后再试")
+
+        model.selectIP("2606::9")
+        XCTAssertEqual(model.state.notice?.message, "应用仍在准备，请稍后再试")
+
+        do {
+            try await model.saveXrayTemplate(Data("{}".utf8))
+            XCTFail("Expected template save to be rejected before bootstrap")
+        } catch let error as AppModelError {
+            XCTAssertEqual(error, .appNotReady)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+        await model.shutdown()
+    }
+
+    func testInvalidSpeedTestSourceIsReportedBeforeLaunchingCFST() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let model = try await makeSpeedTestModel(
+            paths: paths,
+            selectedIP: "",
+            script: "#!/bin/sh\nexit 0\n"
+        )
+        var parameters = model.parameters
+        parameters.ipFile = ""
+        parameters.ipRange = "not-an-ip"
+        model.parameters = parameters
+
+        model.startSpeedTest()
+
+        XCTAssertEqual(model.state.notice?.message, "IP 段格式无效：not-an-ip")
+        XCTAssertFalse(model.isCfstBusy)
+        XCTAssertEqual(model.state.speedTest.phase, .idle)
+        await model.shutdown()
     }
 
     func testStopSpeedTestDoesNotCancelCurrentConfigurationTest() async throws {
@@ -939,7 +1033,13 @@ final class AppModelTests: XCTestCase {
         }
     }
 
-    private func validTemplate(host: String = "127.0.0.1", port: Int = 11_451) -> Data {
+    private func validTemplate(
+        host: String = "127.0.0.1",
+        port: Int = 11_451,
+        userID: String = "7b602ceb-cc3f-4274-a79d-c1a38f0fb0da",
+        serverName: String = "proxy.example.net",
+        path: String = "/viasix"
+    ) -> Data {
         Data(
             #"""
             {
@@ -948,11 +1048,11 @@ final class AppModelTests: XCTestCase {
                 "tag": "proxy",
                 "settings": {"vnext": [{
                   "address": "2001:db8::10",
-                  "users": [{"id": "7b602ceb-cc3f-4274-a79d-c1a38f0fb0da"}]
+                  "users": [{"id": "\#(userID)"}]
                 }]},
                 "streamSettings": {
-                  "tlsSettings": {"serverName": "proxy.example.net"},
-                  "wsSettings": {"host": "proxy.example.net", "path": "/viasix"}
+                  "tlsSettings": {"serverName": "\#(serverName)"},
+                  "wsSettings": {"host": "\#(serverName)", "path": "\#(path)"}
                 }
               }]
             }

@@ -94,7 +94,7 @@ final class RuntimeComponentCancellationTests: XCTestCase {
 
         try FileManager.default.createDirectory(at: runtimeURL, withIntermediateDirectories: true)
         for payload in RuntimePayloadFile.allCases {
-            try Data("existing-\(payload.rawValue)".utf8)
+            try runtimeFixtureData(for: payload, marker: "existing")
                 .write(to: runtimeURL.appendingPathComponent(payload.rawValue))
         }
         try FileManager.default.setAttributes(
@@ -133,7 +133,7 @@ final class RuntimeComponentCancellationTests: XCTestCase {
         for payload in RuntimePayloadFile.allCases {
             XCTAssertEqual(
                 try Data(contentsOf: runtimeURL.appendingPathComponent(payload.rawValue)),
-                Data("existing-\(payload.rawValue)".utf8)
+                runtimeFixtureData(for: payload, marker: "existing")
             )
         }
     }
@@ -182,7 +182,7 @@ final class RuntimeComponentCancellationTests: XCTestCase {
                 // returns normally. The manager must check cancellation before
                 // discovering or committing its output.
                 try? await Task.sleep(for: .seconds(30))
-                try Data("cfst".utf8).write(
+                try runtimeFixtureData(for: .cfst, marker: "cancelled").write(
                     to: destinationURL.appendingPathComponent(RuntimePayloadFile.cfst.rawValue)
                 )
             }
@@ -287,11 +287,11 @@ private func writeRuntimePayloads(to destinationURL: URL) throws {
     let fileManager = FileManager.default
     let component = destinationURL.lastPathComponent
     if component == RuntimeComponent.cfst.rawValue {
-        try Data("cfst".utf8)
+        try runtimeFixtureData(for: .cfst, marker: "downloaded")
             .write(to: destinationURL.appendingPathComponent(RuntimePayloadFile.cfst.rawValue))
     } else if component == RuntimeComponent.xray.rawValue {
         for payload in [RuntimePayloadFile.xray, .geoIP, .geoSite] {
-            try Data(payload.rawValue.utf8)
+            try runtimeFixtureData(for: payload, marker: "downloaded")
                 .write(to: destinationURL.appendingPathComponent(payload.rawValue))
         }
     } else {
@@ -305,4 +305,14 @@ private func writeRuntimePayloads(to destinationURL: URL) throws {
                 : RuntimePayloadFile.xray.rawValue
         ).path
     )
+}
+
+private func runtimeFixtureData(
+    for payload: RuntimePayloadFile,
+    marker: String
+) -> Data {
+    if payload.requiresExecutablePermission {
+        return Data("#!/bin/sh\n# \(marker)-\(payload.rawValue)\nexit 0\n".utf8)
+    }
+    return Data("\(marker)-\(payload.rawValue)".utf8)
 }

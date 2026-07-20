@@ -73,7 +73,7 @@ final class RuntimeOperationStateTests: XCTestCase {
         for payload in RuntimePayloadFile.allCases {
             XCTAssertEqual(
                 try Data(contentsOf: paths.runtime.appendingPathComponent(payload.rawValue)),
-                Data("existing-\(payload.rawValue)".utf8)
+                runtimeFixtureData(for: payload, marker: "existing")
             )
         }
         await model.shutdown()
@@ -126,7 +126,7 @@ final class RuntimeOperationStateTests: XCTestCase {
         try FileManager.default.createDirectory(at: runtimeURL, withIntermediateDirectories: true)
         for payload in RuntimePayloadFile.allCases {
             let fileURL = runtimeURL.appendingPathComponent(payload.rawValue)
-            try Data("existing-\(payload.rawValue)".utf8).write(to: fileURL)
+            try runtimeFixtureData(for: payload, marker: "existing").write(to: fileURL)
             if payload.requiresExecutablePermission {
                 try FileManager.default.setAttributes(
                     [.posixPermissions: 0o755],
@@ -152,12 +152,22 @@ private enum RuntimeOperationStateTestError: Error {
 
 private func writeRuntimePayloads(to destinationURL: URL) throws {
     if destinationURL.lastPathComponent == RuntimeComponent.cfst.rawValue {
-        try Data("cfst".utf8)
+        try runtimeFixtureData(for: .cfst, marker: "downloaded")
             .write(to: destinationURL.appendingPathComponent(RuntimePayloadFile.cfst.rawValue))
         return
     }
     for payload in [RuntimePayloadFile.xray, .geoIP, .geoSite] {
-        try Data(payload.rawValue.utf8)
+        try runtimeFixtureData(for: payload, marker: "downloaded")
             .write(to: destinationURL.appendingPathComponent(payload.rawValue))
     }
+}
+
+private func runtimeFixtureData(
+    for payload: RuntimePayloadFile,
+    marker: String
+) -> Data {
+    if payload.requiresExecutablePermission {
+        return Data("#!/bin/sh\n# \(marker)-\(payload.rawValue)\nexit 0\n".utf8)
+    }
+    return Data("\(marker)-\(payload.rawValue)".utf8)
 }

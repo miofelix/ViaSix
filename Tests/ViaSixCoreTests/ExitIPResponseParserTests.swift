@@ -103,6 +103,25 @@ final class ExitIPResponseParserTests: XCTestCase {
         )
     }
 
+    func testParsesDetailedIPWhoIPv6ResponseWithEquivalentAddressNotation() throws {
+        let data = Data(
+            #"{"success":true,"ip":"2606:4700:4700:0000:0000:0000:0000:1111","country":"美国","region":"加利福尼亚州","city":"圣何塞","postal":"95113","timezone":{"id":"America/Los_Angeles"},"connection":{"org":"Cloudflare, Inc.","isp":"Cloudflare, Inc.","asn":"13335"}}"#
+                .utf8
+        )
+
+        XCTAssertEqual(
+            try ExitIPGeolocationResponseParser.parse(
+                data,
+                expectedIP: "2606:4700:4700::1111"
+            ),
+            ExitIPInfo(
+                ip: "2606:4700:4700::1111",
+                location: "美国 · 加利福尼亚州 · 圣何塞 · 邮编 95113",
+                details: "Cloudflare, Inc. · AS13335 · America/Los_Angeles"
+            )
+        )
+    }
+
     func testRejectsUnsuccessfulIPWhoGeolocationResponse() {
         let data = Data(
             #"{"success":false,"message":"Rate limit exceeded","ip":"1.1.1.1"}"#.utf8

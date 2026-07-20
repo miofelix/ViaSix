@@ -106,6 +106,7 @@ extension NodesView {
     }
 
     var parameterValidationMessage: String? {
+        guard model.state.launchPhase == .ready else { return nil }
         do {
             _ = try model.parameters.validated()
             return nil
