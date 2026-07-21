@@ -120,6 +120,8 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
         }
         if options.routingMode != .direct {
             try validateServerMapping(serverRoot)
+        } else {
+            serverRoot = [:]
         }
         if projection == .privilegedTun {
             serverRoot = try privilegedServerMapping(from: serverRoot)

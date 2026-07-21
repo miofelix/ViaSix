@@ -399,6 +399,21 @@ final class AppBootstrapperTests: XCTestCase {
         XCTAssertTrue(privilegedText.contains("proxy-groups:"))
         XCTAssertTrue(privilegedText.contains("rules:"))
         XCTAssertEqual(try Data(contentsOf: paths.generatedConfig), userConfiguration)
+
+        let envelope = try await bootstrapper.privilegedTunConfigurationEnvelope(
+            selectedIP: "203.0.113.88"
+        )
+        XCTAssertTrue(envelope.starts(with: Data("bplist00".utf8)))
+        let envelopeRoot = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: envelope, format: nil)
+                as? [String: Any]
+        )
+        let envelopeServer = try XCTUnwrap(envelopeRoot["server"] as? [String: Any])
+        let envelopeProxies = try XCTUnwrap(
+            envelopeServer["proxies"] as? [[String: Any]]
+        )
+        XCTAssertEqual(envelopeProxies.first?["server"] as? String, "203.0.113.88")
+        XCTAssertEqual(try Data(contentsOf: paths.generatedConfig), userConfiguration)
     }
 
     func testPrivilegedTunProjectionRejectsNonVirtualInterfaceModes() async throws {
@@ -416,6 +431,16 @@ final class AppBootstrapperTests: XCTestCase {
             do {
                 _ = try await bootstrapper.privilegedTunConfiguration()
                 XCTFail("Only virtual-interface mode may request privileged TUN configuration")
+            } catch {
+                XCTAssertEqual(
+                    error as? AppBootstrapperError,
+                    .virtualInterfaceRequiresPrivilegedService
+                )
+            }
+
+            do {
+                _ = try await bootstrapper.privilegedTunConfigurationEnvelope()
+                XCTFail("Only virtual-interface mode may request a privileged TUN envelope")
             } catch {
                 XCTAssertEqual(
                     error as? AppBootstrapperError,

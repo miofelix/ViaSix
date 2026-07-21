@@ -554,6 +554,303 @@ final class MihomoRuntimeConfigurationTests: XCTestCase {
         XCTAssertEqual(process.terminationStatus, 0, diagnostics)
     }
 
+    func testPrivilegedEnvelopeRoundTripsThroughFreshAllowlistProjection() throws {
+        let server = try supportedProtocolsServer()
+        let options = privilegedOptions()
+        let expected = try server.runtimeConfiguration(
+            options: options,
+            projection: .privilegedTun
+        )
+
+        let envelope = try MihomoPrivilegedEnvelope.encode(
+            server: server,
+            options: options
+        )
+        let decoded = try MihomoPrivilegedEnvelope.decodeRuntimeConfiguration(
+            from: envelope
+        )
+
+        XCTAssertTrue(envelope.starts(with: Data("bplist00".utf8)))
+        XCTAssertEqual(
+            try MihomoYAML.mapping(from: decoded) as NSDictionary,
+            try MihomoYAML.mapping(from: expected) as NSDictionary
+        )
+
+        let replaced = try MihomoPrivilegedEnvelope.decodeRuntimeConfiguration(
+            from: MihomoPrivilegedEnvelope.encode(
+                server: server,
+                options: options,
+                replacingPrimaryServerWith: "203.0.113.21"
+            )
+        )
+        XCTAssertEqual(
+            try MihomoYAML.mapping(from: replaced).mappings("proxies")?.first?
+                .string("server"),
+            "203.0.113.21"
+        )
+    }
+
+    func testPrivilegedEnvelopeRejectsRawYAMLBadSchemaAndNonCanonicalPayload() throws {
+        XCTAssertThrowsError(
+            try MihomoPrivilegedEnvelope.decodeRuntimeConfiguration(
+                from: try supportedProtocolsServer().runtimeConfiguration(
+                    options: privilegedOptions(),
+                    projection: .privilegedTun
+                )
+            )
+        ) { error in
+            XCTAssertEqual(error as? MihomoConfigurationError, .invalidPrivilegedEnvelope)
+        }
+
+        let envelope = try MihomoPrivilegedEnvelope.encode(
+            server: try supportedProtocolsServer(),
+            options: privilegedOptions()
+        )
+        var root = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: envelope, format: nil)
+                as? [String: Any]
+        )
+        root["schemaVersion"] = 99
+        let unsupported = try PropertyListSerialization.data(
+            fromPropertyList: root,
+            format: .binary,
+            options: 0
+        )
+        XCTAssertThrowsError(
+            try MihomoPrivilegedEnvelope.decodeRuntimeConfiguration(from: unsupported)
+        ) { error in
+            XCTAssertEqual(
+                error as? MihomoConfigurationError,
+                .unsupportedPrivilegedEnvelopeVersion(99)
+            )
+        }
+
+        root["schemaVersion"] = MihomoPrivilegedEnvelope.schemaVersion
+        var server = try XCTUnwrap(root["server"] as? [String: Any])
+        server["certificate"] = "/tmp/root-readable.pem"
+        root["server"] = server
+        let nonCanonical = try PropertyListSerialization.data(
+            fromPropertyList: root,
+            format: .binary,
+            options: 0
+        )
+        XCTAssertThrowsError(
+            try MihomoPrivilegedEnvelope.decodeRuntimeConfiguration(from: nonCanonical)
+        ) { error in
+            XCTAssertEqual(
+                error as? MihomoConfigurationError,
+                .nonCanonicalPrivilegedEnvelope
+            )
+        }
+
+        func assertRejectedUnknownField(
+            _ mutatedRoot: [String: Any],
+            line: UInt = #line
+        ) throws {
+            let data = try PropertyListSerialization.data(
+                fromPropertyList: mutatedRoot,
+                format: .binary,
+                options: 0
+            )
+            XCTAssertThrowsError(
+                try MihomoPrivilegedEnvelope.decodeRuntimeConfiguration(from: data),
+                line: line
+            ) { error in
+                XCTAssertEqual(
+                    error as? MihomoConfigurationError,
+                    .nonCanonicalPrivilegedEnvelope,
+                    line: line
+                )
+            }
+        }
+
+        let canonicalRoot = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: envelope, format: nil)
+                as? [String: Any]
+        )
+        var unknownTopLevel = canonicalRoot
+        unknownTopLevel["rawYAML"] = "mode: direct"
+        try assertRejectedUnknownField(unknownTopLevel)
+
+        var unknownOption = canonicalRoot
+        var options = try XCTUnwrap(unknownOption["options"] as? [String: Any])
+        options["executablePath"] = "/tmp/mihomo"
+        unknownOption["options"] = options
+        try assertRejectedUnknownField(unknownOption)
+
+        var unknownTunOption = canonicalRoot
+        options = try XCTUnwrap(unknownTunOption["options"] as? [String: Any])
+        var tun = try XCTUnwrap(options["tun"] as? [String: Any])
+        tun["device"] = "utun99"
+        options["tun"] = tun
+        unknownTunOption["options"] = options
+        try assertRejectedUnknownField(unknownTunOption)
+    }
+
+    func testPrivilegedEnvelopeRejectsOversizedInputBeforeDecoding() {
+        let data = Data(
+            repeating: 0,
+            count: MihomoPrivilegedEnvelope.maximumBytes + 1
+        )
+
+        XCTAssertThrowsError(
+            try MihomoPrivilegedEnvelope.decodeRuntimeConfiguration(from: data)
+        ) { error in
+            XCTAssertEqual(
+                error as? MihomoConfigurationError,
+                .privilegedEnvelopeTooLarge(data.count)
+            )
+        }
+    }
+
+    func testPrivilegedEnvelopeEncoderRejectsNonCanonicalOptions() throws {
+        var options = privilegedOptions()
+        options.listenAddress = "LOCALHOST"
+        XCTAssertThrowsError(
+            try MihomoPrivilegedEnvelope.encode(
+                server: try supportedProtocolsServer(),
+                options: options
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? MihomoConfigurationError,
+                .nonCanonicalPrivilegedEnvelope
+            )
+        }
+
+        options = privilegedOptions(
+            tun: MihomoTunConfiguration(
+                routeExcludeAddresses: [" 203.0.113.0/24"]
+            )
+        )
+        XCTAssertThrowsError(
+            try MihomoPrivilegedEnvelope.encode(
+                server: try supportedProtocolsServer(),
+                options: options
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? MihomoConfigurationError,
+                .nonCanonicalPrivilegedEnvelope
+            )
+        }
+    }
+
+    func testPrivilegedEnvelopeRejectsDeepOrOverlyComplexPlistBeforeTypedDecode() throws {
+        let envelope = try MihomoPrivilegedEnvelope.encode(
+            server: try supportedProtocolsServer(),
+            options: privilegedOptions()
+        )
+        let canonicalRoot = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: envelope, format: nil)
+                as? [String: Any]
+        )
+
+        var deepValue: Any = "leaf"
+        for _ in 0...64 {
+            deepValue = [deepValue]
+        }
+        var deepRoot = canonicalRoot
+        deepRoot["unknown"] = deepValue
+        let deepEnvelope = try PropertyListSerialization.data(
+            fromPropertyList: deepRoot,
+            format: .binary,
+            options: 0
+        )
+        XCTAssertThrowsError(
+            try MihomoPrivilegedEnvelope.decodeRuntimeConfiguration(from: deepEnvelope)
+        ) { error in
+            XCTAssertEqual(error as? MihomoConfigurationError, .configurationTooDeep)
+        }
+
+        var complexRoot = canonicalRoot
+        complexRoot["unknown"] = [Bool](repeating: false, count: 200_000)
+        let complexEnvelope = try PropertyListSerialization.data(
+            fromPropertyList: complexRoot,
+            format: .binary,
+            options: 0
+        )
+        XCTAssertLessThanOrEqual(
+            complexEnvelope.count,
+            MihomoPrivilegedEnvelope.maximumBytes
+        )
+        XCTAssertThrowsError(
+            try MihomoPrivilegedEnvelope.decodeRuntimeConfiguration(from: complexEnvelope)
+        ) { error in
+            XCTAssertEqual(error as? MihomoConfigurationError, .configurationTooComplex)
+        }
+    }
+
+    func testPrivilegedDirectProjectionDropsUnsafeRemoteSourcesBeforeValidation() throws {
+        let server = try MihomoServerConfiguration(
+            data: Data(
+                """
+                proxy-providers:
+                  remote:
+                    type: http
+                    url: https://subscription.example/profile.yaml
+                    path: ../../outside.yaml
+                proxy-groups:
+                  - name: PROXY
+                    type: select
+                    use: [remote]
+                rules:
+                  - GEOIP,CN,DIRECT
+                  - MATCH,PROXY
+                """.utf8
+            )
+        )
+        let options = MihomoRuntimeOptions(
+            routingMode: .direct,
+            tun: MihomoTunConfiguration()
+        )
+
+        let runtime = try server.runtimeConfiguration(
+            options: options,
+            projection: .privilegedTun
+        )
+        let envelope = try MihomoPrivilegedEnvelope.encode(server: server, options: options)
+        let decodedEnvelope = try MihomoPrivilegedEnvelope.decodeRuntimeConfiguration(
+            from: envelope
+        )
+
+        for data in [runtime, decodedEnvelope] {
+            let root = try MihomoYAML.mapping(from: data)
+            XCTAssertEqual(root.string("mode"), "direct")
+            XCTAssertEqual(root["rules"] as? [String], ["MATCH,DIRECT"])
+            XCTAssertNil(root["proxies"])
+            XCTAssertNil(root["proxy-providers"])
+            XCTAssertNil(root["proxy-groups"])
+            XCTAssertEqual(root.mapping("tun")?.bool("enable"), true)
+        }
+
+        var injectedRoot = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: envelope, format: nil)
+                as? [String: Any]
+        )
+        var injectedServer = try XCTUnwrap(injectedRoot["server"] as? [String: Any])
+        injectedServer["proxy-providers"] = [
+            "remote": [
+                "type": "http",
+                "url": "https://subscription.example/profile.yaml",
+            ]
+        ]
+        injectedRoot["server"] = injectedServer
+        let injectedEnvelope = try PropertyListSerialization.data(
+            fromPropertyList: injectedRoot,
+            format: .binary,
+            options: 0
+        )
+        XCTAssertThrowsError(
+            try MihomoPrivilegedEnvelope.decodeRuntimeConfiguration(from: injectedEnvelope)
+        ) { error in
+            XCTAssertEqual(
+                error as? MihomoConfigurationError,
+                .nonCanonicalPrivilegedEnvelope
+            )
+        }
+    }
+
     private func privilegedOptions(
         tun: MihomoTunConfiguration = MihomoTunConfiguration()
     ) -> MihomoRuntimeOptions {

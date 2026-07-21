@@ -105,7 +105,7 @@ public enum MihomoRuntimeProjection: Equatable, Sendable {
     case privilegedTun
 }
 
-public struct MihomoTunConfiguration: Equatable, Sendable {
+public struct MihomoTunConfiguration: Codable, Equatable, Sendable {
     public var stack: MihomoTunStack
     public var strictRoute: Bool
     public var mtu: Int
@@ -124,7 +124,7 @@ public struct MihomoTunConfiguration: Equatable, Sendable {
     }
 }
 
-public struct MihomoRuntimeOptions: Equatable, Sendable {
+public struct MihomoRuntimeOptions: Codable, Equatable, Sendable {
     public var listenAddress: String
     public var mixedPort: Int
     public var routingMode: MihomoRoutingMode
@@ -179,6 +179,10 @@ public enum MihomoConfigurationError: LocalizedError, Equatable, Sendable {
     case invalidTunMTU
     case tooManyTunRouteExclusions
     case invalidTunRouteExclusion(String)
+    case privilegedEnvelopeTooLarge(Int)
+    case invalidPrivilegedEnvelope
+    case unsupportedPrivilegedEnvelopeVersion(Int)
+    case nonCanonicalPrivilegedEnvelope
     case legacyXrayConfiguration
     case configurationTooLarge(Int)
     case configurationTooDeep
@@ -227,6 +231,14 @@ public enum MihomoConfigurationError: LocalizedError, Equatable, Sendable {
             "TUN 路由排除项最多允许 32 条"
         case .invalidTunRouteExclusion(let value):
             "TUN 路由排除项无效或不安全：\(value)"
+        case .privilegedEnvelopeTooLarge(let size):
+            "特权 TUN 配置 envelope 过大：\(size) 字节"
+        case .invalidPrivilegedEnvelope:
+            "特权 TUN 配置 envelope 无效"
+        case .unsupportedPrivilegedEnvelopeVersion(let version):
+            "特权 TUN 配置 envelope 版本不受支持：\(version)"
+        case .nonCanonicalPrivilegedEnvelope:
+            "特权 TUN 配置 envelope 未通过安全重建"
         case .legacyXrayConfiguration:
             "检测到旧版 Xray JSON，需要先迁移为 Mihomo YAML"
         case .configurationTooLarge(let size):

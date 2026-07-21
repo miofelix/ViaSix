@@ -290,6 +290,35 @@ public actor AppBootstrapper {
         )
     }
 
+    /// Builds the versioned binary-plist request consumed by the privileged
+    /// helper. Unlike ``privilegedTunConfiguration(selectedIP:)``, this value
+    /// is not runnable YAML; the helper must decode it and rebuild the runtime
+    /// document through the same privileged projection before use.
+    public func privilegedTunConfigurationEnvelope(
+        selectedIP: String? = nil
+    ) throws -> Data {
+        let sources = try loadConfigurationSources()
+        guard sources.local.networkAccessMode == .virtualInterface else {
+            throw AppBootstrapperError.virtualInterfaceRequiresPrivilegedService
+        }
+        let local = try sources.local.validated()
+        let replacement: String?
+        if local.routingMode == .direct {
+            replacement = nil
+        } else if sources.profile?.hasReplaceablePrimaryServer == true {
+            replacement = Self.nonEmpty(
+                selectedIP?.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+        } else {
+            replacement = nil
+        }
+        return try MihomoPrivilegedEnvelope.encode(
+            server: sources.profile,
+            options: mihomoRuntimeOptions(for: local, projection: .privilegedTun),
+            replacingPrimaryServerWith: replacement
+        )
+    }
+
     @discardableResult
     public func replaceProfile(with data: Data, selectedIP: String? = nil) throws -> ProxyEndpoint {
         try replaceProfileTransaction(
