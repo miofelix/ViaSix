@@ -368,30 +368,87 @@ final class AppBootstrapperTests: XCTestCase {
         XCTAssertTrue(generated.contains("servername: origin.example"))
     }
 
-    func testVirtualInterfaceProjectionFailsClosedInUserWritableRuntime() async throws {
+    func testVirtualInterfaceUsesPrivilegedProjectionWithoutPublishingEnabledTun() async throws {
         let paths = makePaths()
         defer { try? FileManager.default.removeItem(at: paths.root) }
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
         try await bootstrapper.replaceProfile(with: validProfile())
-        let originalLocal = try await bootstrapper.loadLocalProxyConfiguration()
-        let originalConfig = try Data(contentsOf: paths.generatedConfig)
-        var tunnel = originalLocal
+        var tunnel = try await bootstrapper.loadLocalProxyConfiguration()
         tunnel.networkAccessMode = .virtualInterface
 
-        do {
-            _ = try await bootstrapper.replaceLocalProxyConfiguration(with: tunnel)
-            XCTFail("The unprivileged runtime must not generate an enabled TUN config")
-        } catch {
-            XCTAssertEqual(
-                error as? AppBootstrapperError,
-                .virtualInterfaceRequiresPrivilegedService
-            )
-        }
+        _ = try await bootstrapper.replaceLocalProxyConfiguration(with: tunnel)
 
         let persistedLocal = try await bootstrapper.loadLocalProxyConfiguration()
-        XCTAssertEqual(persistedLocal, originalLocal)
-        XCTAssertEqual(try Data(contentsOf: paths.generatedConfig), originalConfig)
+        XCTAssertEqual(persistedLocal, tunnel)
+
+        let userConfiguration = try Data(contentsOf: paths.generatedConfig)
+        let userText = String(decoding: userConfiguration, as: UTF8.self)
+        XCTAssertTrue(userText.contains("tun:"))
+        XCTAssertTrue(userText.contains("enable: false"))
+        XCTAssertFalse(userText.contains("auto-route: true"))
+
+        let privileged = try await bootstrapper.privilegedTunConfiguration()
+        let privilegedText = String(decoding: privileged, as: UTF8.self)
+        XCTAssertTrue(privilegedText.contains("enable: true"))
+        XCTAssertTrue(privilegedText.contains("auto-route: true"))
+        XCTAssertTrue(privilegedText.contains("auto-detect-interface: true"))
+        XCTAssertTrue(privilegedText.contains("dns-hijack:"))
+        XCTAssertTrue(privilegedText.contains("enhanced-mode: fake-ip"))
+        XCTAssertTrue(privilegedText.contains("proxies:"))
+        XCTAssertTrue(privilegedText.contains("proxy-groups:"))
+        XCTAssertTrue(privilegedText.contains("rules:"))
+        XCTAssertEqual(try Data(contentsOf: paths.generatedConfig), userConfiguration)
+    }
+
+    func testPrivilegedTunProjectionRejectsNonVirtualInterfaceModes() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let bootstrapper = AppBootstrapper(paths: paths)
+        try await bootstrapper.prepareDefaults()
+        try await bootstrapper.replaceProfile(with: validProfile())
+
+        for mode in [NetworkAccessMode.localProxy, .systemProxy] {
+            var local = try await bootstrapper.loadLocalProxyConfiguration()
+            local.networkAccessMode = mode
+            _ = try await bootstrapper.replaceLocalProxyConfiguration(with: local)
+
+            do {
+                _ = try await bootstrapper.privilegedTunConfiguration()
+                XCTFail("Only virtual-interface mode may request privileged TUN configuration")
+            } catch {
+                XCTAssertEqual(
+                    error as? AppBootstrapperError,
+                    .virtualInterfaceRequiresPrivilegedService
+                )
+            }
+        }
+    }
+
+    func testHTTPProviderRemainsUsableByUserProjectionButPrivilegedTunRejectsIt() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let bootstrapper = AppBootstrapper(paths: paths)
+        try await bootstrapper.prepareDefaults()
+        try await bootstrapper.replaceProfile(with: providerOnlyProfile())
+
+        var local = try await bootstrapper.loadLocalProxyConfiguration()
+        local.networkAccessMode = .virtualInterface
+        _ = try await bootstrapper.replaceLocalProxyConfiguration(with: local)
+
+        let userConfiguration = try Data(contentsOf: paths.generatedConfig)
+        let userText = String(decoding: userConfiguration, as: UTF8.self)
+        XCTAssertTrue(userText.contains("proxy-providers:"))
+        XCTAssertTrue(userText.contains("type: http"))
+        XCTAssertTrue(userText.contains("enable: false"))
+
+        do {
+            _ = try await bootstrapper.privilegedTunConfiguration()
+            XCTFail("Remote providers must not enter a privileged runtime")
+        } catch {
+            XCTAssertNotNil(error as? LocalizedError)
+        }
+        XCTAssertEqual(try Data(contentsOf: paths.generatedConfig), userConfiguration)
     }
 
     func testProfileReplacementPublishesProfileLocalAndRuntimeWithOwnerOnlyPermissions() async throws {

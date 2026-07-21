@@ -13,7 +13,6 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
         "rule-providers",
         "sub-rules",
     ]
-
     private let canonicalData: Data
 
     public init(data: Data) throws {
@@ -86,11 +85,13 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
 
     public func runtimeConfiguration(
         options: MihomoRuntimeOptions,
+        projection: MihomoRuntimeProjection = .user,
         replacingPrimaryServerWith address: String? = nil
     ) throws -> Data {
         try Self.runtimeConfiguration(
             server: self,
             options: options,
+            projection: projection,
             replacingPrimaryServerWith: address
         )
     }
@@ -98,9 +99,10 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
     public static func runtimeConfiguration(
         server: Self?,
         options: MihomoRuntimeOptions,
+        projection: MihomoRuntimeProjection = .user,
         replacingPrimaryServerWith address: String? = nil
     ) throws -> Data {
-        try validate(options: options)
+        try validate(options: options, projection: projection)
 
         var serverRoot = server?.rawMapping() ?? [:]
         if let address {
@@ -108,14 +110,25 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
                 if options.routingMode != .direct {
                     throw MihomoConfigurationError.missingProxySource
                 }
-                return try composeRuntime(server: [:], options: options)
+                return try composeRuntime(
+                    server: [:],
+                    options: options,
+                    projection: projection
+                )
             }
             serverRoot = try server.replacingPrimaryServer(with: address).rawMapping()
         }
         if options.routingMode != .direct {
             try validateServerMapping(serverRoot)
         }
-        return try composeRuntime(server: serverRoot, options: options)
+        if projection == .privilegedTun {
+            serverRoot = try privilegedServerMapping(from: serverRoot)
+        }
+        return try composeRuntime(
+            server: serverRoot,
+            options: options,
+            projection: projection
+        )
     }
 
     public static func proxyServerAddress(in data: Data) -> String? {
@@ -211,7 +224,8 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
 
     private static func composeRuntime(
         server: [String: Any],
-        options: MihomoRuntimeOptions
+        options: MihomoRuntimeOptions,
+        projection: MihomoRuntimeProjection
     ) throws -> Data {
         var runtime: [String: Any] = [
             "mixed-port": options.mixedPort,
@@ -224,7 +238,7 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
             "tcp-concurrent": true,
             "profile": [
                 "store-selected": false,
-                "store-fake-ip": options.tun != nil,
+                "store-fake-ip": projection == .privilegedTun,
             ],
         ]
 
@@ -263,21 +277,19 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
 
         try installManagedPolicy(in: &runtime, options: options)
 
-        if let tun = options.tun {
+        if projection == .privilegedTun {
+            guard let tun = options.tun else {
+                throw MihomoConfigurationError.missingTunConfiguration
+            }
             var tunMapping: [String: Any] = [
                 "enable": true,
                 "stack": tun.stack.rawValue,
-                "auto-route": tun.autoRoute,
+                "auto-route": true,
                 "strict-route": tun.strictRoute,
-                "auto-detect-interface": tun.autoDetectInterface,
-                "dns-hijack": tun.dnsHijack,
+                "auto-detect-interface": true,
+                "dns-hijack": ["any:53", "tcp://any:53"],
                 "mtu": tun.mtu,
             ]
-            if let device = tun.device?.trimmingCharacters(in: .whitespacesAndNewlines),
-                !device.isEmpty
-            {
-                tunMapping["device"] = device
-            }
             if !tun.routeExcludeAddresses.isEmpty {
                 tunMapping["route-exclude-address"] = tun.routeExcludeAddresses
             }
@@ -288,7 +300,16 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
                 "enhanced-mode": "fake-ip",
                 "fake-ip-range": "198.18.0.1/16",
                 "fake-ip-range6": "fdfe:dcba:9876::1/64",
-                "nameserver": ["system"],
+                "respect-rules": true,
+                "default-nameserver": ["1.1.1.1", "8.8.8.8"],
+                "nameserver": [
+                    "https://1.1.1.1/dns-query",
+                    "https://8.8.8.8/dns-query",
+                ],
+                "proxy-server-nameserver": [
+                    "https://1.1.1.1/dns-query",
+                    "https://8.8.8.8/dns-query",
+                ],
             ]
         } else {
             runtime["tun"] = ["enable": false]
@@ -372,25 +393,29 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
         runtime["rules"] = rules
     }
 
-    private static func validate(options: MihomoRuntimeOptions) throws {
+    private static func validate(
+        options: MihomoRuntimeOptions,
+        projection: MihomoRuntimeProjection
+    ) throws {
         guard isLoopbackHost(options.listenAddress) else {
             throw MihomoConfigurationError.invalidListenAddress
         }
         guard (1...65_535).contains(options.mixedPort) else {
             throw MihomoConfigurationError.invalidMixedPort
         }
-        if let tun = options.tun {
-            guard (576...9_000).contains(tun.mtu) else {
+        if projection == .privilegedTun {
+            guard let tun = options.tun else {
+                throw MihomoConfigurationError.missingTunConfiguration
+            }
+            guard (1_280...9_000).contains(tun.mtu) else {
                 throw MihomoConfigurationError.invalidTunMTU
             }
-            if let device = tun.device?.trimmingCharacters(in: .whitespacesAndNewlines),
-                !device.isEmpty
-            {
-                guard device.hasPrefix("utun"),
-                    !device.dropFirst(4).isEmpty,
-                    device.dropFirst(4).allSatisfy(\.isNumber)
-                else {
-                    throw MihomoConfigurationError.invalidProxy("macOS TUN 设备名必须为 utun 加数字")
+            guard tun.routeExcludeAddresses.count <= 32 else {
+                throw MihomoConfigurationError.tooManyTunRouteExclusions
+            }
+            for route in tun.routeExcludeAddresses {
+                guard isSafeTunRouteExclusion(route) else {
+                    throw MihomoConfigurationError.invalidTunRouteExclusion(route)
                 }
             }
         }

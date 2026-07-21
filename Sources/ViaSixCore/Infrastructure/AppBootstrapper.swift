@@ -271,6 +271,25 @@ public actor AppBootstrapper {
         return sources.local.endpoint
     }
 
+    /// Builds the root-owned Mihomo configuration used for virtual-interface
+    /// mode without publishing it into the user-writable runtime directory.
+    /// The caller must hand this document to the privileged service as part of
+    /// a single-owner core transition.
+    public func privilegedTunConfiguration(
+        selectedIP: String? = nil
+    ) throws -> Data {
+        let sources = try loadConfigurationSources()
+        guard sources.local.networkAccessMode == .virtualInterface else {
+            throw AppBootstrapperError.virtualInterfaceRequiresPrivilegedService
+        }
+        return try runtimeConfiguration(
+            profile: sources.profile,
+            local: sources.local,
+            selectedIP: selectedIP,
+            projection: .privilegedTun
+        )
+    }
+
     @discardableResult
     public func replaceProfile(with data: Data, selectedIP: String? = nil) throws -> ProxyEndpoint {
         try replaceProfileTransaction(
@@ -329,9 +348,9 @@ public actor AppBootstrapper {
         return try JSONDecoder().decode(LocalProxyConfiguration.self, from: data).validated()
     }
 
-    /// Persists a local preference and regenerates the active Mihomo document.
-    /// This is required because networkAccessMode controls whether `tun` is
-    /// present in config.yaml.
+    /// Persists a local preference and regenerates the user-owned Mihomo
+    /// document. Virtual-interface preferences are stored here, but enabled
+    /// TUN configuration is projected only through privilegedTunConfiguration.
     public func saveLocalProxyPreference(
         _ local: LocalProxyConfiguration,
         selectedIP: String? = nil
@@ -454,7 +473,8 @@ public actor AppBootstrapper {
     private func runtimeConfiguration(
         profile: MihomoServerConfiguration?,
         local: LocalProxyConfiguration,
-        selectedIP: String?
+        selectedIP: String?,
+        projection: MihomoRuntimeProjection = .user
     ) throws -> Data {
         let local = try local.validated()
         let replacement: String?
@@ -467,20 +487,16 @@ public actor AppBootstrapper {
         }
         return try MihomoServerConfiguration.runtimeConfiguration(
             server: profile,
-            options: try mihomoRuntimeOptions(for: local),
+            options: try mihomoRuntimeOptions(for: local, projection: projection),
+            projection: projection,
             replacingPrimaryServerWith: replacement
         )
     }
 
     private func mihomoRuntimeOptions(
-        for local: LocalProxyConfiguration
+        for local: LocalProxyConfiguration,
+        projection: MihomoRuntimeProjection
     ) throws -> MihomoRuntimeOptions {
-        guard !local.networkAccessMode.usesVirtualInterface else {
-            // TUN configuration for the root-owned Mihomo instance is projected
-            // by the privileged service. Never place an enabled TUN document in
-            // the user-writable runtime home.
-            throw AppBootstrapperError.virtualInterfaceRequiresPrivilegedService
-        }
         return MihomoRuntimeOptions(
             listenAddress: local.listenAddress,
             mixedPort: local.port,
@@ -490,7 +506,7 @@ public actor AppBootstrapper {
             udpEnabled: local.udpEnabled,
             sniffingEnabled: local.sniffingEnabled,
             bypassPrivateNetworks: local.bypassPrivateNetworks,
-            tun: nil
+            tun: projection == .privilegedTun ? MihomoTunConfiguration() : nil
         )
     }
 

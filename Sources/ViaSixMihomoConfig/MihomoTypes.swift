@@ -94,32 +94,31 @@ public enum MihomoTunStack: String, Codable, CaseIterable, Sendable {
     }
 }
 
+/// Selects the trust boundary used when projecting a stored server profile
+/// into a runnable Mihomo document.
+///
+/// User-owned runtime homes must always use ``user``. Only the privileged
+/// service may request ``privilegedTun`` and consume the returned document
+/// without first writing it into a user-controlled location.
+public enum MihomoRuntimeProjection: Equatable, Sendable {
+    case user
+    case privilegedTun
+}
+
 public struct MihomoTunConfiguration: Equatable, Sendable {
     public var stack: MihomoTunStack
-    public var device: String?
-    public var autoRoute: Bool
     public var strictRoute: Bool
-    public var autoDetectInterface: Bool
-    public var dnsHijack: [String]
     public var mtu: Int
     public var routeExcludeAddresses: [String]
 
     public init(
         stack: MihomoTunStack = .mixed,
-        device: String? = nil,
-        autoRoute: Bool = true,
         strictRoute: Bool = false,
-        autoDetectInterface: Bool = true,
-        dnsHijack: [String] = ["any:53", "tcp://any:53"],
         mtu: Int = 1_500,
         routeExcludeAddresses: [String] = []
     ) {
         self.stack = stack
-        self.device = device
-        self.autoRoute = autoRoute
         self.strictRoute = strictRoute
-        self.autoDetectInterface = autoDetectInterface
-        self.dnsHijack = dnsHijack
         self.mtu = mtu
         self.routeExcludeAddresses = routeExcludeAddresses
     }
@@ -176,7 +175,10 @@ public enum MihomoConfigurationError: LocalizedError, Equatable, Sendable {
     case placeholderConfiguration
     case invalidListenAddress
     case invalidMixedPort
+    case missingTunConfiguration
     case invalidTunMTU
+    case tooManyTunRouteExclusions
+    case invalidTunRouteExclusion(String)
     case legacyXrayConfiguration
     case configurationTooLarge(Int)
     case configurationTooDeep
@@ -217,8 +219,14 @@ public enum MihomoConfigurationError: LocalizedError, Equatable, Sendable {
             "本地监听地址必须是回环地址"
         case .invalidMixedPort:
             "本地 mixed 端口必须在 1–65535 之间"
+        case .missingTunConfiguration:
+            "特权 TUN 投影需要明确的 TUN 配置"
         case .invalidTunMTU:
-            "TUN MTU 必须在 576–9000 之间"
+            "TUN MTU 必须在 1280–9000 之间"
+        case .tooManyTunRouteExclusions:
+            "TUN 路由排除项最多允许 32 条"
+        case .invalidTunRouteExclusion(let value):
+            "TUN 路由排除项无效或不安全：\(value)"
         case .legacyXrayConfiguration:
             "检测到旧版 Xray JSON，需要先迁移为 Mihomo YAML"
         case .configurationTooLarge(let size):
