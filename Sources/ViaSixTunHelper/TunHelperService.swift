@@ -42,12 +42,11 @@ final class TunHelperService: NSObject, TunHelperXPCProtocol {
 
     func recoverIfNeeded(reply: @escaping (NSError?) -> Void) {
         do {
-            // Recovery is intentionally safe for any authenticated ViaSix
-            // client. A later start/stop surface will bind mutation leases to
-            // clientUserIdentifier, while stale cleanup must remain possible
-            // after logout or a fast-user switch.
+            // This foundation build has no network cleanup backend. Refuse
+            // without changing the journal so the original recovery evidence
+            // remains available to the concrete backend.
             _ = clientUserIdentifier
-            try journalController.recoverIfNeeded()
+            try journalController.rejectPendingRecoveryWithoutBackend()
             reply(nil)
         } catch {
             reply(error as NSError)

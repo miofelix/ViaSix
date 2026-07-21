@@ -11,6 +11,7 @@ public enum TunSessionPhase: String, Codable, CaseIterable, Sendable {
 
 public struct TunSessionJournal: Codable, Equatable, Sendable {
     public static let currentSchemaVersion = 1
+    fileprivate static let maximumLastErrorBytes = 4_096
 
     public let schemaVersion: Int
     public let sessionIdentifier: UUID
@@ -54,7 +55,7 @@ public struct TunSessionJournal: Codable, Equatable, Sendable {
         guard ownerUserIdentifier > 0 else {
             throw TunSessionJournalError.invalidJournal("会话用户无效")
         }
-        if let lastError, lastError.utf8.count > 4_096 {
+        if let lastError, lastError.utf8.count > Self.maximumLastErrorBytes {
             throw TunSessionJournalError.invalidJournal("错误信息过长")
         }
         return self
@@ -69,6 +70,7 @@ public enum TunSessionJournalError: LocalizedError, Equatable, Sendable {
     case journalTooLarge(Int64)
     case unsupportedSchemaVersion(Int)
     case invalidJournal(String)
+    case recoveryBackendUnavailable
     case staleSession(expected: UUID, actual: UUID)
     case posix(operation: String, code: Int32)
 
@@ -88,6 +90,8 @@ public enum TunSessionJournalError: LocalizedError, Equatable, Sendable {
             "虚拟网卡恢复记录版本不受支持：\(version)"
         case .invalidJournal(let reason):
             "虚拟网卡恢复记录内容无效：\(reason)"
+        case .recoveryBackendUnavailable:
+            "虚拟网卡恢复后端不可用，恢复记录已保留"
         case .staleSession(let expected, let actual):
             "虚拟网卡会话已变化（需要 \(expected)，实际 \(actual)）"
         case .posix(let operation, let code):
@@ -339,6 +343,15 @@ public final class TunSessionJournalController: @unchecked Sendable {
         try currentJournal()?.recoveryPending ?? false
     }
 
+    /// Reports that this helper build cannot safely recover a pending session
+    /// without changing the recovery evidence on disk.
+    public func rejectPendingRecoveryWithoutBackend() throws {
+        try lock.withLock {
+            guard try store.load()?.recoveryPending == true else { return }
+            throw TunSessionJournalError.recoveryBackendUnavailable
+        }
+    }
+
     @discardableResult
     public func begin(ownerUserIdentifier: UInt32) throws -> TunSessionJournal {
         try lock.withLock {
@@ -381,7 +394,10 @@ public final class TunSessionJournalController: @unchecked Sendable {
             sessionIdentifier: sessionIdentifier,
             phase: .failed,
             cleanupRequired: true,
-            lastError: String(error.localizedDescription.prefix(4_096))
+            lastError: boundedUTF8Prefix(
+                error.localizedDescription,
+                maximumBytes: TunSessionJournal.maximumLastErrorBytes
+            )
         )
     }
 
@@ -398,9 +414,7 @@ public final class TunSessionJournalController: @unchecked Sendable {
         }
     }
 
-    public func recoverIfNeeded(
-        cleanup: (TunSessionJournal) throws -> Void = { _ in }
-    ) throws {
+    public func recoverIfNeeded(cleanup: (TunSessionJournal) throws -> Void) throws {
         try lock.withLock {
             guard var journal = try store.load(), journal.recoveryPending else { return }
             journal.phase = .restoring
@@ -420,7 +434,10 @@ public final class TunSessionJournalController: @unchecked Sendable {
                 journal.phase = .failed
                 journal.cleanupRequired = true
                 journal.updatedAt = max(now(), journal.createdAt)
-                journal.lastError = String(error.localizedDescription.prefix(4_096))
+                journal.lastError = boundedUTF8Prefix(
+                    error.localizedDescription,
+                    maximumBytes: TunSessionJournal.maximumLastErrorBytes
+                )
                 try? store.save(journal)
                 throw error
             }
@@ -458,4 +475,18 @@ public final class TunSessionJournalController: @unchecked Sendable {
             )
         }
     }
+}
+
+private func boundedUTF8Prefix(_ value: String, maximumBytes: Int) -> String {
+    guard value.utf8.count > maximumBytes else { return value }
+
+    var result = String()
+    var byteCount = 0
+    for character in value {
+        let characterBytes = String(character).utf8.count
+        guard byteCount + characterBytes <= maximumBytes else { break }
+        result.append(character)
+        byteCount += characterBytes
+    }
+    return result
 }

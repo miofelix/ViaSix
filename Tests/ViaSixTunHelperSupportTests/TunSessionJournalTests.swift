@@ -88,8 +88,58 @@ final class TunSessionJournalTests: XCTestCase {
             XCTAssertTrue(failed.recoveryPending)
             XCTAssertEqual(failed.lastError, "cleanup failed")
 
-            try controller.recoverIfNeeded()
+            try controller.recoverIfNeeded { _ in }
             XCTAssertNil(try controller.currentJournal())
+        }
+    }
+
+    func testUnavailableRecoveryBackendPreservesExistingJournalExactly() throws {
+        enum CleanupError: LocalizedError {
+            case failed
+
+            var errorDescription: String? { "original cleanup failure" }
+        }
+
+        try withStore { store, _ in
+            let controller = TunSessionJournalController(store: store)
+            let pending = try controller.begin(ownerUserIdentifier: UInt32(geteuid()))
+            try controller.markFailed(
+                sessionIdentifier: pending.sessionIdentifier,
+                error: CleanupError.failed
+            )
+            let before = try XCTUnwrap(controller.currentJournal())
+
+            XCTAssertThrowsError(
+                try controller.rejectPendingRecoveryWithoutBackend()
+            ) { error in
+                XCTAssertEqual(
+                    error as? TunSessionJournalError,
+                    .recoveryBackendUnavailable
+                )
+            }
+
+            XCTAssertEqual(try controller.currentJournal(), before)
+        }
+    }
+
+    func testFailureDescriptionIsBoundedByUTF8Bytes() throws {
+        struct CleanupError: LocalizedError {
+            let errorDescription: String?
+        }
+
+        try withStore { store, _ in
+            let controller = TunSessionJournalController(store: store)
+            let pending = try controller.begin(ownerUserIdentifier: UInt32(geteuid()))
+
+            try controller.markFailed(
+                sessionIdentifier: pending.sessionIdentifier,
+                error: CleanupError(errorDescription: String(repeating: "\u{1F6A7}", count: 2_000))
+            )
+
+            let failed = try XCTUnwrap(controller.currentJournal())
+            let lastError = try XCTUnwrap(failed.lastError)
+            XCTAssertEqual(lastError.utf8.count, 4_096)
+            XCTAssertEqual(lastError, String(repeating: "\u{1F6A7}", count: 1_024))
         }
     }
 

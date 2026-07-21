@@ -19,11 +19,10 @@ do {
 
     let journalController = TunSessionJournalController()
     do {
-        try journalController.recoverIfNeeded()
+        try journalController.rejectPendingRecoveryWithoutBackend()
     } catch {
-        // Keep the authenticated recovery endpoint available so the app can
-        // surface the failure and retry instead of making a stale journal
-        // impossible to repair without manual filesystem work.
+        // Keep serving probe/recovery so the app can surface the failure.
+        // The journal remains available for a future concrete cleanup backend.
         logger.error(
             "Initial TUN recovery failed: \(error.localizedDescription, privacy: .public)"
         )
