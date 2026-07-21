@@ -147,6 +147,7 @@ ViaSix 的可变数据默认保存在：
 - [架构说明](Docs/ARCHITECTURE.md)：模块、数据和进程边界
 - [发布指南](Docs/RELEASING.md)：签名、公证与发布检查
 - [地址列表来源](Docs/ADDRESS_SOURCES.md)：内置 IPv4 / IPv6 快照与更新流程
+- [Cloudflare Pages 部署资源](Server/CloudflarePages/README.md)：生成、上传和验证自建 VLESS Pages 服务及 ViaSix 客户端配置
 - [参与贡献](CONTRIBUTING.md)：协作流程、代码规范与验证要求
 - [变更日志](CHANGELOG.md)：未发布和已发布版本的重要变化
 - [安全政策](SECURITY.md)：私密漏洞报告和供应链约定

@@ -1,0 +1,17 @@
+proxies:
+  - name: ViaSix Cloudflare Pages
+    type: vless
+    server: "your-project.pages.dev"
+    port: 443
+    uuid: "11111111-1111-4111-8111-111111111111"
+    encryption: none
+    udp: false
+    tls: true
+    servername: "your-project.pages.dev"
+    client-fingerprint: chrome
+    skip-cert-verify: false
+    network: ws
+    ws-opts:
+      path: "/?ed=2560"
+      headers:
+        Host: "your-project.pages.dev"

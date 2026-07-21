@@ -1,7 +1,7 @@
 SWIFT := swift
 SWIFT_SOURCES := Sources Tests Package.swift
 APP_BUNDLE := $(CURDIR)/dist/ViaSix.app
-SHELL_SCRIPTS := $(wildcard Scripts/*.sh)
+SHELL_SCRIPTS := $(shell find Scripts Server -type f -name '*.sh' 2>/dev/null | LC_ALL=C sort)
 
 .PHONY: \
 	build \
