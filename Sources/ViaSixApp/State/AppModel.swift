@@ -119,6 +119,9 @@ final class AppModel {
             }
         }
         if effectiveNetworkAccessUsesTun, !canUseTunMode {
+            if case .unavailable(let detail) = state.tun.servicePhase {
+                return detail
+            }
             return "虚拟网卡模式需要先准备 TUN 服务"
         }
         return nil

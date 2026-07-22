@@ -21,8 +21,12 @@ public enum TunHelperConstants {
         "/Library/LaunchDaemons/\(launchDaemonPlistName)"
     public static let errorDomain = "com.felix.viasix.tun-helper.error"
     public static let protocolVersion = 2
-    public static let implementationVersion = 5
-    public static let minimumCompatibleImplementationVersion = 5
+    // Increment this compatibility floor whenever helper-side validation or
+    // canonical configuration rebuilding changes, even if the XPC selectors
+    // remain stable. This prevents a newer app from sending payloads to an
+    // older helper that interprets the same envelope differently.
+    public static let implementationVersion = 6
+    public static let minimumCompatibleImplementationVersion = 6
 }
 
 public struct TunHelperFeature: OptionSet, Hashable, Sendable {

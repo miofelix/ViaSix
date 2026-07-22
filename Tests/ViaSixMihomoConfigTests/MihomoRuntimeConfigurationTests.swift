@@ -729,6 +729,57 @@ final class MihomoRuntimeConfigurationTests: XCTestCase {
         )
     }
 
+    func testPrivilegedEnvelopeRoundTripsSelectedIPVLESSWebSocketProfile() throws {
+        let server = try MihomoServerConfiguration(
+            data: Data(
+                """
+                x-viasix:
+                  version: 1
+                  primary-server: selected-ip
+                proxies:
+                  - name: ViaSix Cloudflare Pages
+                    type: vless
+                    port: 443
+                    uuid: 11111111-1111-4111-8111-111111111111
+                    encryption: none
+                    udp: false
+                    tls: true
+                    servername: origin.example
+                    client-fingerprint: chrome
+                    skip-cert-verify: false
+                    network: ws
+                    ws-opts:
+                      path: /?ed=2560
+                      headers:
+                        Host: origin.example
+                """.utf8
+            )
+        )
+        let options = MihomoRuntimeOptions(
+            listenAddress: "127.0.0.1",
+            mixedPort: 11_451,
+            routingMode: .rule,
+            logLevel: .warning,
+            ipv6Enabled: true,
+            udpEnabled: true,
+            sniffingEnabled: true,
+            bypassPrivateNetworks: true,
+            externalController: MihomoExternalControllerConfiguration(
+                port: 9_090,
+                secret: "controller-secret"
+            ),
+            tun: MihomoTunConfiguration()
+        )
+
+        let envelope = try MihomoPrivilegedEnvelope.encode(
+            server: server,
+            options: options,
+            replacingPrimaryServerWith: "2606:4700::53"
+        )
+
+        XCTAssertNoThrow(try MihomoPrivilegedEnvelope.decodeRuntimePlan(from: envelope))
+    }
+
     func testPrivilegedEnvelopeRejectsRawYAMLBadSchemaAndNonCanonicalPayload() throws {
         XCTAssertThrowsError(
             try MihomoPrivilegedEnvelope.decodeRuntimeConfiguration(
@@ -826,6 +877,33 @@ final class MihomoRuntimeConfigurationTests: XCTestCase {
         options["tun"] = tun
         unknownTunOption["options"] = options
         try assertRejectedUnknownField(unknownTunOption)
+    }
+
+    func testPrivilegedEnvelopeRejectsPreviousCanonicalRebuildVersion() throws {
+        let envelope = try MihomoPrivilegedEnvelope.encode(
+            server: try supportedProtocolsServer(),
+            options: privilegedOptions(),
+            replacingPrimaryServerWith: "2606:4700::55"
+        )
+        var root = try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: envelope, format: nil)
+                as? [String: Any]
+        )
+        root["schemaVersion"] = 1
+        let previousVersion = try PropertyListSerialization.data(
+            fromPropertyList: root,
+            format: .binary,
+            options: 0
+        )
+
+        XCTAssertThrowsError(
+            try MihomoPrivilegedEnvelope.decodeRuntimeConfiguration(from: previousVersion)
+        ) { error in
+            XCTAssertEqual(
+                error as? MihomoConfigurationError,
+                .unsupportedPrivilegedEnvelopeVersion(1)
+            )
+        }
     }
 
     func testPrivilegedEnvelopeRejectsOversizedInputBeforeDecoding() {

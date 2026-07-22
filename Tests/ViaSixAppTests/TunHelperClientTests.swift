@@ -26,7 +26,7 @@ final class TunHelperClientTests: XCTestCase {
     func testOutdatedImplementationIsRejectedBeforeAnyMutation() async throws {
         let remote = try FakeTunHelperRemote(
             protocolVersion: TunHelperConstants.protocolVersion,
-            implementationVersion: 4
+            implementationVersion: 5
         )
         let factory = FakeTunHelperConnectionFactory(remote: remote)
         let client = TunHelperClient(connectionFactory: { factory.makeConnection() })
@@ -37,7 +37,7 @@ final class TunHelperClientTests: XCTestCase {
         } catch {
             XCTAssertEqual(
                 error as? TunHelperClientError,
-                .incompatibleImplementation(minimum: 5, actual: 4)
+                .incompatibleImplementation(minimum: 6, actual: 5)
             )
         }
 

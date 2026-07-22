@@ -100,8 +100,8 @@ final class CodeSigningRequirementTests: XCTestCase {
 
     func testProtocolConstantsRemainStable() {
         XCTAssertEqual(TunHelperConstants.protocolVersion, 2)
-        XCTAssertEqual(TunHelperConstants.implementationVersion, 5)
-        XCTAssertEqual(TunHelperConstants.minimumCompatibleImplementationVersion, 5)
+        XCTAssertEqual(TunHelperConstants.implementationVersion, 6)
+        XCTAssertEqual(TunHelperConstants.minimumCompatibleImplementationVersion, 6)
         XCTAssertEqual(TunLocalInstallationPolicy.currentSchemaVersion, 2)
         XCTAssertEqual(
             TunHelperConstants.launchDaemonPlistName,

@@ -15,7 +15,10 @@ public struct MihomoPrivilegedRuntimePlan: Equatable, Sendable {
 /// must decode it, repeat the privileged allowlist projection, and generate a
 /// fresh runtime document before validation or launch.
 public enum MihomoPrivilegedEnvelope {
-    public static let schemaVersion = 1
+    // Version 2 preserves a proxy's explicit UDP restriction during the
+    // helper's second allowlist projection. Version 1 helpers rebuilt such a
+    // proxy differently and rejected an otherwise valid envelope.
+    public static let schemaVersion = 2
     public static let maximumBytes = 8 * 1_024 * 1_024
 
     public static func encode(
