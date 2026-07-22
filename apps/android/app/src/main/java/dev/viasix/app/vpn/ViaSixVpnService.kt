@@ -5,7 +5,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
-import android.net.ProxyInfo
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
@@ -13,6 +12,7 @@ import android.util.Log
 import dev.viasix.app.MainActivity
 import dev.viasix.app.mihomo.MihomoInstaller
 import dev.viasix.app.mihomo.MihomoProcess
+import dev.viasix.app.tun.Tun2SocksEngine
 import dev.viasix.core.projection.MihomoProjection
 import dev.viasix.core.projection.ProjectError
 import dev.viasix.core.projection.ProjectOptions
@@ -22,13 +22,16 @@ import java.util.UUID
 import kotlin.concurrent.thread
 
 /**
- * Android network path: projects profile → starts mihomo → establishes a VPN
- * session that publishes an HTTP/HTTPS proxy (API 29+) for apps using the VPN
- * network. Full packet TUN into mihomo is a later step.
+ * Full-path Android network access:
+ * 1) Project profile → start user-space mihomo (mixed/SOCKS on loopback)
+ * 2) Establish VPN with default routes
+ * 3) Exclude this app UID from the VPN (prevents routing loops for mihomo)
+ * 4) Userspace IPv4 TCP→SOCKS + DNS forwarder (Tun2SocksEngine)
  */
 class ViaSixVpnService : VpnService() {
     private var tunnel: ParcelFileDescriptor? = null
     private var mihomo: MihomoProcess? = null
+    private var tunEngine: Tun2SocksEngine? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
@@ -40,12 +43,13 @@ class ViaSixVpnService : VpnService() {
         val selectedIp = intent?.getStringExtra(EXTRA_SELECTED_IP)
         val modeWire = intent?.getStringExtra(EXTRA_MODE) ?: "rule"
         val mode = RoutingMode.parse(modeWire) ?: RoutingMode.RULE
+        val fullTunnel = intent?.getBooleanExtra(EXTRA_FULL_TUNNEL, true) ?: true
 
         startForeground(NOTIFICATION_ID, buildNotification("Starting ViaSix…"))
 
         thread(name = "viasix-vpn-start", isDaemon = true) {
             try {
-                startStack(profile, selectedIp, mode)
+                startStack(profile, selectedIp, mode, fullTunnel)
             } catch (error: Exception) {
                 Log.e(TAG, "start failed", error)
                 updateNotification("Start failed: ${error.message}")
@@ -55,7 +59,12 @@ class ViaSixVpnService : VpnService() {
         return START_STICKY
     }
 
-    private fun startStack(profile: String, selectedIp: String?, mode: RoutingMode) {
+    private fun startStack(
+        profile: String,
+        selectedIp: String?,
+        mode: RoutingMode,
+        fullTunnel: Boolean,
+    ) {
         val secret = UUID.randomUUID().toString().replace("-", "")
         val options =
             ProjectOptions(
@@ -83,9 +92,8 @@ class ViaSixVpnService : VpnService() {
         process.start(yaml)
         mihomo = process
 
-        // VPN session for system integration + HTTP proxy (Q+).
-        // Intentionally avoid 0.0.0.0/0 routes until packet path is implemented,
-        // so we don't black-hole traffic when mihomo is only a local mixed proxy.
+        // Exclude our UID so mihomo outbound sockets use the underlying network
+        // instead of looping into this VPN interface.
         val builder =
             Builder()
                 .setSession("ViaSix")
@@ -94,9 +102,21 @@ class ViaSixVpnService : VpnService() {
                 .addDnsServer("1.1.1.1")
                 .addDisallowedApplication(packageName)
 
+        if (fullTunnel) {
+            builder.addRoute("0.0.0.0", 0)
+            // IPv6 default route needs an IPv6 address on the interface.
+            try {
+                builder.addAddress("fd00:10:10::2", 128)
+                builder.addRoute("::", 0)
+            } catch (error: Exception) {
+                Log.w(TAG, "IPv6 route not applied: ${error.message}")
+            }
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Also publish proxy metadata for proxy-aware apps.
             builder.setHttpProxy(
-                ProxyInfo.buildDirectProxy(
+                android.net.ProxyInfo.buildDirectProxy(
                     "127.0.0.1",
                     MIXED_PORT,
                     listOf("localhost", "127.0.0.1", "::1"),
@@ -105,11 +125,26 @@ class ViaSixVpnService : VpnService() {
         }
 
         tunnel?.close()
-        tunnel = builder.establish()
-            ?: throw IllegalStateException("VpnService.Builder.establish() returned null")
+        val established =
+            builder.establish()
+                ?: throw IllegalStateException("VpnService.Builder.establish() returned null")
+        tunnel = established
 
-        updateNotification("Mihomo running · mixed 127.0.0.1:$MIXED_PORT")
-        Log.i(TAG, "stack ready; controller 127.0.0.1:$CONTROLLER_PORT")
+        if (fullTunnel) {
+            val engine =
+                Tun2SocksEngine(
+                    vpnService = this,
+                    tun = established,
+                    socksHost = "127.0.0.1",
+                    socksPort = MIXED_PORT,
+                )
+            engine.start()
+            tunEngine = engine
+            updateNotification("Full tunnel · mihomo mixed :$MIXED_PORT")
+        } else {
+            updateNotification("Proxy VPN · mihomo mixed :$MIXED_PORT")
+        }
+        Log.i(TAG, "stack ready fullTunnel=$fullTunnel")
     }
 
     override fun onDestroy() {
@@ -119,6 +154,12 @@ class ViaSixVpnService : VpnService() {
 
     private fun shutdownAll(reason: String) {
         Log.i(TAG, "shutdown: $reason")
+        try {
+            tunEngine?.stop()
+        } catch (error: Exception) {
+            Log.w(TAG, "tun stop: ${error.message}")
+        }
+        tunEngine = null
         try {
             mihomo?.stop()
         } catch (error: Exception) {
@@ -178,6 +219,7 @@ class ViaSixVpnService : VpnService() {
         const val EXTRA_PROFILE = "profile"
         const val EXTRA_SELECTED_IP = "selected_ip"
         const val EXTRA_MODE = "mode"
+        const val EXTRA_FULL_TUNNEL = "full_tunnel"
         const val MIXED_PORT = 11451
         const val CONTROLLER_PORT = 9090
 

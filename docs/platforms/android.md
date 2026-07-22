@@ -12,7 +12,7 @@
 | 投影 | `:core` JVM 库，contracts 对齐 |
 | 虚拟网卡 | `ViaSixVpnService`（`VpnService`） |
 | 代理内核 | 预编译 mihomo（assets `mihomo-arm64`，`fetch-mihomo.mjs`） |
-| 网络接入 | VpnService + HTTP 代理（非全量 TUN） |
+| 网络接入 | VpnService 全量路由 + 用户态 TCP/DNS 转发；可选仅 HTTP 代理 |
 | 系统代理 | 不支持 |
 
 ## 验证

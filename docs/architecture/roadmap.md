@@ -29,7 +29,8 @@
 - [x] `assembleDebug` APK 可构建
 - [x] mihomo 资产拉取脚本
 - [x] 嵌入 mihomo 用户态 + VPN HTTP 代理（`setHttpProxy`）
-- [ ] 全量路由 / TUN fd 封包转发
+- [x] 全量路由 + 用户态 IPv4 TCP/DNS 转发（`Tun2SocksEngine`）
+- [ ] 生产级 tun2socks（hev/native）与完整 UDP/IPv6
 - [ ] 无系统代理（产品矩阵已约定）
 
 ## 阶段 3 — 共享实现（按需）

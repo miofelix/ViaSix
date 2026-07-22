@@ -22,7 +22,10 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.Alignment
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,9 +73,10 @@ class MainActivity : ComponentActivity() {
                     var selectedIp by remember { mutableStateOf("2001:db8::1") }
                     var mode by remember { mutableStateOf(RoutingMode.RULE) }
                     var modeExpanded by remember { mutableStateOf(false) }
+                    var fullTunnel by remember { mutableStateOf(true) }
                     var preview by remember { mutableStateOf("# 点击生成运行配置") }
                     var status by remember {
-                        mutableStateOf("Android · 投影 + mihomo 用户态 + VPN HTTP 代理")
+                        mutableStateOf("Android · 投影 + mihomo + 全量隧道(TCP/DNS)")
                     }
 
                     fun buildStartIntent(): Intent =
@@ -80,6 +84,7 @@ class MainActivity : ComponentActivity() {
                             .putExtra(ViaSixVpnService.EXTRA_PROFILE, profile)
                             .putExtra(ViaSixVpnService.EXTRA_SELECTED_IP, selectedIp)
                             .putExtra(ViaSixVpnService.EXTRA_MODE, mode.wire)
+                            .putExtra(ViaSixVpnService.EXTRA_FULL_TUNNEL, fullTunnel)
 
                     Column(
                         modifier =
@@ -168,6 +173,19 @@ class MainActivity : ComponentActivity() {
                         ) {
                             Text("生成运行配置")
                         }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Switch(checked = fullTunnel, onCheckedChange = { fullTunnel = it })
+                            Text(
+                                if (fullTunnel) {
+                                    "全量隧道（IPv4 TCP→SOCKS + DNS）"
+                                } else {
+                                    "仅 HTTP 代理 VPN（无默认路由）"
+                                },
+                            )
+                        }
                         Button(
                             onClick = {
                                 val intent = buildStartIntent()
@@ -197,8 +215,8 @@ class MainActivity : ComponentActivity() {
                         }
                         Text(status, style = MaterialTheme.typography.bodySmall)
                         Text(
-                            "说明：当前通过 VpnService.setHttpProxy 发布 mixed 代理；" +
-                                "未做 0.0.0.0/0 全量路由，避免未接 TUN 时断网。需先 node scripts/fetch-mihomo.mjs。",
+                            "全量隧道：默认路由 + 用户态转发（TCP via mihomo SOCKS，DNS protect 出站）。" +
+                                "本应用 UID 排除在 VPN 外以防环路。需 arm64 + fetch-mihomo.mjs。",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Text(preview, style = MaterialTheme.typography.bodySmall)
