@@ -1,6 +1,8 @@
+mod activity_log;
 mod controller;
 mod exit_ip;
 mod prefs;
+mod profile;
 mod projection;
 mod runtime;
 mod speed_test;
@@ -8,18 +10,23 @@ mod system_proxy;
 mod traffic;
 mod virtual_network;
 
+use activity_log::{ActivityEntry, ActivityLog};
 use controller::ControllerHealth;
 use parking_lot::Mutex;
 use prefs::{PrefsStore, SessionPrefs};
-use projection::{ProjectOptions, RoutingMode};
-use runtime::{CoreStatus, CoreRuntime, SharedCore};
+use profile::ProfileSummary;
+use projection::{ProjectOptions, RoutingMode, TunOptions};
+use runtime::{CoreRuntime, CoreStatus, SharedCore};
 use speed_test::{SpeedTestRequest, SpeedTestResponse};
 use std::path::PathBuf;
 use std::sync::Arc;
 use system_proxy::{ProxyEndpoint, SystemProxyManager, SystemProxyStatus};
 use traffic::{TrafficSampler, TrafficSnapshot};
-use tauri::{AppHandle, Manager, State};
-use projection::TunOptions;
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Emitter, Manager, RunEvent, State, WindowEvent,
+};
 use virtual_network::{
     stage_wintun_beside_mihomo, VirtualNetworkCapability, VirtualNetworkManager,
     VirtualNetworkStatus,
@@ -31,28 +38,73 @@ struct AppServices {
     prefs: PrefsStore,
     virtual_network: Mutex<VirtualNetworkManager>,
     traffic: Mutex<TrafficSampler>,
+    activity: Mutex<ActivityLog>,
     default_mixed_port: u16,
     data_dir: PathBuf,
 }
 
 type SharedServices = Arc<AppServices>;
 
+fn push_log(
+    services: &AppServices,
+    app: Option<&AppHandle>,
+    level: &str,
+    source: &str,
+    message: impl Into<String>,
+) {
+    let entry = services.activity.lock().push(level, source, message);
+    if let Some(app) = app {
+        let _ = app.emit("activity-log", &entry);
+    }
+}
+
+fn apply_ports(options: &mut ProjectOptions, mixed_port: Option<u16>, controller_port: Option<u16>) {
+    if let Some(port) = mixed_port.filter(|p| *p > 0) {
+        options.mixed_port = port;
+    }
+    if let Some(port) = controller_port.filter(|p| *p > 0) {
+        options.controller_port = port;
+    }
+}
+
 #[tauri::command]
 fn project_runtime_config(
     profile_yaml: String,
     selected_address: Option<String>,
     routing_mode: String,
+    mixed_port: Option<u16>,
+    controller_port: Option<u16>,
 ) -> Result<String, String> {
     let mode = RoutingMode::parse(&routing_mode).ok_or_else(|| "invalid routingMode".to_string())?;
     let mut options = ProjectOptions::default();
     options.routing_mode = mode;
     options.selected_address = selected_address;
+    apply_ports(&mut options, mixed_port, controller_port);
     let profile = if mode == RoutingMode::Direct {
         None
     } else {
         Some(profile_yaml.as_str())
     };
     projection::project_runtime_yaml(profile, &options).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn summarize_profile(profile_yaml: String) -> ProfileSummary {
+    profile::summarize_profile_yaml(&profile_yaml)
+}
+
+#[tauri::command]
+fn read_text_file(path: String) -> Result<String, String> {
+    let p = PathBuf::from(&path);
+    if !p.is_file() {
+        return Err(format!("file not found: {path}"));
+    }
+    // Basic guard: only allow reasonable text sizes for profile YAML.
+    let meta = std::fs::metadata(&p).map_err(|e| e.to_string())?;
+    if meta.len() > 2 * 1024 * 1024 {
+        return Err("file too large (max 2 MiB)".into());
+    }
+    std::fs::read_to_string(&p).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -68,28 +120,68 @@ fn start_core(
     selected_address: Option<String>,
     routing_mode: String,
     enable_system_proxy: Option<bool>,
+    mixed_port: Option<u16>,
+    controller_port: Option<u16>,
 ) -> Result<CoreStatus, String> {
     let mode = RoutingMode::parse(&routing_mode).ok_or_else(|| "invalid routingMode".to_string())?;
     let mut options = ProjectOptions::default();
     options.routing_mode = mode;
     options.selected_address = selected_address;
+    apply_ports(&mut options, mixed_port, controller_port);
 
     let want_tun = services.virtual_network.lock().is_enabled();
     if want_tun {
         options.tun = Some(TunOptions::default());
     }
 
-    let bin = resolve_mihomo_binary(&app)?;
-    if want_tun {
-        let sidecar = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("sidecar");
-        stage_wintun_beside_mihomo(&bin, &sidecar)?;
-    }
+    // Project first so failures never leave a half-started process.
     let profile = if mode == RoutingMode::Direct {
         None
     } else {
         Some(profile_yaml.as_str())
     };
-    let mut status = services.core.start(profile, &options, &bin)?;
+    let _preview = projection::project_runtime_yaml(profile, &options).map_err(|e| {
+        let msg = e.to_string();
+        push_log(
+            &services,
+            Some(&app),
+            "error",
+            "config",
+            format!("投影失败: {msg}"),
+        );
+        msg
+    })?;
+
+    let bin = resolve_mihomo_binary(&app).map_err(|e| {
+        push_log(&services, Some(&app), "error", "core", e.clone());
+        e
+    })?;
+    if want_tun {
+        let sidecar = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("sidecar");
+        stage_wintun_beside_mihomo(&bin, &sidecar).map_err(|e| {
+            push_log(&services, Some(&app), "error", "network", e.clone());
+            e
+        })?;
+    }
+
+    push_log(
+        &services,
+        Some(&app),
+        "info",
+        "core",
+        format!(
+            "正在启动 Mihomo (mode={}, mixed={}:{}, controller={})",
+            mode.as_str(),
+            options.listen_address,
+            options.mixed_port,
+            options.controller_port
+        ),
+    );
+
+    let mut status = services.core.start(profile, &options, &bin).map_err(|e| {
+        push_log(&services, Some(&app), "error", "core", e.clone());
+        e
+    })?;
     services.traffic.lock().reset();
     if want_tun {
         status.message = format!(
@@ -106,29 +198,62 @@ fn start_core(
         match services.system_proxy.enable(&endpoint) {
             Ok(proxy_status) => {
                 status.message = format!("{}; {}", status.message, proxy_status.message);
+                push_log(
+                    &services,
+                    Some(&app),
+                    "info",
+                    "proxy",
+                    proxy_status.message.clone(),
+                );
             }
             Err(err) => {
                 status.message =
                     format!("{}; system proxy not applied: {err}", status.message);
+                push_log(
+                    &services,
+                    Some(&app),
+                    "warn",
+                    "proxy",
+                    format!("系统代理未应用: {err}"),
+                );
             }
         }
     }
 
+    push_log(
+        &services,
+        Some(&app),
+        if status.running { "success" } else { "warn" },
+        "core",
+        status.message.clone(),
+    );
     Ok(status)
 }
 
 #[tauri::command]
-fn stop_core(services: State<'_, SharedServices>) -> Result<CoreStatus, String> {
-    let status = services.core.stop()?;
+fn stop_core(app: AppHandle, services: State<'_, SharedServices>) -> Result<CoreStatus, String> {
+    let status = services.core.stop().map_err(|e| {
+        push_log(&services, Some(&app), "error", "core", e.clone());
+        e
+    })?;
     services.traffic.lock().reset();
     let proxy_note = match services.system_proxy.disable() {
-        Ok(s) => s.message,
-        Err(err) => format!("system proxy restore failed: {err}"),
+        Ok(s) => {
+            push_log(&services, Some(&app), "info", "proxy", s.message.clone());
+            s.message
+        }
+        Err(err) => {
+            let msg = format!("system proxy restore failed: {err}");
+            push_log(&services, Some(&app), "warn", "proxy", msg.clone());
+            msg
+        }
     };
+    let message = format!("{}; {proxy_note}", status.message);
+    push_log(&services, Some(&app), "info", "core", message.clone());
     Ok(CoreStatus {
         running: status.running,
         pid: status.pid,
-        message: format!("{}; {proxy_note}", status.message),
+        message,
         controller_port: status.controller_port,
     })
 }
@@ -140,12 +265,13 @@ fn system_proxy_status(services: State<'_, SharedServices>) -> SystemProxyStatus
 
 #[tauri::command]
 fn set_system_proxy(
+    app: AppHandle,
     services: State<'_, SharedServices>,
     enabled: bool,
     host: Option<String>,
     port: Option<u16>,
 ) -> Result<SystemProxyStatus, String> {
-    if enabled {
+    let result = if enabled {
         let endpoint = ProxyEndpoint {
             host: host.unwrap_or_else(|| "127.0.0.1".into()),
             port: port.unwrap_or(services.default_mixed_port),
@@ -153,12 +279,48 @@ fn set_system_proxy(
         services.system_proxy.enable(&endpoint)
     } else {
         services.system_proxy.disable()
+    };
+    match &result {
+        Ok(status) => push_log(&services, Some(&app), "info", "proxy", status.message.clone()),
+        Err(err) => push_log(
+            &services,
+            Some(&app),
+            "error",
+            "proxy",
+            format!("系统代理操作失败: {err}"),
+        ),
     }
+    result
 }
 
 #[tauri::command]
-async fn detect_exit_ip(endpoints: Option<Vec<String>>) -> Result<exit_ip::ExitIpResult, String> {
-    exit_ip::detect_exit_ip(endpoints).await
+async fn detect_exit_ip(
+    app: AppHandle,
+    services: State<'_, SharedServices>,
+    endpoints: Option<Vec<String>>,
+) -> Result<exit_ip::ExitIpResult, String> {
+    match exit_ip::detect_exit_ip(endpoints).await {
+        Ok(result) => {
+            push_log(
+                &services,
+                Some(&app),
+                "success",
+                "network",
+                format!("{} ({})", result.message, result.source),
+            );
+            Ok(result)
+        }
+        Err(err) => {
+            push_log(
+                &services,
+                Some(&app),
+                "error",
+                "network",
+                format!("出口检测失败: {err}"),
+            );
+            Err(err)
+        }
+    }
 }
 
 #[tauri::command]
@@ -167,12 +329,40 @@ fn run_speed_test(
     services: State<'_, SharedServices>,
     request: SpeedTestRequest,
 ) -> Result<SpeedTestResponse, String> {
+    push_log(
+        &services,
+        Some(&app),
+        "info",
+        "speed",
+        "开始 CFST 测速…",
+    );
     let bin = resolve_bundled_binary(&app, "viasix-cfst").or_else(|_| {
         let sidecar = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("sidecar");
         speed_test::resolve_cfst_binary(&sidecar)
     })?;
     let work = services.data_dir.join("cfst");
-    speed_test::run_speed_test(&bin, &work, &request)
+    match speed_test::run_speed_test(&bin, &work, &request) {
+        Ok(response) => {
+            push_log(
+                &services,
+                Some(&app),
+                "success",
+                "speed",
+                response.message.clone(),
+            );
+            Ok(response)
+        }
+        Err(err) => {
+            push_log(
+                &services,
+                Some(&app),
+                "error",
+                "speed",
+                format!("测速失败: {err}"),
+            );
+            Err(err)
+        }
+    }
 }
 
 #[tauri::command]
@@ -194,16 +384,51 @@ fn app_version() -> String {
 }
 
 #[tauri::command]
-async fn probe_controller(services: State<'_, SharedServices>) -> Result<ControllerHealth, String> {
+fn data_dir_path(services: State<'_, SharedServices>) -> String {
+    services.data_dir.display().to_string()
+}
+
+#[tauri::command]
+fn open_data_dir(services: State<'_, SharedServices>) -> Result<String, String> {
+    // Return path so the frontend can open it via shell plugin (opener path).
+    Ok(services.data_dir.display().to_string())
+}
+
+#[tauri::command]
+fn list_activity_logs(services: State<'_, SharedServices>) -> Vec<ActivityEntry> {
+    services.activity.lock().list()
+}
+
+#[tauri::command]
+fn clear_activity_logs(app: AppHandle, services: State<'_, SharedServices>) {
+    services.activity.lock().clear();
+    push_log(&services, Some(&app), "info", "app", "活动日志已清空");
+}
+
+#[tauri::command]
+async fn probe_controller(
+    app: AppHandle,
+    services: State<'_, SharedServices>,
+) -> Result<ControllerHealth, String> {
     let Some((port, secret)) = services.core.controller_credentials() else {
-        return Ok(ControllerHealth {
+        let health = ControllerHealth {
             ok: false,
             endpoint: String::new(),
             message: "Mihomo is not running".into(),
             version: None,
-        });
+        };
+        push_log(&services, Some(&app), "warn", "core", health.message.clone());
+        return Ok(health);
     };
-    Ok(controller::probe("127.0.0.1", port, &secret).await)
+    let health = controller::probe("127.0.0.1", port, &secret).await;
+    push_log(
+        &services,
+        Some(&app),
+        if health.ok { "success" } else { "warn" },
+        "core",
+        health.message.clone(),
+    );
+    Ok(health)
 }
 
 #[tauri::command]
@@ -216,11 +441,11 @@ async fn sample_traffic(services: State<'_, SharedServices>) -> Result<TrafficSn
             down_bps: 0,
             upload_total: 0,
             download_total: 0,
+            memory_in_use: 0,
             message: "Mihomo is not running".into(),
         });
     };
 
-    // Take sampler state, await without holding the mutex, then put it back.
     let mut sampler = {
         let mut guard = services.traffic.lock();
         std::mem::take(&mut *guard)
@@ -242,15 +467,29 @@ fn virtual_network_status(services: State<'_, SharedServices>) -> VirtualNetwork
 
 #[tauri::command]
 fn set_virtual_network(
+    app: AppHandle,
     services: State<'_, SharedServices>,
     enabled: bool,
 ) -> Result<VirtualNetworkStatus, String> {
     let mut mgr = services.virtual_network.lock();
-    if enabled {
-        mgr.enable()
-    } else {
-        mgr.disable()
+    let result = if enabled { mgr.enable() } else { mgr.disable() };
+    match &result {
+        Ok(status) => push_log(
+            &services,
+            Some(&app),
+            "info",
+            "network",
+            status.message.clone(),
+        ),
+        Err(err) => push_log(
+            &services,
+            Some(&app),
+            "error",
+            "network",
+            format!("虚拟网卡切换失败: {err}"),
+        ),
     }
+    result
 }
 
 fn resolve_mihomo_binary(app: &AppHandle) -> Result<PathBuf, String> {
@@ -309,28 +548,159 @@ fn default_data_dir(app: &AppHandle) -> PathBuf {
         .unwrap_or_else(|_| std::env::temp_dir().join("viasix-windows"))
 }
 
+fn shutdown_services(services: &AppServices) {
+    let _ = services.core.stop();
+    services.traffic.lock().reset();
+    let _ = services.system_proxy.disable();
+    push_log(services, None, "info", "app", "应用退出：已停止内核并尝试恢复系统代理");
+}
+
+fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
+    let show_i = MenuItem::with_id(app, "show", "显示 ViaSix", true, None::<&str>)?;
+    let start_i = MenuItem::with_id(app, "start", "启动代理", true, None::<&str>)?;
+    let stop_i = MenuItem::with_id(app, "stop", "停止代理", true, None::<&str>)?;
+    let quit_i = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show_i, &start_i, &stop_i, &quit_i])?;
+
+    let icon = app
+        .default_window_icon()
+        .cloned()
+        .ok_or_else(|| tauri::Error::FailedToReceiveMessage)?;
+
+    TrayIconBuilder::with_id("main")
+        .icon(icon)
+        .menu(&menu)
+        .tooltip("ViaSix")
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => show_main_window(app),
+            "start" => {
+                // Frontend owns full start payload; tray just focuses UI for now
+                // and emits a request event.
+                let _ = app.emit("tray-action", "start");
+                show_main_window(app);
+            }
+            "stop" => {
+                if let Some(services) = app.try_state::<SharedServices>() {
+                    match services.core.stop() {
+                        Ok(status) => {
+                            services.traffic.lock().reset();
+                            let _ = services.system_proxy.disable();
+                            push_log(
+                                services.inner(),
+                                Some(app),
+                                "info",
+                                "core",
+                                format!("托盘停止: {}", status.message),
+                            );
+                            let _ = app.emit("core-stopped", status);
+                        }
+                        Err(err) => push_log(
+                            services.inner(),
+                            Some(app),
+                            "error",
+                            "core",
+                            format!("托盘停止失败: {err}"),
+                        ),
+                    }
+                }
+            }
+            "quit" => {
+                if let Some(services) = app.try_state::<SharedServices>() {
+                    shutdown_services(services.inner());
+                }
+                app.exit(0);
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        })
+        .build(app)?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let data = default_data_dir(app.handle());
             let work = data.join("runtime");
             let sidecar = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("sidecar");
+            let defaults = ProjectOptions::default();
             let services = Arc::new(AppServices {
                 core: Arc::new(CoreRuntime::new(work)),
                 system_proxy: SystemProxyManager::new(data.clone()),
                 prefs: PrefsStore::new(data.clone()),
                 virtual_network: Mutex::new(VirtualNetworkManager::new(sidecar)),
                 traffic: Mutex::new(TrafficSampler::default()),
-                default_mixed_port: ProjectOptions::default().mixed_port,
+                activity: Mutex::new(ActivityLog::new(800)),
+                default_mixed_port: defaults.mixed_port,
                 data_dir: data,
             });
+            // Recover any leftover system proxy from a previous crash.
+            let recovered = services.system_proxy.disable();
+            if let Ok(status) = recovered {
+                if status.message.contains("restored") || status.message.contains("cleared") {
+                    push_log(
+                        &services,
+                        None,
+                        "info",
+                        "proxy",
+                        format!("启动恢复: {}", status.message),
+                    );
+                }
+            }
+            push_log(&services, None, "info", "app", "ViaSix Windows 后端已就绪");
             app.manage(services);
+
+            if let Err(err) = setup_tray(app.handle()) {
+                eprintln!("tray setup failed: {err}");
+            }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let close_to_tray = window
+                    .app_handle()
+                    .try_state::<SharedServices>()
+                    .map(|s| s.prefs.load().close_to_tray.unwrap_or(true))
+                    .unwrap_or(true);
+                if close_to_tray {
+                    api.prevent_close();
+                    let _ = window.hide();
+                    if let Some(services) = window.app_handle().try_state::<SharedServices>() {
+                        push_log(
+                            services.inner(),
+                            Some(window.app_handle()),
+                            "info",
+                            "app",
+                            "窗口已隐藏到托盘（关闭时退出可在设置中关闭）",
+                        );
+                    }
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             project_runtime_config,
+            summarize_profile,
+            read_text_file,
             core_status,
             start_core,
             stop_core,
@@ -341,12 +711,23 @@ pub fn run() {
             load_session_prefs,
             save_session_prefs,
             app_version,
+            data_dir_path,
+            open_data_dir,
+            list_activity_logs,
+            clear_activity_logs,
             probe_controller,
             sample_traffic,
             virtual_network_capability,
             virtual_network_status,
             set_virtual_network
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running ViaSix Windows");
+        .build(tauri::generate_context!())
+        .expect("error while building ViaSix Windows")
+        .run(|app_handle, event| {
+            if let RunEvent::Exit = event {
+                if let Some(services) = app_handle.try_state::<SharedServices>() {
+                    shutdown_services(services.inner());
+                }
+            }
+        });
 }

@@ -43,6 +43,27 @@ export type TrafficSnapshot = {
   downBps: number;
   uploadTotal: number;
   downloadTotal: number;
+  memoryInUse?: number;
+  message: string;
+};
+
+export type BackendProfileSummary = {
+  primaryName: string | null;
+  primaryType: string | null;
+  proxyCount: number;
+  hasXviasix: boolean;
+  looksLikeExample: boolean;
+  hasInlineProxy: boolean;
+  notes: string[];
+  ok: boolean;
+  error: string | null;
+};
+
+export type ActivityEntry = {
+  id: number;
+  at: number;
+  level: string;
+  source: string;
   message: string;
 };
 
@@ -106,6 +127,9 @@ export type SessionPrefs = {
   speedPort?: number | null;
   exitIpMode?: string | null;
   lastSection?: string | null;
+  mixedPort?: number | null;
+  controllerPort?: number | null;
+  closeToTray?: boolean | null;
 };
 
 export type NoticeStyle = "info" | "success" | "error";

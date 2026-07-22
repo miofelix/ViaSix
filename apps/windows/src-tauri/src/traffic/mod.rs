@@ -1,4 +1,4 @@
-//! Poll Mihomo `/connections` totals and derive instantaneous rates.
+//! Poll Mihomo `/connections` totals (and optional `/memory`) for live stats.
 
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
@@ -11,6 +11,7 @@ pub struct TrafficSnapshot {
     pub down_bps: u64,
     pub upload_total: u64,
     pub download_total: u64,
+    pub memory_in_use: u64,
     pub message: String,
 }
 
@@ -22,6 +23,7 @@ impl Default for TrafficSnapshot {
             down_bps: 0,
             upload_total: 0,
             download_total: 0,
+            memory_in_use: 0,
             message: "no sample".into(),
         }
     }
@@ -48,6 +50,7 @@ impl TrafficSampler {
     pub async fn sample(&mut self, host: &str, port: u16, secret: &str) -> TrafficSnapshot {
         match fetch_totals(host, port, secret).await {
             Ok((upload, download)) => {
+                let memory = fetch_memory(host, port, secret).await.unwrap_or(0);
                 let now = Instant::now();
                 let (up_bps, down_bps) = match (self.last_upload, self.last_download, self.last_at) {
                     (Some(prev_up), Some(prev_down), Some(prev_at)) => {
@@ -61,14 +64,20 @@ impl TrafficSampler {
                 self.last_upload = Some(upload);
                 self.last_download = Some(download);
                 self.last_at = Some(now);
+                let mem_part = if memory > 0 {
+                    format!(" · mem {}", format_bytes(memory))
+                } else {
+                    String::new()
+                };
                 self.latest = TrafficSnapshot {
                     live: true,
                     up_bps,
                     down_bps,
                     upload_total: upload,
                     download_total: download,
+                    memory_in_use: memory,
                     message: format!(
-                        "↑ {}/s  ↓ {}/s  ·  Σ ↑ {}  ↓ {}",
+                        "↑ {}/s  ↓ {}/s  ·  Σ ↑ {}  ↓ {}{mem_part}",
                         format_rate(up_bps),
                         format_rate(down_bps),
                         format_bytes(upload),
@@ -84,6 +93,7 @@ impl TrafficSampler {
                     down_bps: 0,
                     upload_total: self.last_upload.unwrap_or(0),
                     download_total: self.last_download.unwrap_or(0),
+                    memory_in_use: self.latest.memory_in_use,
                     message: format!("traffic unavailable: {err}"),
                 };
                 self.latest.clone()
@@ -98,6 +108,12 @@ struct ConnectionsResponse {
     upload_total: u64,
     #[serde(rename = "downloadTotal", default)]
     download_total: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryResponse {
+    #[serde(default)]
+    inuse: u64,
 }
 
 async fn fetch_totals(host: &str, port: u16, secret: &str) -> Result<(u64, u64), String> {
@@ -119,6 +135,27 @@ async fn fetch_totals(host: &str, port: u16, secret: &str) -> Result<(u64, u64),
         .await
         .map_err(|e| e.to_string())?;
     Ok((body.upload_total, body.download_total))
+}
+
+async fn fetch_memory(host: &str, port: u16, secret: &str) -> Result<u64, String> {
+    let url = format!("http://{host}:{port}/memory");
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let mut req = client.get(&url);
+    if !secret.is_empty() {
+        req = req.header("Authorization", format!("Bearer {secret}"));
+    }
+    let response = req.send().await.map_err(|e| e.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("HTTP {}", response.status()));
+    }
+    let body = response
+        .json::<MemoryResponse>()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(body.inuse)
 }
 
 pub fn format_rate(bps: u64) -> String {

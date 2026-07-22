@@ -11,9 +11,9 @@ import { icon } from "./icons";
 import {
   canStartProxy,
   configurationReady,
+  effectiveProfileSummary,
   filteredLogs,
   hasUsableProfile,
-  parseProfileSummary,
   readinessIssues,
   routingModeLabel,
   selectedNodeSecondary,
@@ -165,7 +165,7 @@ function renderOverview(model: AppModel): string {
       ? "虚拟网卡（Mihomo TUN + Wintun）"
       : "已请求 TUN，但 Wintun 不可用"
     : model.systemProxyEnabled || model.proxy?.enabled
-      ? "系统代理 · 本地 mixed 127.0.0.1:11451"
+      ? `系统代理 · 本地 mixed 127.0.0.1:${model.mixedPort}`
       : "用户态本地代理（未启用系统代理 / TUN）";
 
   const headerTone =
@@ -303,13 +303,13 @@ function renderOverview(model: AppModel): string {
               ? "直连模式不加载远程代理配置"
               : hasUsableProfile(model)
                 ? "主内联节点可注入当前 IPv6 地址"
-                : parseProfileSummary(model.profileYaml).hasInlineProxy
+                : effectiveProfileSummary(model).hasInlineProxy
                   ? "配置需要替换示例入口"
                   : "配置需要包含可注入地址的内联代理",
           ready:
             model.routingMode === "direct" ||
-            (parseProfileSummary(model.profileYaml).hasInlineProxy &&
-              !parseProfileSummary(model.profileYaml).looksLikeExample),
+            (effectiveProfileSummary(model).hasInlineProxy &&
+              !effectiveProfileSummary(model).looksLikeExample),
           active:
             running &&
             (model.routingMode === "direct" || hasUsableProfile(model)),
@@ -376,12 +376,12 @@ function renderOverview(model: AppModel): string {
         <div class="metric-grid" id="metric-grid">
           <div class="metric tone-accent"><div class="metric-label">${icon("arrow-up", 14)} 上传</div><div class="metric-value" data-metric="up">${up}</div></div>
           <div class="metric tone-positive"><div class="metric-label">${icon("arrow-down", 14)} 下载</div><div class="metric-value" data-metric="down">${down}</div></div>
-          <div class="metric"><div class="metric-label">状态</div><div class="metric-value" data-metric="status">${running ? (traffic?.live ? "实时采集" : "连接中") : "未连接"}</div></div>
+          <div class="metric"><div class="metric-label">内存</div><div class="metric-value" data-metric="mem">${traffic?.memoryInUse ? formatBytes(traffic.memoryInUse) : "—"}</div></div>
           <div class="metric tone-accent"><div class="metric-label">总上传</div><div class="metric-value" data-metric="up-total">${upTotal}</div></div>
           <div class="metric tone-positive"><div class="metric-label">总下载</div><div class="metric-value" data-metric="down-total">${downTotal}</div></div>
-          <div class="metric"><div class="metric-label">Controller</div><div class="metric-value" data-metric="ctrl">${model.core?.controllerPort ?? "—"}</div></div>
+          <div class="metric"><div class="metric-label">状态</div><div class="metric-value" data-metric="status">${running ? (traffic?.live ? "实时采集" : "连接中") : "未连接"}</div></div>
         </div>
-        <p class="help-text muted" id="traffic-help">${escapeHtml(traffic?.message || (running ? "速率由 /connections 采样差分得到；启动后持续刷新曲线" : "启动连接后显示实时上下行速率、累计流量与曲线"))}</p>
+        <p class="help-text muted" id="traffic-help">${escapeHtml(traffic?.message || (running ? "速率 /connections · 内存 /memory；启动后持续刷新曲线" : "启动连接后显示实时上下行速率、累计流量、内存与曲线"))}</p>
       </div>
     </section>
 
@@ -451,9 +451,9 @@ function renderOverview(model: AppModel): string {
               : "已停止",
           )}
           <div class="row-divider"></div>
-          ${infoRow("代理", "127.0.0.1:11451")}
+          ${infoRow("代理", `127.0.0.1:${model.mixedPort}`)}
           <div class="row-divider"></div>
-          ${infoRow("控制", model.core?.controllerPort != null ? `127.0.0.1:${model.core.controllerPort}` : "—")}
+          ${infoRow("控制", model.core?.controllerPort != null ? `127.0.0.1:${model.core.controllerPort}` : `127.0.0.1:${model.controllerPort}`)}
           <div class="row-divider"></div>
           ${infoRow("模式", routingModeLabel(model.routingMode))}
           <div class="app-links">
@@ -629,7 +629,7 @@ function renderNodes(model: AppModel): string {
 }
 
 function renderProfiles(model: AppModel): string {
-  const summary = parseProfileSummary(model.profileYaml);
+  const summary = effectiveProfileSummary(model);
   const tone =
     model.routingMode === "direct"
       ? "positive"
@@ -653,7 +653,10 @@ function renderProfiles(model: AppModel): string {
   ${pageHeader(
     "连接配置",
     "管理用于承载当前 IPv6 地址的代理入口",
-    statusBadge(status, tone),
+    `<div class="inline-actions">
+       <button type="button" class="btn btn-sm" data-action="import-profile">${icon("export", 14)} 导入</button>
+       ${statusBadge(status, tone)}
+     </div>`,
   )}
   <div class="page-scroll">
     <section class="card">
@@ -703,6 +706,7 @@ function renderProfiles(model: AppModel): string {
           </label>
         </div>
         <div class="inline-actions wrap">
+          <button type="button" class="btn" data-action="import-profile">${icon("export", 14)} 导入文件</button>
           <button type="button" class="btn btn-primary" data-action="project-config" ${model.busy.project ? "disabled" : ""}>
             ${model.busy.project ? "生成中…" : "生成运行配置"}
           </button>
@@ -834,6 +838,29 @@ function renderSettings(model: AppModel): string {
   <div class="page-scroll">
     <section class="card">
       <div class="card-header">
+        <div class="card-title">${icon("settings", 16)} <span>本机代理</span></div>
+      </div>
+      <div class="card-body">
+        <div class="form-row">
+          <label class="field">
+            <span>Mixed 端口</span>
+            <input id="settings-mixed-port" type="number" min="1" max="65535" value="${model.mixedPort}" ${model.core?.running ? "disabled" : ""} />
+          </label>
+          <label class="field">
+            <span>Controller 端口</span>
+            <input id="settings-controller-port" type="number" min="1" max="65535" value="${model.controllerPort}" ${model.core?.running ? "disabled" : ""} />
+          </label>
+        </div>
+        <p class="help-text muted">对齐 macOS local-proxy 端口语义；运行中不可修改。默认 11451 / 9090。</p>
+        <label class="check" style="margin-top:10px">
+          <input type="checkbox" id="settings-close-tray" ${model.closeToTray ? "checked" : ""} />
+          <span>关闭窗口时隐藏到系统托盘（托盘可显示 / 停止 / 退出）</span>
+        </label>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
         <div class="card-title">${icon("settings", 16)} <span>运行时</span></div>
         ${statusBadge(model.core?.running ? "运行中" : "已停止", model.core?.running ? "positive" : "neutral")}
       </div>
@@ -926,9 +953,14 @@ function renderSettings(model: AppModel): string {
       <div class="card-body stack-8">
         <div class="kv"><span>应用</span><span>ViaSix for Windows</span></div>
         <div class="kv"><span>版本</span><span>v${escapeHtml(model.version)}</span></div>
-        <div class="kv"><span>本地 mixed</span><span>127.0.0.1:11451</span></div>
+        <div class="kv"><span>本地 mixed</span><span>127.0.0.1:${model.mixedPort}</span></div>
+        <div class="kv"><span>Controller</span><span>127.0.0.1:${model.controllerPort}</span></div>
+        <div class="kv"><span>数据目录</span><span class="mono small" title="${escapeHtml(model.dataDir)}">${escapeHtml(truncateMiddle(model.dataDir || "—", 36))}</span></div>
         <div class="kv"><span>投影契约</span><span>contracts/fixtures/mihomo-config</span></div>
-        <p class="help-text muted">快捷键：<span class="mono">1–5</span> 切换分区（输入框外），<span class="mono">Ctrl/⌘+Enter</span> 启动/停止连接。</p>
+        <div class="inline-actions" style="margin-top:8px">
+          <button type="button" class="btn btn-sm" data-action="open-data-dir">打开数据目录</button>
+        </div>
+        <p class="help-text muted">快捷键：<span class="mono">1–5</span> 切换分区（输入框外），<span class="mono">Ctrl/⌘+Enter</span> 启动/停止连接。关闭窗口默认进托盘。</p>
       </div>
     </section>
   </div>`;
@@ -973,7 +1005,7 @@ export function syncChrome(model: AppModel): void {
         : `<button type="button" class="btn btn-sm btn-dock btn-primary" data-action="start-core" ${!canStartProxy(model) || busy ? "disabled" : ""}>${model.busy.start ? "启动中" : "启动代理"}</button>`;
     dock.innerHTML = `
       <div class="dock-status tone-${tone}">${escapeHtml(title)}</div>
-      <div class="dock-endpoint mono">127.0.0.1:11451</div>
+      <div class="dock-endpoint mono">127.0.0.1:${model.mixedPort}</div>
       ${action}`;
   }
 
@@ -1035,6 +1067,7 @@ export function patchTrafficWidgets(model: AppModel, root: HTMLElement): void {
   };
   set("up", traffic.live ? formatRate(traffic.upBps) : "—");
   set("down", traffic.live ? formatRate(traffic.downBps) : "—");
+  set("mem", traffic.memoryInUse ? formatBytes(traffic.memoryInUse) : "—");
   set("status", running ? (traffic.live ? "实时采集" : "连接中") : "未连接");
   set("up-total", formatBytes(traffic.uploadTotal));
   set("down-total", formatBytes(traffic.downloadTotal));
@@ -1042,7 +1075,7 @@ export function patchTrafficWidgets(model: AppModel, root: HTMLElement): void {
   if (help) {
     help.textContent =
       traffic.message ||
-      (running ? "速率由 /connections 采样差分得到" : "启动连接后显示实时流量");
+      (running ? "速率 /connections · 内存 /memory" : "启动连接后显示实时流量");
   }
   const sparkHost = root.querySelector("#sparkline-host");
   if (sparkHost && model.trafficHistory.length > 1) {

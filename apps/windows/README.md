@@ -53,16 +53,18 @@ make windows-skeleton         # 目录/文件校验
 | --- | --- |
 | contracts 投影（rule/global/direct + 拒绝用例） | ✓ |
 | UI：侧栏导航 + 五分区 + 侧栏代理坞（对齐 macOS） | ✓ |
-| UI：流量曲线、就绪校验、测速参数/排序/重连确认 | ✓ |
-| UI：导入 YAML、选 IPv6、生成运行配置 | ✓ |
-| 用户态 Mihomo 启停 | ✓（需 `prebuild`） |
-| 系统代理（WinINET 注册表 + 快照恢复） | ✓（仅 Windows 构建） |
+| UI：流量曲线/内存、就绪校验、测速参数/排序/重连确认 | ✓ |
+| UI：Profile 文件导入 + 后端 YAML 摘要 | ✓ |
+| 用户态 Mihomo 启停（投影预检 + 端口可配） | ✓（需 `prebuild`） |
+| 系统代理（WinINET 注册表 + 启动/退出恢复） | ✓（仅 Windows 构建） |
+| 后端活动日志流（`activity-log` 事件） | ✓ |
+| 系统托盘（显示 / 启停提示 / 停止 / 退出；关窗进托盘） | ✓ |
 | 出口 IP 检测（ipify HTTPS） | ✓ |
 | 测速（CFST） | ✓（`pnpm prebuild` 拉取） |
 | NSIS CI 构建 | ✓（`.github/workflows/windows-build.yml`） |
-| 会话偏好持久化 | ✓（app data `session-prefs.json`） |
+| 会话偏好持久化 | ✓（含端口 / 托盘 / 测速参数） |
 | Controller 健康探测 | ✓ |
-| 实时流量（controller `/connections` 轮询） | ✓ |
+| 实时流量（`/connections` + `/memory`） | ✓ |
 | 虚拟网卡 Mihomo TUN + Wintun | ✓（需 wintun.dll + 通常需管理员；见 Docs/VIRTUAL_NETWORK.md） |
 | 独立 Windows Service 隔离 | 未做（可选增强） |
 

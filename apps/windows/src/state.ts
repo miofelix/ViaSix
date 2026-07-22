@@ -40,6 +40,10 @@ export type AppModel = {
   speedParams: SpeedTestParams;
   showSpeedParams: boolean;
   exitIpMode: ExitIpMode;
+  mixedPort: number;
+  controllerPort: number;
+  closeToTray: boolean;
+  dataDir: string;
   core: CoreStatus | null;
   proxy: SystemProxyStatus | null;
   virtualNetwork: VirtualNetworkStatus | null;
@@ -72,6 +76,7 @@ export type AppModel = {
   };
   logNewestFirst: boolean;
   confirm: ConfirmDialog | null;
+  profileSummary: ProfileSummary | null;
   bootstrapped: boolean;
   bootstrapError: string | null;
 };
@@ -93,6 +98,10 @@ export function createInitialModel(): AppModel {
     speedParams: { ...DEFAULT_SPEED_PARAMS },
     showSpeedParams: false,
     exitIpMode: "auto",
+    mixedPort: 11451,
+    controllerPort: 9090,
+    closeToTray: true,
+    dataDir: "",
     core: null,
     proxy: null,
     virtualNetwork: null,
@@ -121,6 +130,7 @@ export function createInitialModel(): AppModel {
     logFilter: { source: "all", level: "all", query: "" },
     logNewestFirst: true,
     confirm: null,
+    profileSummary: null,
     bootstrapped: false,
     bootstrapError: null,
   };
@@ -193,12 +203,54 @@ export function sessionPrefsFromModel(model: AppModel) {
     speedPort: model.speedParams.port,
     exitIpMode: model.exitIpMode,
     lastSection: model.section,
+    mixedPort: model.mixedPort,
+    controllerPort: model.controllerPort,
+    closeToTray: model.closeToTray,
   };
 }
 
+export function mergeBackendLog(
+  model: AppModel,
+  entry: {
+    id: number;
+    at: number;
+    level: string;
+    source: string;
+    message: string;
+  },
+): void {
+  const level = (["info", "success", "warn", "error"].includes(entry.level)
+    ? entry.level
+    : "info") as LogLevel;
+  const source = (
+    ["app", "core", "proxy", "speed", "network", "config"].includes(entry.source)
+      ? entry.source
+      : "app"
+  ) as LogSource;
+  // Avoid duplicates when both frontend and backend log the same action.
+  if (model.logs.some((l) => l.id === `be-${entry.id}`)) return;
+  model.logs.push({
+    id: `be-${entry.id}`,
+    at: entry.at,
+    level,
+    source,
+    message: entry.message,
+  });
+  if (model.logs.length > 800) {
+    model.logs.splice(0, model.logs.length - 800);
+  }
+}
+
 export function hasUsableProfile(model: AppModel): boolean {
+  if (model.profileSummary) {
+    return model.profileSummary.hasInlineProxy && !model.profileSummary.looksLikeExample;
+  }
   const yaml = model.profileYaml.trim();
   return yaml.length > 0 && !yaml.includes("origin.example.com");
+}
+
+export function effectiveProfileSummary(model: AppModel): ProfileSummary {
+  return model.profileSummary ?? parseProfileSummary(model.profileYaml);
 }
 
 export function configurationReady(model: AppModel): boolean {
@@ -217,15 +269,14 @@ export function routingModeLabel(mode: RoutingMode): string {
 }
 
 export function parseProfileSummary(yaml: string): ProfileSummary {
+  // Lightweight client fallback; prefer backend summarize_profile when available.
   const text = yaml ?? "";
   const notes: string[] = [];
-  const proxyBlocks = text.split(/\n(?= {2}- name:)/).filter((b) => /type:\s*\S+/.test(b));
-  // Prefer list items under proxies:
   const nameMatches = [...text.matchAll(/^\s{2,}-\s+name:\s*(.+)$/gm)].map((m) =>
     m[1].trim().replace(/^["']|["']$/g, ""),
   );
   const typeMatches = [...text.matchAll(/^\s+type:\s*(\S+)/gm)].map((m) => m[1].trim());
-  const proxyCount = Math.max(nameMatches.length, proxyBlocks.length);
+  const proxyCount = nameMatches.length;
   const primaryName = nameMatches[0] ?? null;
   const primaryType = typeMatches[0] ?? null;
   const hasXviasix = /x-viasix\s*:/.test(text);
@@ -250,10 +301,30 @@ export function parseProfileSummary(yaml: string): ProfileSummary {
   };
 }
 
+export function profileSummaryFromBackend(raw: {
+  primaryName: string | null;
+  primaryType: string | null;
+  proxyCount: number;
+  hasXviasix: boolean;
+  looksLikeExample: boolean;
+  hasInlineProxy: boolean;
+  notes: string[];
+}): ProfileSummary {
+  return {
+    primaryName: raw.primaryName,
+    primaryType: raw.primaryType,
+    proxyCount: raw.proxyCount,
+    hasXviasix: raw.hasXviasix,
+    looksLikeExample: raw.looksLikeExample,
+    hasInlineProxy: raw.hasInlineProxy,
+    notes: raw.notes ?? [],
+  };
+}
+
 export function readinessIssues(model: AppModel): ReadinessIssue[] {
   const issues: ReadinessIssue[] = [];
   if (model.routingMode !== "direct") {
-    const summary = parseProfileSummary(model.profileYaml);
+    const summary = effectiveProfileSummary(model);
     if (!summary.hasInlineProxy) {
       issues.push({
         code: "profile",

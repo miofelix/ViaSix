@@ -29,6 +29,12 @@ pub struct SessionPrefs {
     pub exit_ip_mode: Option<String>,
     #[serde(default)]
     pub last_section: Option<String>,
+    #[serde(default)]
+    pub mixed_port: Option<u16>,
+    #[serde(default)]
+    pub controller_port: Option<u16>,
+    #[serde(default)]
+    pub close_to_tray: Option<bool>,
 }
 
 pub struct PrefsStore {
@@ -86,6 +92,9 @@ mod tests {
             speed_port: Some(443),
             exit_ip_mode: Some("ipv6".into()),
             last_section: Some("nodes".into()),
+            mixed_port: Some(11451),
+            controller_port: Some(9090),
+            close_to_tray: Some(true),
         };
         store.save(&prefs).unwrap();
         let loaded = store.load();
@@ -93,6 +102,8 @@ mod tests {
         assert!(loaded.system_proxy_enabled);
         assert_eq!(loaded.speed_threads, Some(120));
         assert_eq!(loaded.exit_ip_mode.as_deref(), Some("ipv6"));
+        assert_eq!(loaded.mixed_port, Some(11451));
+        assert_eq!(loaded.close_to_tray, Some(true));
         let _ = fs::remove_dir_all(dir);
     }
 
@@ -114,6 +125,7 @@ mod tests {
         let loaded = store.load();
         assert_eq!(loaded.selected_address, "::1");
         assert!(loaded.speed_threads.is_none());
+        assert!(loaded.mixed_port.is_none());
         let _ = fs::remove_dir_all(dir);
     }
 }

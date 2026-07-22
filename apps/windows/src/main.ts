@@ -1,4 +1,7 @@
 import "./styles.css";
+import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
+import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import * as api from "./api";
 import { copyText, isLikelyIPv6 } from "./format";
 import {
@@ -8,6 +11,8 @@ import {
   createInitialModel,
   exitIpEndpoints,
   filteredLogs,
+  mergeBackendLog,
+  profileSummaryFromBackend,
   pushLog,
   pushTrafficSample,
   readinessIssues,
@@ -16,7 +21,14 @@ import {
   sortedSpeedResults,
   type AppModel,
 } from "./state";
-import type { AppSection, ExitIpMode, NodeSortKey, RoutingMode } from "./types";
+import type {
+  ActivityEntry,
+  AppSection,
+  CoreStatus,
+  ExitIpMode,
+  NodeSortKey,
+  RoutingMode,
+} from "./types";
 import { DEFAULT_SPEED_PARAMS, SECTIONS } from "./types";
 import { patchTrafficWidgets, renderSection, renderShell, syncChrome } from "./views";
 
@@ -227,6 +239,36 @@ function bindSectionControls(): void {
     profileYaml.addEventListener("input", () => {
       model.profileYaml = profileYaml.value;
       scheduleSavePrefs();
+      scheduleProfileSummary();
+    });
+  }
+
+  const mixedPortEl = document.querySelector<HTMLInputElement>("#settings-mixed-port");
+  const controllerPortEl = document.querySelector<HTMLInputElement>("#settings-controller-port");
+  const closeTrayEl = document.querySelector<HTMLInputElement>("#settings-close-tray");
+  if (mixedPortEl) {
+    mixedPortEl.addEventListener("change", () => {
+      const n = Number(mixedPortEl.value);
+      if (Number.isFinite(n) && n > 0 && n <= 65535) {
+        model.mixedPort = Math.floor(n);
+        scheduleSavePrefs();
+        syncChrome(model);
+      }
+    });
+  }
+  if (controllerPortEl) {
+    controllerPortEl.addEventListener("change", () => {
+      const n = Number(controllerPortEl.value);
+      if (Number.isFinite(n) && n > 0 && n <= 65535) {
+        model.controllerPort = Math.floor(n);
+        scheduleSavePrefs();
+      }
+    });
+  }
+  if (closeTrayEl) {
+    closeTrayEl.addEventListener("change", () => {
+      model.closeToTray = closeTrayEl.checked;
+      scheduleSavePrefs();
     });
   }
   if (profileIp) {
@@ -355,7 +397,16 @@ async function handleAction(action: string, el: HTMLElement): Promise<void> {
       return;
     case "clear-logs":
       model.logs = [];
+      void api.clearActivityLogs().catch(() => {
+        // ignore offline
+      });
       paint();
+      return;
+    case "import-profile":
+      await importProfile();
+      return;
+    case "open-data-dir":
+      await openDataDir();
       return;
     case "toggle-log-order":
       model.logNewestFirst = !model.logNewestFirst;
@@ -470,6 +521,8 @@ async function projectConfig(): Promise<void> {
       profileYaml: model.profileYaml,
       selectedAddress: mode === "direct" ? null : model.selectedAddress || null,
       routingMode: mode,
+      mixedPort: model.mixedPort,
+      controllerPort: model.controllerPort,
     });
     model.runtimeYaml = yaml;
     pushLog(model, "success", "config", "运行配置投影成功");
@@ -482,6 +535,66 @@ async function projectConfig(): Promise<void> {
   } finally {
     model.busy.project = false;
     paint();
+  }
+}
+
+let profileSummaryTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleProfileSummary(): void {
+  if (profileSummaryTimer) clearTimeout(profileSummaryTimer);
+  profileSummaryTimer = setTimeout(() => {
+    void refreshProfileSummary();
+  }, 350);
+}
+
+async function refreshProfileSummary(): Promise<void> {
+  try {
+    const summary = await api.summarizeProfile(model.profileYaml);
+    model.profileSummary = profileSummaryFromBackend(summary);
+    if (model.section === "profiles" || model.section === "overview") {
+      paint({ preserveFocus: true });
+    } else {
+      syncChrome(model);
+    }
+  } catch {
+    model.profileSummary = null;
+  }
+}
+
+async function importProfile(): Promise<void> {
+  try {
+    const selected = await open({
+      multiple: false,
+      filters: [
+        { name: "YAML", extensions: ["yaml", "yml"] },
+        { name: "All", extensions: ["*"] },
+      ],
+    });
+    if (!selected || Array.isArray(selected)) return;
+    const path = typeof selected === "string" ? selected : String(selected);
+    const text = await api.readTextFile(path);
+    model.profileYaml = text;
+    scheduleSavePrefs();
+    await refreshProfileSummary();
+    pushLog(model, "success", "config", `已导入配置：${path}`);
+    toast("已导入连接配置", "success");
+    if (model.section !== "profiles") navigate("profiles");
+    else paint();
+  } catch (error) {
+    // dialog cancel throws or returns null depending on platform
+    const msg = String(error);
+    if (/cancel/i.test(msg)) return;
+    pushLog(model, "error", "config", `导入失败：${error}`);
+    toast(`导入失败：${error}`, "error");
+  }
+}
+
+async function openDataDir(): Promise<void> {
+  try {
+    const path = model.dataDir || (await api.openDataDir());
+    model.dataDir = path;
+    await shellOpen(path);
+  } catch (error) {
+    toast(`无法打开数据目录：${error}`, "error");
   }
 }
 
@@ -503,6 +616,8 @@ async function startCore(): Promise<void> {
       selectedAddress: mode === "direct" ? null : model.selectedAddress || null,
       routingMode: mode,
       enableSystemProxy: model.systemProxyEnabled,
+      mixedPort: model.mixedPort,
+      controllerPort: model.controllerPort,
     });
     model.core = status;
     pushLog(model, status.running ? "success" : "warn", "core", status.message);
@@ -547,7 +662,7 @@ async function applySystemProxy(enabled: boolean): Promise<void> {
     const status = await api.setSystemProxy({
       enabled,
       host: "127.0.0.1",
-      port: 11451,
+      port: model.mixedPort,
     });
     model.proxy = status;
     model.systemProxyEnabled = enabled ? status.enabled : false;
@@ -777,8 +892,48 @@ async function restorePrefs(): Promise<void> {
     ) {
       model.section = prefs.lastSection;
     }
+    if (prefs.mixedPort && prefs.mixedPort > 0) model.mixedPort = prefs.mixedPort;
+    if (prefs.controllerPort && prefs.controllerPort > 0) {
+      model.controllerPort = prefs.controllerPort;
+    }
+    if (typeof prefs.closeToTray === "boolean") model.closeToTray = prefs.closeToTray;
   } catch {
     // browser preview keeps defaults
+  }
+}
+
+async function hydrateBackendLogs(): Promise<void> {
+  try {
+    const entries = await api.listActivityLogs();
+    for (const entry of entries) {
+      mergeBackendLog(model, entry);
+    }
+  } catch {
+    // offline preview
+  }
+}
+
+async function bindBackendEvents(): Promise<void> {
+  try {
+    await listen<ActivityEntry>("activity-log", (event) => {
+      mergeBackendLog(model, event.payload);
+      if (model.section === "logs") {
+        paint({ preserveFocus: true });
+      }
+    });
+    await listen<string>("tray-action", (event) => {
+      if (event.payload === "start") {
+        void startCore();
+      }
+    });
+    await listen<CoreStatus>("core-stopped", (event) => {
+      model.core = event.payload;
+      stopTrafficPolling();
+      paint();
+      toast(event.payload.message || "已从托盘停止代理", "info");
+    });
+  } catch {
+    // not in tauri
   }
 }
 
@@ -793,7 +948,15 @@ async function bootstrap(): Promise<void> {
     } catch {
       model.version = "dev";
     }
+    try {
+      model.dataDir = await api.dataDirPath();
+    } catch {
+      model.dataDir = "";
+    }
     await restorePrefs();
+    await hydrateBackendLogs();
+    await bindBackendEvents();
+    await refreshProfileSummary();
     await refreshAllStatus();
     model.bootstrapped = true;
     model.bootstrapError = null;

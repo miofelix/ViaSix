@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  ActivityEntry,
+  BackendProfileSummary,
   ControllerHealth,
   CoreStatus,
   ExitIpResult,
@@ -9,8 +11,6 @@ import type {
   TrafficSnapshot,
   VirtualNetworkStatus,
 } from "./types";
-
-/** Thin Tauri command wrappers. Safe no-ops fail with thrown errors for callers. */
 
 export async function appVersion(): Promise<string> {
   return invoke<string>("app_version");
@@ -28,8 +28,18 @@ export async function projectRuntimeConfig(args: {
   profileYaml: string;
   selectedAddress: string | null;
   routingMode: string;
+  mixedPort?: number | null;
+  controllerPort?: number | null;
 }): Promise<string> {
   return invoke<string>("project_runtime_config", args);
+}
+
+export async function summarizeProfile(profileYaml: string): Promise<BackendProfileSummary> {
+  return invoke<BackendProfileSummary>("summarize_profile", { profileYaml });
+}
+
+export async function readTextFile(path: string): Promise<string> {
+  return invoke<string>("read_text_file", { path });
 }
 
 export async function coreStatus(): Promise<CoreStatus> {
@@ -41,6 +51,8 @@ export async function startCore(args: {
   selectedAddress: string | null;
   routingMode: string;
   enableSystemProxy: boolean;
+  mixedPort?: number | null;
+  controllerPort?: number | null;
 }): Promise<CoreStatus> {
   return invoke<CoreStatus>("start_core", args);
 }
@@ -94,4 +106,20 @@ export async function virtualNetworkStatus(): Promise<VirtualNetworkStatus> {
 
 export async function setVirtualNetwork(enabled: boolean): Promise<VirtualNetworkStatus> {
   return invoke<VirtualNetworkStatus>("set_virtual_network", { enabled });
+}
+
+export async function listActivityLogs(): Promise<ActivityEntry[]> {
+  return invoke<ActivityEntry[]>("list_activity_logs");
+}
+
+export async function clearActivityLogs(): Promise<void> {
+  await invoke("clear_activity_logs");
+}
+
+export async function dataDirPath(): Promise<string> {
+  return invoke<string>("data_dir_path");
+}
+
+export async function openDataDir(): Promise<string> {
+  return invoke<string>("open_data_dir");
 }

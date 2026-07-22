@@ -2,7 +2,7 @@
 
 实现位置：[`apps/windows`](../../apps/windows)。
 
-**状态**：功能 MVP 已齐；**UI 信息架构对齐 macOS**（侧栏：首页 · IPv6 优选 · 连接配置 · 日志 · 设置）。
+**状态**：主路径能力持续对齐 macOS（壳层 + 托盘 + 活动日志 + Profile 导入/摘要 + 可配本地端口）；TUN 仍为进程内 Wintun（非 macOS XPC helper 模型）。
 
 ## 技术选型
 
@@ -11,7 +11,9 @@
 | UI / 宿主 | **Tauri 2** + Vite/TypeScript（设计系统对齐 macOS `VisualStyle`） |
 | 投影 | Rust `src-tauri/src/projection`（contracts 对齐） |
 | 代理内核 | 预编译 mihomo（`pnpm prebuild`） |
-| 系统代理 | WinINET 注册表（`ProxyEnable` / `ProxyServer`）+ 快照恢复 |
+| 系统代理 | WinINET 注册表（`ProxyEnable` / `ProxyServer`）+ 启动/退出恢复 |
+| 活动日志 | 后端 `ActivityLog` + `activity-log` 事件 |
+| 托盘 | Tauri tray-icon（关窗可隐藏到托盘） |
 | 出口检测 | HTTPS ipify（`detect_exit_ip`） |
 | 测速 | CFST v2.3.5（`pnpm prebuild` + `run_speed_test`） |
 | 虚拟网卡 | Mihomo TUN + Wintun.dll（进程内；可选后续 Service 隔离） |
