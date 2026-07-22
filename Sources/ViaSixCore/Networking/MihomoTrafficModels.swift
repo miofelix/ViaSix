@@ -90,10 +90,56 @@ public struct MihomoMemoryUsage: Equatable, Sendable, Codable {
     }
 }
 
+/// Session cumulative traffic totals from the Mihomo `/connections` WebSocket.
+///
+/// Only the totals fields are retained. Connection list content is intentionally
+/// ignored so ViaSix can show Clash-style upload/download totals without an
+/// active-connection UI.
+public struct MihomoTrafficTotals: Equatable, Sendable, Codable {
+    public var uploadTotal: UInt64
+    public var downloadTotal: UInt64
+
+    public init(uploadTotal: UInt64 = 0, downloadTotal: UInt64 = 0) {
+        self.uploadTotal = uploadTotal
+        self.downloadTotal = downloadTotal
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case uploadTotal
+        case downloadTotal
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.uploadTotal = try Self.decodeUInt64(from: container, forKey: .uploadTotal)
+        self.downloadTotal = try Self.decodeUInt64(from: container, forKey: .downloadTotal)
+    }
+
+    private static func decodeUInt64(
+        from container: KeyedDecodingContainer<CodingKeys>,
+        forKey key: CodingKeys
+    ) throws -> UInt64 {
+        if let value = try? container.decode(UInt64.self, forKey: key) {
+            return value
+        }
+        if let value = try? container.decode(Int64.self, forKey: key), value >= 0 {
+            return UInt64(value)
+        }
+        if let value = try? container.decode(Double.self, forKey: key),
+            value.isFinite, value >= 0
+        {
+            return UInt64(value)
+        }
+        return 0
+    }
+}
+
 /// Latest traffic view for UI consumption.
 public struct TrafficSnapshot: Equatable, Sendable {
     public var up: UInt64
     public var down: UInt64
+    public var uploadTotal: UInt64
+    public var downloadTotal: UInt64
     public var memoryInUse: UInt64
     public var points: [TrafficSpeedSample]
     public var isLive: Bool
@@ -102,6 +148,8 @@ public struct TrafficSnapshot: Equatable, Sendable {
     public init(
         up: UInt64 = 0,
         down: UInt64 = 0,
+        uploadTotal: UInt64 = 0,
+        downloadTotal: UInt64 = 0,
         memoryInUse: UInt64 = 0,
         points: [TrafficSpeedSample] = [],
         isLive: Bool = false,
@@ -109,6 +157,8 @@ public struct TrafficSnapshot: Equatable, Sendable {
     ) {
         self.up = up
         self.down = down
+        self.uploadTotal = uploadTotal
+        self.downloadTotal = downloadTotal
         self.memoryInUse = memoryInUse
         self.points = points
         self.isLive = isLive

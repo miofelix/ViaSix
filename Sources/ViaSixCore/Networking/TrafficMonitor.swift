@@ -21,7 +21,7 @@ public struct TrafficMonitorConfiguration: Equatable, Sendable {
     public static let `default` = TrafficMonitorConfiguration()
 }
 
-/// Collects Mihomo `/traffic` and `/memory` streams into a UI-facing snapshot.
+/// Collects Mihomo `/traffic`, `/memory`, and `/connections` totals into a UI snapshot.
 public actor TrafficMonitor {
     private let webSocket: any MihomoWebSocketStreaming
     private let configuration: TrafficMonitorConfiguration
@@ -29,16 +29,20 @@ public actor TrafficMonitor {
 
     private var trafficTask: Task<Void, Never>?
     private var memoryTask: Task<Void, Never>?
+    private var totalsTask: Task<Void, Never>?
     private var isRunning = false
     private var generation = 0
 
     private var latestUp: UInt64 = 0
     private var latestDown: UInt64 = 0
+    private var latestUploadTotal: UInt64 = 0
+    private var latestDownloadTotal: UInt64 = 0
     private var latestMemory: UInt64 = 0
     private var points: [TrafficSpeedSample] = []
     private var lastUpdated: Date?
     private var trafficLive = false
     private var memoryLive = false
+    private var totalsLive = false
 
     private var continuations: [UUID: AsyncStream<TrafficSnapshot>.Continuation] = [:]
 
@@ -53,6 +57,7 @@ public actor TrafficMonitor {
     deinit {
         trafficTask?.cancel()
         memoryTask?.cancel()
+        totalsTask?.cancel()
     }
 
     nonisolated public func snapshots() -> AsyncStream<TrafficSnapshot> {
@@ -85,6 +90,9 @@ public actor TrafficMonitor {
         memoryTask = Task { [weak self] in
             await self?.runMemoryLoop(generation: generation)
         }
+        totalsTask = Task { [weak self] in
+            await self?.runTotalsLoop(generation: generation)
+        }
         publish()
     }
 
@@ -98,13 +106,18 @@ public actor TrafficMonitor {
         generation += 1
         trafficTask?.cancel()
         memoryTask?.cancel()
+        totalsTask?.cancel()
         trafficTask = nil
         memoryTask = nil
+        totalsTask = nil
         trafficLive = false
         memoryLive = false
+        totalsLive = false
         if resetSnapshot {
             latestUp = 0
             latestDown = 0
+            latestUploadTotal = 0
+            latestDownloadTotal = 0
             latestMemory = 0
             points = []
             lastUpdated = nil
@@ -134,47 +147,57 @@ public actor TrafficMonitor {
         TrafficSnapshot(
             up: latestUp,
             down: latestDown,
+            uploadTotal: latestUploadTotal,
+            downloadTotal: latestDownloadTotal,
             memoryInUse: latestMemory,
             points: points,
-            isLive: isRunning && (trafficLive || memoryLive),
+            isLive: isRunning && (trafficLive || memoryLive || totalsLive),
             lastUpdated: lastUpdated
         )
     }
 
     private func runTrafficLoop(generation: Int) async {
-        if configuration.initialConnectDelay > .zero {
-            try? await Task.sleep(for: configuration.initialConnectDelay)
-        }
-        guard isRunning, self.generation == generation else { return }
-
-        while isRunning, self.generation == generation, !Task.isCancelled {
-            guard let api = apiConfiguration else { return }
-            let stream = webSocket.stream(configuration: api, path: "/traffic")
-            do {
-                for try await data in stream {
-                    guard isRunning, self.generation == generation else { return }
-                    let sample = try MihomoAPIDecoder.decodeTraffic(data)
-                    applyTraffic(sample)
-                }
-                trafficLive = false
-                publish()
-            } catch is CancellationError {
-                return
-            } catch MihomoAPIClientError.cancelled {
-                return
-            } catch {
-                trafficLive = false
-                latestUp = 0
-                latestDown = 0
-                publish()
-            }
-
-            guard isRunning, self.generation == generation else { return }
-            try? await Task.sleep(for: configuration.reconnectDelay)
+        await runStreamLoop(generation: generation, path: "/traffic") { data in
+            let sample = try MihomoAPIDecoder.decodeTraffic(data)
+            applyTraffic(sample)
+        } onStreamEnded: {
+            trafficLive = false
+        } onStreamFailed: {
+            trafficLive = false
+            latestUp = 0
+            latestDown = 0
         }
     }
 
     private func runMemoryLoop(generation: Int) async {
+        await runStreamLoop(generation: generation, path: "/memory") { data in
+            let memory = try MihomoAPIDecoder.decodeMemory(data)
+            applyMemory(memory)
+        } onStreamEnded: {
+            memoryLive = false
+        } onStreamFailed: {
+            memoryLive = false
+        }
+    }
+
+    private func runTotalsLoop(generation: Int) async {
+        await runStreamLoop(generation: generation, path: "/connections") { data in
+            let totals = try MihomoAPIDecoder.decodeTrafficTotals(data)
+            applyTotals(totals)
+        } onStreamEnded: {
+            totalsLive = false
+        } onStreamFailed: {
+            totalsLive = false
+        }
+    }
+
+    private func runStreamLoop(
+        generation: Int,
+        path: String,
+        onMessage: (Data) throws -> Void,
+        onStreamEnded: () -> Void,
+        onStreamFailed: () -> Void
+    ) async {
         if configuration.initialConnectDelay > .zero {
             try? await Task.sleep(for: configuration.initialConnectDelay)
         }
@@ -182,21 +205,20 @@ public actor TrafficMonitor {
 
         while isRunning, self.generation == generation, !Task.isCancelled {
             guard let api = apiConfiguration else { return }
-            let stream = webSocket.stream(configuration: api, path: "/memory")
+            let stream = webSocket.stream(configuration: api, path: path)
             do {
                 for try await data in stream {
                     guard isRunning, self.generation == generation else { return }
-                    let memory = try MihomoAPIDecoder.decodeMemory(data)
-                    applyMemory(memory)
+                    try onMessage(data)
                 }
-                memoryLive = false
+                onStreamEnded()
                 publish()
             } catch is CancellationError {
                 return
             } catch MihomoAPIClientError.cancelled {
                 return
             } catch {
-                memoryLive = false
+                onStreamFailed()
                 publish()
             }
 
@@ -218,6 +240,14 @@ public actor TrafficMonitor {
     private func applyMemory(_ memory: MihomoMemoryUsage) {
         latestMemory = memory.inuse
         memoryLive = true
+        lastUpdated = Date()
+        publish()
+    }
+
+    private func applyTotals(_ totals: MihomoTrafficTotals) {
+        latestUploadTotal = totals.uploadTotal
+        latestDownloadTotal = totals.downloadTotal
+        totalsLive = true
         lastUpdated = Date()
         publish()
     }
@@ -254,5 +284,10 @@ extension TrafficMonitor {
     /// Injects memory usage without going through a WebSocket (tests only).
     public func testApplyMemory(inuse: UInt64) {
         applyMemory(MihomoMemoryUsage(inuse: inuse))
+    }
+
+    /// Injects cumulative totals without going through a WebSocket (tests only).
+    public func testApplyTotals(uploadTotal: UInt64, downloadTotal: UInt64) {
+        applyTotals(MihomoTrafficTotals(uploadTotal: uploadTotal, downloadTotal: downloadTotal))
     }
 }

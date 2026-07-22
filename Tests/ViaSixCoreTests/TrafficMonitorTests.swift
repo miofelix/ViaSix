@@ -13,6 +13,23 @@ final class TrafficMonitorTests: XCTestCase {
         XCTAssertEqual(memory.oslimit, 0)
     }
 
+    func testDecodesConnectionTotalsAndIgnoresConnectionList() throws {
+        let payload = Data(
+            #"""
+            {
+              "uploadTotal": 1048576,
+              "downloadTotal": 20971520,
+              "connections": [
+                {"id":"1","upload":1,"download":2,"metadata":{"host":"example.com"}}
+              ]
+            }
+            """#.utf8
+        )
+        let totals = try MihomoAPIDecoder.decodeTrafficTotals(payload)
+        XCTAssertEqual(totals.uploadTotal, 1_048_576)
+        XCTAssertEqual(totals.downloadTotal, 20_971_520)
+    }
+
     func testDecodesNumericVariants() throws {
         let traffic = try MihomoAPIDecoder.decodeTraffic(Data(#"{"up":12.5,"down":-1}"#.utf8))
         XCTAssertEqual(traffic.up, 12)
@@ -35,10 +52,13 @@ final class TrafficMonitorTests: XCTestCase {
         await monitor.testApplyTraffic(up: 5, down: 6, at: now.addingTimeInterval(-10))
         await monitor.testApplyTraffic(up: 7, down: 8, at: now)
         await monitor.testApplyMemory(inuse: 4_096)
+        await monitor.testApplyTotals(uploadTotal: 9_000, downloadTotal: 12_000)
 
         let snapshot = await monitor.currentSnapshot()
         XCTAssertEqual(snapshot.up, 7)
         XCTAssertEqual(snapshot.down, 8)
+        XCTAssertEqual(snapshot.uploadTotal, 9_000)
+        XCTAssertEqual(snapshot.downloadTotal, 12_000)
         XCTAssertEqual(snapshot.memoryInUse, 4_096)
         XCTAssertEqual(snapshot.points.count, 3)
         XCTAssertEqual(snapshot.points.map(\.up), [3, 5, 7])
@@ -50,6 +70,7 @@ final class TrafficMonitorTests: XCTestCase {
         )
         await monitor.testApplyTraffic(up: 100, down: 200)
         await monitor.testApplyMemory(inuse: 512)
+        await monitor.testApplyTotals(uploadTotal: 1_000, downloadTotal: 2_000)
         await monitor.stop()
 
         let snapshot = await monitor.currentSnapshot()

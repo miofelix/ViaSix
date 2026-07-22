@@ -113,19 +113,22 @@ x-viasix:
 
 ```text
 Mihomo external-controller (127.0.0.1:controllerPort)
-  ├─ WS /traffic  → 即时上下行 B/s
-  └─ WS /memory   → inuse 字节
+  ├─ WS /traffic      → 即时上下行 B/s
+  ├─ WS /memory       → inuse 字节
+  └─ WS /connections  → uploadTotal / downloadTotal（忽略连接列表）
         │
         ▼
 TrafficMonitor（ring buffer，默认 10 分钟）
         │
         ▼
 AppState.traffic.snapshot
-  ├─ Overview TrafficStatsView（曲线 + 指标）
+  ├─ Overview TrafficStatsView（曲线 + 速率 + 累计流量 + 内存）
   └─ MenuBarExtra 两行速率标题
 ```
 
-认证使用本机 `controller.secret` 的 `Authorization: Bearer`。停止、失败或退出时关闭订阅并清空快照。本功能不展示活跃连接数，也不订阅 `/connections` 列表。
+认证使用本机 `controller.secret` 的 `Authorization: Bearer`。停止、失败或退出时关闭订阅并清空快照。
+
+累计上传/下载与 Clash 一致，取自 `/connections` 推送中的 `uploadTotal` / `downloadTotal`（Mihomo 当前会话累计，重启内核后归零）。本功能不展示活跃连接数，也不解析连接列表内容。
 
 ## 启动与可恢复错误
 

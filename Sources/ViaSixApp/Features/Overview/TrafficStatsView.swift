@@ -51,8 +51,23 @@ struct TrafficStatsView: View {
                     )
                 }
 
+                HStack(spacing: VisualStyle.spacing12) {
+                    metricTile(
+                        title: "总上传",
+                        value: ByteRateFormatter.formatBytes(snapshot.uploadTotal),
+                        systemImage: "arrow.up.to.line.circle.fill",
+                        tone: .accent
+                    )
+                    metricTile(
+                        title: "总下载",
+                        value: ByteRateFormatter.formatBytes(snapshot.downloadTotal),
+                        systemImage: "arrow.down.to.line.circle.fill",
+                        tone: .positive
+                    )
+                }
+
                 if !isProxyRunning {
-                    Text("启动连接后显示实时上下行速率、流量曲线与 Mihomo 内存占用。")
+                    Text("启动连接后显示实时上下行速率、累计流量、流量曲线与 Mihomo 内存占用。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

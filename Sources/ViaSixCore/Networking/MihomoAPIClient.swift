@@ -168,7 +168,7 @@ private final class WebSocketSessionBox: @unchecked Sendable {
     }
 }
 
-/// Decodes Mihomo traffic and memory payloads.
+/// Decodes Mihomo traffic, memory, and connection-total payloads.
 public enum MihomoAPIDecoder {
     private static let decoder = JSONDecoder()
 
@@ -183,6 +183,15 @@ public enum MihomoAPIDecoder {
     public static func decodeMemory(_ data: Data) throws -> MihomoMemoryUsage {
         do {
             return try decoder.decode(MihomoMemoryUsage.self, from: data)
+        } catch {
+            throw MihomoAPIClientError.decodingFailed(error.localizedDescription)
+        }
+    }
+
+    /// Reads only cumulative totals from a `/connections` frame.
+    public static func decodeTrafficTotals(_ data: Data) throws -> MihomoTrafficTotals {
+        do {
+            return try decoder.decode(MihomoTrafficTotals.self, from: data)
         } catch {
             throw MihomoAPIClientError.decodingFailed(error.localizedDescription)
         }
