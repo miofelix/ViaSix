@@ -14,7 +14,7 @@ struct ProfilesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            AppPageHeader("配置", subtitle: "管理 ViaSix 使用的 Mihomo 配置档") {
+            AppPageHeader("连接配置", subtitle: "管理用于承载当前 IPv6 地址的代理入口") {
                 HStack(spacing: VisualStyle.spacing8) {
                     Button("导入", systemImage: "square.and.arrow.down") {
                         showsImporter = true
@@ -63,7 +63,7 @@ struct ProfilesView: View {
 
     private var currentProfileCard: some View {
         SurfaceCard {
-            CardHeader("当前配置档", systemImage: "shippingbox", tone: profileTone) {
+            CardHeader("当前代理入口", systemImage: "shippingbox", tone: profileTone) {
                 StatusBadge(profileStatus, tone: profileTone, systemImage: profileStatusIcon)
             }
             Divider()
@@ -78,7 +78,7 @@ struct ProfilesView: View {
                             .background(VisualStyle.accent.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
 
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(summary.primaryProxyName ?? "Mihomo Profile")
+                            Text(summary.primaryProxyName ?? "ViaSix 代理入口")
                                 .font(.title3.weight(.semibold))
                             Text(model.paths.profileConfig.path)
                                 .font(.caption.monospaced())
@@ -89,25 +89,22 @@ struct ProfilesView: View {
                         Spacer()
                     }
 
-                    HStack(spacing: VisualStyle.spacing8) {
-                        profileMetric("节点", value: summary.inlineProxyCount, icon: "server.rack")
-                        profileMetric("Provider", value: summary.providerCount, icon: "icloud.and.arrow.down")
-                        profileMetric("代理组", value: summary.groupCount, icon: "wifi")
-                        profileMetric("规则", value: summary.ruleCount, icon: "arrow.triangle.branch")
-                    }
+                    Label("当前优选 IPv6 地址将在运行时注入", systemImage: "network")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                 }
                 .padding(VisualStyle.spacing16)
             } else if let loadError {
                 ContentUnavailableView {
-                    Label("配置档需要处理", systemImage: "exclamationmark.triangle")
+                    Label("连接配置需要处理", systemImage: "exclamationmark.triangle")
                 } description: {
                     Text(loadError)
                 } actions: {
-                    Button("导入配置", systemImage: "square.and.arrow.down") { showsImporter = true }
+                    Button("导入连接配置", systemImage: "square.and.arrow.down") { showsImporter = true }
                 }
                 .frame(maxWidth: .infinity, minHeight: 220)
             } else {
-                ProgressView("正在读取配置档…")
+                ProgressView("正在读取连接配置…")
                     .frame(maxWidth: .infinity, minHeight: 220)
             }
         }
@@ -115,25 +112,25 @@ struct ProfilesView: View {
 
     private var profileActionsCard: some View {
         SurfaceCard {
-            CardHeader("配置操作", systemImage: "slider.horizontal.3", tone: .accent)
+            CardHeader("连接操作", systemImage: "slider.horizontal.3", tone: .accent)
             Divider()
             VStack(spacing: 0) {
                 SettingRow(
                     "可视化编辑",
-                    detail: "配置常用的 VLESS、VMess、Trojan 或 Shadowsocks 节点",
+                    detail: "编辑代理协议、身份凭据、TLS 与传输参数",
                     systemImage: "list.bullet.rectangle"
                 ) {
                     Button("编辑", systemImage: "pencil") { showsManualEditor = true }
                 }
                 Divider().padding(.leading, 52)
-                SettingRow("Mihomo YAML", detail: "编辑代理组、Provider、规则与高级内核字段", systemImage: "curlybraces.square") {
+                SettingRow("高级 YAML", detail: "编辑代理入口的协议与高级传输字段", systemImage: "curlybraces.square") {
                     Button("打开编辑器", systemImage: "chevron.left.forwardslash.chevron.right") {
                         showsYAMLEditor = true
                     }
                     .disabled(summary == nil)
                 }
                 Divider().padding(.leading, 52)
-                SettingRow("配置文件位置", detail: "在 Finder 中显示 ViaSix 私有配置", systemImage: "folder") {
+                SettingRow("配置文件位置", detail: "在 Finder 中显示私有连接配置", systemImage: "folder") {
                     Button("显示", systemImage: "arrow.up.right.square") {
                         NSWorkspace.shared.activateFileViewerSelecting([model.paths.profileConfig])
                     }
@@ -155,7 +152,7 @@ struct ProfilesView: View {
                     Text("由 ViaSix 管理本机运行字段")
                         .font(.callout.weight(.semibold))
                     Text(
-                        "x-viasix 只用于声明由 ViaSix 注入当前 IPv6 节点；代理模式、系统代理、TUN、监听端口与其他本机设置不会被 YAML 覆盖。"
+                        "x-viasix 只用于声明由 ViaSix 注入当前优选 IPv6 地址；代理模式、系统代理、TUN、监听端口与其他本机设置不会被 YAML 覆盖。"
                     )
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -164,20 +161,6 @@ struct ProfilesView: View {
             }
             .padding(VisualStyle.spacing16)
         }
-    }
-
-    private func profileMetric(_ title: String, value: Int, icon: String) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: icon).foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 1) {
-                Text("\(value)").font(.callout.weight(.semibold).monospacedDigit())
-                Text(title).font(.caption2).foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity)
-        .background(VisualStyle.subtleFill, in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var configurationEditingDisabled: Bool {

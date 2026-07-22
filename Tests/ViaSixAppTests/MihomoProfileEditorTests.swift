@@ -145,7 +145,7 @@ final class MihomoProfileEditorTests: XCTestCase {
             """
         )
 
-        XCTAssertEqual(analysis.status, .inlineProxy("当前优选节点（运行时注入）"))
+        XCTAssertEqual(analysis.status, .inlineProxy("当前优选 IPv6（运行时注入）"))
         XCTAssertTrue(analysis.isValid)
         XCTAssertTrue(analysis.canFormat)
         XCTAssertNil(analysis.issue)
@@ -171,7 +171,7 @@ final class MihomoProfileEditorTests: XCTestCase {
 
         XCTAssertEqual(
             analysis.status,
-            .invalidConfiguration("ViaSix 需要包含可注入 IPv6 地址的内联代理")
+            .invalidConfiguration("ViaSix 需要包含可注入 IPv6 地址的代理入口")
         )
         XCTAssertFalse(analysis.isValid)
         XCTAssertFalse(analysis.canFormat)

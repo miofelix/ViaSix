@@ -65,7 +65,7 @@ struct MihomoProfileEditorView: View {
     }
 
     private var editorHeader: some View {
-        AppPageHeader("代理配置", subtitle: "编辑 profile.yaml 中的节点、Provider 与规则") {
+        AppPageHeader("高级连接配置", subtitle: "编辑 profile.yaml 中的代理入口与传输参数") {
             HStack(spacing: VisualStyle.spacing8) {
                 Menu {
                     Button("在访达中显示配置", systemImage: "folder") {
@@ -117,7 +117,7 @@ struct MihomoProfileEditorView: View {
                 }
                 .disabled(isSaving)
                 .accessibilityLabel("Mihomo YAML 配置")
-                .accessibilityHint("保存前会检查节点、Provider 与规则结构")
+                .accessibilityHint("保存前会检查代理入口与传输参数")
 
             editorFeedback
             editorFooter
@@ -177,7 +177,7 @@ struct MihomoProfileEditorView: View {
         switch draftAnalysis.status {
         case .inlineProxy:
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("当前节点")
+                Text("当前优选 IPv6")
                     .font(.caption.weight(.medium))
                 Text(selectedIPDescription)
                     .font(.caption.monospaced())
@@ -186,7 +186,7 @@ struct MihomoProfileEditorView: View {
                     .truncationMode(.middle)
                     .textSelection(.enabled)
                 Spacer(minLength: 10)
-                Text("连接时可将第一个内联节点的服务器地址替换为当前节点，不会改动凭据与 TLS 标识。")
+                Text("连接时会将代理入口的服务器地址替换为当前优选 IPv6，不会改动凭据与 TLS 标识。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -506,7 +506,7 @@ struct MihomoProfileDraftAnalysis: Equatable, Sendable {
     var statusTitle: String {
         switch status {
         case .empty: "等待配置"
-        case .inlineProxy: "内联节点配置有效"
+        case .inlineProxy: "代理入口配置有效"
         case .invalidYAML: "YAML 需要修正"
         case .invalidConfiguration: "配置需要修正"
         }
@@ -535,10 +535,10 @@ struct MihomoProfileDraftAnalysis: Equatable, Sendable {
                 return Self(status: .inlineProxy(server))
             }
             if configuration.requiresSelectedPrimaryServer {
-                return Self(status: .inlineProxy("当前优选节点（运行时注入）"))
+                return Self(status: .inlineProxy("当前优选 IPv6（运行时注入）"))
             }
             return Self(
-                status: .invalidConfiguration("ViaSix 需要包含可注入 IPv6 地址的内联代理")
+                status: .invalidConfiguration("ViaSix 需要包含可注入 IPv6 地址的代理入口")
             )
         } catch let error as MihomoConfigurationError {
             switch error {

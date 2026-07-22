@@ -102,8 +102,8 @@ struct ServerConfigurationEditorView: View {
             .labelsHidden()
             .frame(width: 180)
         }
-        fieldRow("节点名称") {
-            TextField("用于在代理组中识别此节点", text: $profile.name)
+        fieldRow("连接名称") {
+            TextField("用于识别此代理入口", text: $profile.name)
                 .textFieldStyle(.roundedBorder)
         }
         fieldRow("服务器地址") {
@@ -388,7 +388,7 @@ struct ServerConfigurationEditorView: View {
             loadError = nil
         } catch {
             loadError =
-                "当前代理配置无法使用表单编辑。包含多个节点或 Proxy Provider 时，请使用高级 YAML 编辑器；也可以明确选择重新配置。\n\n\(error.localizedDescription)"
+                "当前文件包含表单不使用的高级 Mihomo 结构。可以使用高级 YAML 清理这些内容，或明确选择重新配置。\n\n\(error.localizedDescription)"
         }
         isLoading = false
     }
@@ -473,7 +473,7 @@ enum MihomoGuidedProfileDraftError: LocalizedError, Equatable {
     var errorDescription: String? {
         switch self {
         case .requiresAdvancedEditor:
-            "当前配置包含表单不会显示的节点、Provider、代理组或规则"
+            "当前配置包含表单不使用的高级 Mihomo 结构"
         }
     }
 }
