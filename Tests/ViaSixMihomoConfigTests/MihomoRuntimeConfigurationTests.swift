@@ -4,6 +4,136 @@ import XCTest
 @testable import ViaSixMihomoConfig
 
 final class MihomoRuntimeConfigurationTests: XCTestCase {
+    func testIPv6RequiredRejectsIPv4SelectionAndProviderOnlyProfile() throws {
+        XCTAssertThrowsError(
+            try sampleServer().runtimeConfiguration(
+                options: MihomoRuntimeOptions(runtimePolicy: .ipv6Required),
+                replacingPrimaryServerWith: "203.0.113.8"
+            )
+        ) { error in
+            XCTAssertEqual(error as? MihomoConfigurationError, .selectedNodeMustBeIPv6)
+        }
+
+        let providerOnly = try MihomoServerConfiguration(
+            data: Data(
+                """
+                proxy-providers:
+                  remote:
+                    type: http
+                    url: https://subscription.example/profile.yaml
+                    path: remote.yaml
+                proxy-groups:
+                  - name: PROXY
+                    type: select
+                    use: [remote]
+                rules:
+                  - MATCH,PROXY
+                """.utf8
+            )
+        )
+        XCTAssertThrowsError(
+            try providerOnly.runtimeConfiguration(
+                options: MihomoRuntimeOptions(runtimePolicy: .ipv6Required),
+                replacingPrimaryServerWith: "2606:4700::8"
+            )
+        ) { error in
+            XCTAssertEqual(error as? MihomoConfigurationError, .ipv6ManagedProfileRequired)
+        }
+    }
+
+    func testIPv6RequiredKeepsOnlyPrimaryProxyAndManagedRules() throws {
+        let server = try MihomoServerConfiguration(
+            data: Data(
+                """
+                proxies:
+                  - name: primary-edge
+                    type: vless
+                    server: origin.example
+                    port: 443
+                    uuid: 11111111-1111-4111-8111-111111111111
+                  - name: unused-edge
+                    type: ss
+                    server: unused.example
+                    port: 8388
+                    cipher: aes-128-gcm
+                    password: secret
+                proxy-providers:
+                  remote:
+                    type: inline
+                    payload:
+                      - name: provider-edge
+                        type: ss
+                        server: provider.example
+                        port: 8388
+                        cipher: aes-128-gcm
+                        password: secret
+                proxy-groups:
+                  - name: IMPORTED
+                    type: select
+                    proxies: [primary-edge, unused-edge]
+                rule-providers:
+                  domains:
+                    type: inline
+                    behavior: domain
+                    payload: [example.com]
+                sub-rules:
+                  imported:
+                    - DOMAIN,example.com,DIRECT
+                rules:
+                  - DOMAIN-SUFFIX,example.com,DIRECT
+                  - MATCH,IMPORTED
+                """.utf8
+            )
+        )
+
+        let root = try MihomoYAML.mapping(
+            from: server.runtimeConfiguration(
+                options: MihomoRuntimeOptions(
+                    routingMode: .global,
+                    runtimePolicy: .ipv6Required
+                ),
+                replacingPrimaryServerWith: "2606:4700::8"
+            )
+        )
+
+        let proxies = try XCTUnwrap(root.mappings("proxies"))
+        XCTAssertEqual(proxies.count, 1)
+        XCTAssertEqual(proxies.first?.string("name"), "primary-edge")
+        XCTAssertEqual(proxies.first?.string("server"), "2606:4700::8")
+        XCTAssertEqual(root.string("mode"), "rule")
+        XCTAssertNil(root["proxy-providers"])
+        XCTAssertNil(root["proxy-groups"])
+        XCTAssertNil(root["rule-providers"])
+        XCTAssertNil(root["sub-rules"])
+        let rules = try XCTUnwrap(root["rules"] as? [String])
+        XCTAssertTrue(rules.contains("IP-CIDR6,fc00::/7,DIRECT,no-resolve"))
+        XCTAssertFalse(rules.contains(where: { $0.contains("example.com") }))
+        XCTAssertEqual(rules.last, "MATCH,primary-edge")
+    }
+
+    func testIPv6RequiredPrivilegedEnvelopeRoundTripsPolicyAndProjection() throws {
+        let options = MihomoRuntimeOptions(
+            routingMode: .direct,
+            tun: MihomoTunConfiguration(),
+            runtimePolicy: .ipv6Required
+        )
+        let envelope = try MihomoPrivilegedEnvelope.encode(
+            server: supportedProtocolsServer(),
+            options: options,
+            replacingPrimaryServerWith: "2606:4700::9"
+        )
+
+        let plan = try MihomoPrivilegedEnvelope.decodeRuntimePlan(from: envelope)
+        let root = try MihomoYAML.mapping(from: plan.configuration)
+
+        XCTAssertEqual(plan.options.runtimePolicy, .ipv6Required)
+        XCTAssertEqual(root.string("mode"), "rule")
+        XCTAssertEqual(root.mappings("proxies")?.count, 1)
+        XCTAssertEqual(root.mappings("proxies")?.first?.string("server"), "2606:4700::9")
+        XCTAssertEqual((root["rules"] as? [String])?.last, "MATCH,vless-edge")
+        XCTAssertEqual(root.mapping("tun")?.bool("enable"), true)
+    }
+
     func testUserAndPrivilegedProjectionsKeepAuthenticatedLoopbackController() throws {
         let controller = MihomoExternalControllerConfiguration(port: 9_090, secret: "local-secret")
         let user = try MihomoYAML.mapping(

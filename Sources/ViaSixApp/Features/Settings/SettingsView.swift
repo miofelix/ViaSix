@@ -19,7 +19,6 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: VisualStyle.spacing12) {
                     runtimeCard
                     localProxyCard
-                    serverConfigurationCard
                     tunServiceCard
                     dataCard
                 }
@@ -372,13 +371,16 @@ struct SettingsView: View {
 
             VStack(spacing: 0) {
                 SettingRow(
-                    "代理模式",
-                    detail: model.state.localProxyConfiguration.routingMode.appDescription,
-                    systemImage: model.state.localProxyConfiguration.routingMode.appSystemImage
+                    "传输策略",
+                    detail: model.usesIPv6RequiredTransport
+                        ? "公网流量通过 TUN 进入所选 IPv6 代理节点"
+                        : "保留传统 Mihomo 路由和本地代理能力",
+                    systemImage: model.usesIPv6RequiredTransport
+                        ? "6.circle.fill" : "exclamationmark.triangle"
                 ) {
                     StatusBadge(
-                        model.state.localProxyConfiguration.routingMode.displayName,
-                        tone: .accent
+                        model.state.localProxyConfiguration.ipv6TransportPolicy.displayName,
+                        tone: model.usesIPv6RequiredTransport ? .positive : .warning
                     )
                 }
 
@@ -387,13 +389,16 @@ struct SettingsView: View {
 
                 SettingRow(
                     "网络接入",
-                    detail: networkAccessConfigurationDetail,
+                    detail: model.usesIPv6RequiredTransport
+                        ? "IPv6 模式固定使用虚拟网卡，不修改 macOS 系统代理"
+                        : networkAccessConfigurationDetail,
                     systemImage: "network"
                 ) {
                     StatusBadge(
-                        networkAccessTitle,
-                        tone: networkAccessTone,
-                        systemImage: networkAccessSystemImage
+                        model.usesIPv6RequiredTransport ? "TUN（必需）" : networkAccessTitle,
+                        tone: model.usesIPv6RequiredTransport ? .positive : networkAccessTone,
+                        systemImage: model.usesIPv6RequiredTransport
+                            ? "checkmark.shield.fill" : networkAccessSystemImage
                     )
                 }
 

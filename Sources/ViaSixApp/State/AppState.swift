@@ -168,47 +168,11 @@ struct AppState: Equatable, Sendable {
         case failed(String)
     }
 
-    enum MihomoProvidersPhase: Equatable, Sendable {
-        case unavailable
-        case loading
-        case available
-        case failed(String)
-    }
-
-    enum MihomoConnectionMonitorPhase: Equatable, Sendable {
-        case unavailable
-        case connecting
-        case streaming
-        case reconnecting
-    }
-
-    struct MihomoTrafficSample: Identifiable, Equatable, Sendable {
-        var id: Date { timestamp }
-        let timestamp: Date
-        let uploadSpeed: Int64
-        let downloadSpeed: Int64
-    }
-
-    struct MihomoClosedConnection: Identifiable, Equatable, Sendable {
-        var id: String { connection.id }
-        let connection: MihomoConnection
-        let closedAt: Date
-    }
-
     struct MihomoRuntimeState: Equatable, Sendable {
         var phase: MihomoRuntimePhase = .unavailable
-        var snapshot: MihomoRuntimeSnapshot?
-        var uploadSpeed: Int64 = 0
-        var downloadSpeed: Int64 = 0
+        var snapshot: MihomoProxySelectionSnapshot?
         var lastUpdatedAt: Date?
-        var trafficSamples: [MihomoTrafficSample] = []
-        var providersPhase: MihomoProvidersPhase = .unavailable
-        var providerSnapshot: MihomoProviderSnapshot?
-        var updatingProxyProviders: Set<String> = []
-        var updatingRuleProviders: Set<String> = []
-        var testingProxyGroup: String?
-        var closedConnections: [MihomoClosedConnection] = []
-        var connectionMonitorPhase: MihomoConnectionMonitorPhase = .unavailable
+        var selectingProxyGroup: String?
     }
 
     struct SpeedTestState: Equatable, Sendable {

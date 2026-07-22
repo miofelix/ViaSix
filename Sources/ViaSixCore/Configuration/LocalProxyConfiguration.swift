@@ -80,6 +80,20 @@ public enum ProxyRoutingMode: String, Codable, CaseIterable, Sendable {
     }
 }
 
+/// Determines whether ViaSix enforces an IPv6 proxy transport or preserves
+/// the broader, user-authored Mihomo routing behavior.
+public enum IPv6TransportPolicy: String, Codable, CaseIterable, Sendable {
+    case required
+    case compatibility
+
+    public var displayName: String {
+        switch self {
+        case .required: "IPv6 模式"
+        case .compatibility: "兼容模式"
+        }
+    }
+}
+
 public enum LocalProxyConfigurationError: LocalizedError, Equatable, Sendable {
     case invalidListenAddress
     case invalidPort
@@ -117,6 +131,7 @@ public struct LocalProxyConfiguration: Codable, Equatable, Sendable {
     public var tunStack: VirtualInterfaceStack
     public var tunMTU: Int
     public var tunStrictRoute: Bool
+    public var ipv6TransportPolicy: IPv6TransportPolicy
 
     public init(
         listenAddress: String = AppMetadata.proxyHost,
@@ -131,7 +146,8 @@ public struct LocalProxyConfiguration: Codable, Equatable, Sendable {
         systemProxyEnabled: Bool = false,
         tunStack: VirtualInterfaceStack = .mixed,
         tunMTU: Int = 1_500,
-        tunStrictRoute: Bool = false
+        tunStrictRoute: Bool = false,
+        ipv6TransportPolicy: IPv6TransportPolicy = .compatibility
     ) {
         self.listenAddress = listenAddress
         self.port = port
@@ -151,6 +167,7 @@ public struct LocalProxyConfiguration: Codable, Equatable, Sendable {
         self.tunStack = tunStack
         self.tunMTU = tunMTU
         self.tunStrictRoute = tunStrictRoute
+        self.ipv6TransportPolicy = ipv6TransportPolicy
     }
 
     public static let `default` = Self()
@@ -169,6 +186,7 @@ public struct LocalProxyConfiguration: Codable, Equatable, Sendable {
         case tunStack
         case tunMTU
         case tunStrictRoute
+        case ipv6TransportPolicy
     }
 
     public init(from decoder: Decoder) throws {
@@ -220,6 +238,11 @@ public struct LocalProxyConfiguration: Codable, Equatable, Sendable {
         tunStrictRoute =
             try container.decodeIfPresent(Bool.self, forKey: .tunStrictRoute)
             ?? false
+        ipv6TransportPolicy =
+            try container.decodeIfPresent(
+                IPv6TransportPolicy.self,
+                forKey: .ipv6TransportPolicy
+            ) ?? .compatibility
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -237,6 +260,7 @@ public struct LocalProxyConfiguration: Codable, Equatable, Sendable {
         try container.encode(tunStack, forKey: .tunStack)
         try container.encode(tunMTU, forKey: .tunMTU)
         try container.encode(tunStrictRoute, forKey: .tunStrictRoute)
+        try container.encode(ipv6TransportPolicy, forKey: .ipv6TransportPolicy)
     }
 
     public func validated() throws -> LocalProxyConfiguration {

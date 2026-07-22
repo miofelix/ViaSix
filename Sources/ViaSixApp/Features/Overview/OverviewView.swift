@@ -1,42 +1,39 @@
 import AppKit
+import Network
 import SwiftUI
 import ViaSixCore
 
 struct OverviewView: View {
     @Environment(AppModel.self) private var model
+
     let onSelectNodes: () -> Void
     let onManageRuntime: () -> Void
 
-    @State private var copiedEndpoint = false
-    @State private var copiedExitIP = false
-    @State private var optimisticRoutingMode: ProxyRoutingMode?
-
     var body: some View {
         VStack(spacing: 0) {
-            pageHeader
+            AppPageHeader("首页", subtitle: "IPv6 代理链路状态与控制") {
+                StatusBadge(
+                    headerStatus,
+                    tone: headerTone,
+                    systemImage: headerIcon
+                )
+            }
 
             ScrollView {
                 VStack(alignment: .leading, spacing: VisualStyle.spacing12) {
-                    if runtimeNeedsAttention {
-                        runtimeBanner
+                    if !model.usesIPv6RequiredTransport {
+                        compatibilityBanner
                     }
-
-                    LazyVGrid(
-                        columns: [
-                            GridItem(
-                                .adaptive(minimum: 350),
-                                spacing: VisualStyle.spacing12,
-                                alignment: .top
-                            )
-                        ],
-                        alignment: .leading,
-                        spacing: VisualStyle.spacing12
-                    ) {
-                        connectionCard
-                        routingModeCard
-                        networkAccessCard
-                        runtimeActivityCard
+                    ipv6LinkCard
+                    HStack(alignment: .top, spacing: VisualStyle.spacing12) {
+                        nodeCard
                         exitIPCard
+                    }
+                    if !model.usesIPv6RequiredTransport,
+                        let groups = model.state.mihomoRuntime.snapshot?.proxyGroups,
+                        !groups.isEmpty
+                    {
+                        proxySelectionCard(groups)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -45,1228 +42,338 @@ struct OverviewView: View {
             }
             .scrollbarSafeContent()
         }
-        .onChange(of: model.state.localProxyConfiguration.routingMode) { _, mode in
-            if optimisticRoutingMode == mode {
-                optimisticRoutingMode = nil
-            }
-        }
-        .onChange(of: model.isRoutingModeChanging) { _, isChanging in
-            if !isChanging {
-                optimisticRoutingMode = nil
-            }
-        }
     }
 
-    private var pageHeader: some View {
-        AppPageHeader(
-            "首页",
-            subtitle: "查看连接状态并控制本地网络代理"
-        ) {
-            StatusBadge(
-                proxyPresentation.statusTitle,
-                tone: proxyPresentation.tone,
-                systemImage: proxyPresentation.isBusy ? "hourglass" : nil
-            )
-        }
-    }
-
-    private var connectionCard: some View {
-        SurfaceCard {
-            VStack(alignment: .leading, spacing: 0) {
-                CardHeader(
-                    "当前连接",
-                    systemImage: "point.3.connected.trianglepath.dotted",
-                    tone: proxyPresentation.tone
-                ) {
-                    StatusBadge(
-                        connectionStatusShortTitle,
-                        tone: proxyPresentation.tone
-                    )
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: VisualStyle.spacing16) {
-                    currentNodeSummary
-
-                    if selectedResult != nil {
-                        connectionMetrics
-                    }
-
-                    configurationTestStatus
-
-                    Divider()
-
-                    localEndpointRow
-
-                    if case .failed(let message) = model.state.proxyCorePhase {
-                        inlineMessage(
-                            message,
-                            systemImage: "exclamationmark.triangle.fill",
-                            tone: .negative
-                        )
-                    } else if !model.state.isProxyRunning {
-                        inlineMessage(
-                            proxyReadinessHint,
-                            systemImage: "info.circle",
-                            tone: .neutral
-                        )
-                    }
-
-                    connectionActions
-                }
-                .padding(VisualStyle.spacing16)
-            }
-        }
-    }
-
-    private var currentNodeSummary: some View {
-        HStack(alignment: .top, spacing: VisualStyle.spacing12) {
-            Image(systemName: currentNodeIcon)
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(currentNodeTone.color)
-                .frame(width: 42, height: 42)
-                .background(
-                    currentNodeTone.color.opacity(0.1),
-                    in: RoundedRectangle(
-                        cornerRadius: VisualStyle.radiusMedium,
-                        style: .continuous
-                    )
-                )
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(currentNodeTitle)
-                    .font(.title3.weight(.semibold))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-
-                Text(currentNodeDetail)
+    private var compatibilityBanner: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("兼容模式未保证 IPv6 代理链路")
+                    .font(.callout.weight(.semibold))
+                Text("当前可使用 IPv4、Provider、导入规则或系统代理。切换回 IPv6 模式后，ViaSix 会要求 TUN、IPv6 节点和可注入的内联配置。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
-
-            Spacer(minLength: VisualStyle.spacing8)
+            Spacer()
+            Button("打开设置", action: onManageRuntime)
         }
+        .padding(VisualStyle.spacing16)
+        .background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(.orange.opacity(0.25)))
     }
 
-    private var connectionMetrics: some View {
-        HStack(spacing: VisualStyle.spacing8) {
-            if let region = selectedResult?.region, !region.isEmpty {
-                ConnectionMetricChip(
-                    title: region,
-                    systemImage: "mappin.and.ellipse"
-                )
-            }
-
-            if let latency = selectedResult?.latencyDisplayValue {
-                ConnectionMetricChip(
-                    title: latency,
-                    systemImage: "timer"
-                )
-            }
-
-            if let speed = selectedResult?.speedDisplayValue {
-                ConnectionMetricChip(
-                    title: speed,
-                    systemImage: "arrow.down"
-                )
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var localEndpointRow: some View {
-        SettingRow(
-            "本地端点",
-            detail: "HTTP / SOCKS 混合代理",
-            systemImage: "network"
-        ) {
-            HStack(spacing: 4) {
-                Text(proxyEndpoint)
-                    .font(.caption.monospaced().weight(.medium))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
-
-                Button(action: copyProxyEndpoint) {
-                    Image(systemName: copiedEndpoint ? "checkmark" : "doc.on.doc")
-                }
-                .buttonStyle(.borderless)
-                .iconButtonHitTarget()
-                .help(copiedEndpoint ? "已复制" : "复制代理地址")
-                .accessibilityLabel(copiedEndpoint ? "已复制代理地址" : "复制代理地址")
-            }
-        }
-    }
-
-    private var connectionActions: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: VisualStyle.spacing8) {
-                proxyPrimaryButton
-                nodeSelectionButton
-                configurationTestButton
-
-                if model.state.isProxyRunning {
-                    reconnectButton
-                }
-            }
-
-            VStack(alignment: .leading, spacing: VisualStyle.spacing8) {
-                HStack(spacing: VisualStyle.spacing8) {
-                    proxyPrimaryButton
-                    nodeSelectionButton
-                }
-
-                HStack(spacing: VisualStyle.spacing8) {
-                    configurationTestButton
-                    if model.state.isProxyRunning {
-                        reconnectButton
-                    }
-                }
-            }
-        }
-    }
-
-    private var proxyPrimaryButton: some View {
-        Button {
-            performProxyPrimaryAction()
-        } label: {
-            Label(
-                proxyPresentation.actionTitle,
-                systemImage: proxyPresentation.actionSystemImage
-            )
-        }
-        .buttonStyle(OverviewPrimaryActionButtonStyle())
-        .disabled(proxyPresentation.action == .none || proxyToggleDisabled)
-        .help(proxyReadinessHint)
-    }
-
-    private var nodeSelectionButton: some View {
-        Button("选择节点", systemImage: "network", action: onSelectNodes)
-    }
-
-    private var configurationTestButton: some View {
-        Button(configurationTestButtonTitle, systemImage: configurationTestButtonIcon) {
-            if isConfigurationTestRunning {
-                model.stopCurrentConfigurationTest()
-            } else {
-                model.startCurrentConfigurationTest()
-            }
-        }
-        .disabled(configurationTestButtonDisabled)
-        .help(configurationTestButtonHelp)
-        .accessibilityHint(configurationTestButtonHelp)
-    }
-
-    private var reconnectButton: some View {
-        Button("重新连接", systemImage: "arrow.clockwise", action: model.restartProxy)
-            .disabled(model.switchingIP != nil || model.isTemplateOperationBusy)
-    }
-
-    @ViewBuilder
-    private var configurationTestStatus: some View {
-        switch model.state.configurationTest.phase {
-        case .running:
-            inlineMessage(
-                "正在测试当前节点…",
-                systemImage: "gauge.with.dots.needle.67percent",
-                tone: .accent
-            )
-        case .stopping:
-            inlineMessage(
-                "正在停止当前节点测速…",
-                systemImage: "hourglass",
-                tone: .neutral
-            )
-        case .failed(let message):
-            inlineMessage(
-                "当前节点测速失败：\(message)",
-                systemImage: "exclamationmark.circle.fill",
-                tone: .negative
-            )
-        case .idle:
-            if let completedAt = model.state.configurationTest.completedAt,
-                model.state.configurationTest.result != nil
-            {
-                HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    Image(systemName: "checkmark.circle.fill")
-                    Text("当前节点测速完成 ·")
-                    Text(completedAt, style: .relative)
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .help(completedAt.formatted(date: .complete, time: .standard))
-            }
-        }
-    }
-
-    private var routingModeCard: some View {
+    private var ipv6LinkCard: some View {
         SurfaceCard {
-            VStack(alignment: .leading, spacing: 0) {
-                CardHeader(
-                    "代理模式",
-                    systemImage: "point.3.connected.trianglepath.dotted"
-                ) {
-                    if model.isRoutingModeChanging {
-                        ProgressView()
-                            .controlSize(.small)
-                            .accessibilityLabel("正在切换代理模式")
-                    } else {
-                        StatusBadge(displayedRoutingMode.displayName, tone: .accent)
-                    }
-                }
-
-                Divider()
-
-                ProxyRoutingModePicker(
-                    selection: Binding(
-                        get: { displayedRoutingMode },
-                        set: { selectRoutingMode($0) }
-                    ),
-                    isDisabled: routingModePickerDisabled
-                )
-                .padding(VisualStyle.spacing16)
-            }
-        }
-    }
-
-    private var networkAccessCard: some View {
-        SurfaceCard {
-            VStack(alignment: .leading, spacing: 0) {
-                CardHeader(
-                    "网络接入",
-                    systemImage: "macbook.and.iphone",
-                    tone: networkAccessTone
-                ) {
-                    StatusBadge(
-                        networkAccessStatusText,
-                        tone: networkAccessTone,
-                        systemImage: networkAccessStatusSystemImage
-                    )
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: 0) {
-                    SettingRow(
-                        "系统代理",
-                        detail: "配置 macOS HTTP、HTTPS 与 SOCKS 代理；可与 TUN 同时启用。",
-                        systemImage: "network"
-                    ) {
-                        HStack(spacing: VisualStyle.spacing8) {
-                            StatusBadge(
-                                systemProxyStatusText,
-                                tone: systemProxyPresentation.appTone,
-                                systemImage: systemProxyIsTransitioning ? "hourglass" : nil
-                            )
-                            Toggle("系统代理", isOn: systemProxyRequestedBinding)
-                                .labelsHidden()
-                                .disabled(systemProxyToggleDisabled)
-                        }
-                    }
-
-                    Divider()
-
-                    SettingRow(
-                        "TUN 模式",
-                        detail: "通过虚拟网卡接管流量；启用偏好与系统代理互不影响。",
-                        systemImage: "point.3.filled.connected.trianglepath.dotted"
-                    ) {
-                        HStack(spacing: VisualStyle.spacing8) {
-                            StatusBadge(
-                                tunStatusText,
-                                tone: tunTone,
-                                systemImage: tunStatusSystemImage
-                            )
-                            Toggle("TUN 模式", isOn: tunRequestedBinding)
-                                .labelsHidden()
-                                .disabled(tunToggleDisabled)
-                        }
-                    }
-
-                    Divider()
-
-                    SettingRow(
-                        "本地监听",
-                        detail: "仅监听本机回环地址",
-                        systemImage: "lock.shield"
-                    ) {
-                        Text(proxyEndpoint)
-                            .font(.caption.monospaced().weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-
-                    if let message = model.state.tun.lastError {
-                        Divider()
-                        inlineMessage(
-                            message,
-                            systemImage: "exclamationmark.triangle.fill",
-                            tone: .negative
-                        )
-                        .padding(.vertical, VisualStyle.spacing12)
-                    }
-                    if case .failed(let message) = model.state.systemProxyPhase {
-                        Divider()
-                        inlineMessage(
-                            message,
-                            systemImage: "exclamationmark.triangle.fill",
-                            tone: .negative
-                        )
-                        .padding(.vertical, VisualStyle.spacing12)
-                    }
-
-                }
-                .padding(.horizontal, VisualStyle.spacing16)
-                .padding(.bottom, VisualStyle.spacing16)
-            }
-        }
-    }
-
-    private var runtimeActivityCard: some View {
-        SurfaceCard {
-            CardHeader(
-                "实时活动",
-                systemImage: "waveform.path.ecg",
-                tone: model.state.isProxyRunning ? .positive : .neutral
-            ) {
-                if let version = model.state.mihomoRuntime.snapshot?.version {
-                    StatusBadge(version, tone: .neutral)
-                }
+            CardHeader("IPv6 链路", systemImage: "6.circle.fill", tone: headerTone) {
+                proxyActionButton
             }
             Divider()
 
-            if let snapshot = model.state.mihomoRuntime.snapshot {
-                VStack(alignment: .leading, spacing: VisualStyle.spacing12) {
-                    HStack(spacing: VisualStyle.spacing8) {
-                        overviewRuntimeMetric(
-                            "上传",
-                            value: RuntimePresentation.speed(model.state.mihomoRuntime.uploadSpeed),
-                            icon: "arrow.up",
-                            tone: .warning
-                        )
-                        overviewRuntimeMetric(
-                            "下载",
-                            value: RuntimePresentation.speed(model.state.mihomoRuntime.downloadSpeed),
-                            icon: "arrow.down",
-                            tone: .accent
-                        )
-                        overviewRuntimeMetric(
-                            "连接",
-                            value: "\(snapshot.connections.count)",
-                            icon: "link",
-                            tone: .positive
-                        )
-                        overviewRuntimeMetric(
-                            "内存",
-                            value: RuntimePresentation.byteCount(snapshot.memoryUsage),
-                            icon: "memorychip",
-                            tone: .neutral
-                        )
-                    }
-
-                    RuntimeTrafficChart(samples: model.state.mihomoRuntime.trafficSamples)
-
-                    SettingRow(
-                        "累计流量",
-                        detail: "Mihomo 本次运行会话",
-                        systemImage: "chart.bar"
-                    ) {
-                        Text(
-                            "↑ \(RuntimePresentation.byteCount(snapshot.uploadTotal))  "
-                                + "↓ \(RuntimePresentation.byteCount(snapshot.downloadTotal))"
-                        )
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(VisualStyle.spacing16)
-            } else {
-                VStack(spacing: VisualStyle.spacing8) {
-                    if model.state.isProxyRunning {
-                        ProgressView()
-                        Text("正在连接 Mihomo Controller…")
-                    } else {
-                        Image(systemName: "waveform.path.ecg")
-                            .font(.title2)
-                            .foregroundStyle(.tertiary)
-                        Text("启动本地代理后显示实时流量与连接数")
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, minHeight: 142)
-                .padding(VisualStyle.spacing16)
+            VStack(spacing: 0) {
+                linkStep(
+                    "虚拟网卡",
+                    detail: tunDetail,
+                    ready: model.canUseTunMode,
+                    active: model.state.tun.isRunning,
+                    actionTitle: model.canUseTunMode ? nil : "准备服务",
+                    action: onManageRuntime
+                )
+                Divider().padding(.leading, 52)
+                linkStep(
+                    "IPv6 节点",
+                    detail: selectedNodeDetail,
+                    ready: selectedNodeIsIPv6,
+                    active: selectedNodeIsIPv6,
+                    actionTitle: selectedNodeIsIPv6 ? "更换" : "选择",
+                    action: onSelectNodes
+                )
+                Divider().padding(.leading, 52)
+                linkStep(
+                    "连接配置",
+                    detail: configurationDetail,
+                    ready: model.state.proxySupportsNodeSelection,
+                    active: model.state.proxySupportsNodeSelection,
+                    actionTitle: nil,
+                    action: nil
+                )
+                Divider().padding(.leading, 52)
+                linkStep(
+                    "公网流量",
+                    detail: publicTrafficDetail,
+                    ready: model.isProxyConfigurationReady,
+                    active: model.state.isProxyRunning,
+                    actionTitle: nil,
+                    action: nil
+                )
             }
+            .padding(.horizontal, VisualStyle.spacing16)
+            .padding(.bottom, VisualStyle.spacing12)
         }
     }
 
-    private func overviewRuntimeMetric(
+    private func linkStep(
         _ title: String,
-        value: String,
-        icon: String,
-        tone: AppTone
+        detail: String,
+        ready: Bool,
+        active: Bool,
+        actionTitle: String?,
+        action: (() -> Void)?
     ) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label(title, systemImage: icon)
-                .font(.caption)
-                .foregroundStyle(tone.color)
-            Text(value)
-                .font(.callout.weight(.semibold).monospacedDigit())
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tone.color.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
-        .overlay {
-            RoundedRectangle(cornerRadius: 7)
-                .stroke(tone.color.opacity(0.2))
-        }
-    }
-
-    private var exitIPCard: some View {
-        SurfaceCard {
-            VStack(alignment: .leading, spacing: 0) {
-                CardHeader(
-                    "出口 IP",
-                    systemImage: "globe.asia.australia",
-                    tone: model.exitIPResultIsStale ? .warning : .accent
-                ) {
-                    if let family = model.state.exit.info?.addressFamily {
-                        StatusBadge(family.displayName, tone: .neutral)
-                    }
-                }
-
-                Divider()
-
-                VStack(alignment: .leading, spacing: VisualStyle.spacing12) {
-                    exitIPSummary
-                    exitIPControls
-                }
-                .padding(VisualStyle.spacing16)
-            }
-        }
-    }
-
-    private var exitIPSummary: some View {
-        VStack(alignment: .leading, spacing: VisualStyle.spacing8) {
-            HStack(alignment: .firstTextBaseline, spacing: VisualStyle.spacing8) {
-                Text(model.state.exit.info?.ip ?? "尚未检测")
-                    .font(.system(.title3, design: .monospaced).weight(.semibold))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-
-                if model.state.exit.info != nil {
-                    Button(action: copyExitIP) {
-                        Image(systemName: copiedExitIP ? "checkmark" : "doc.on.doc")
-                    }
-                    .buttonStyle(.borderless)
-                    .iconButtonHitTarget()
-                    .help(copiedExitIP ? "已复制" : "复制出口 IP")
-                    .accessibilityLabel(copiedExitIP ? "已复制出口 IP" : "复制出口 IP")
-                }
-            }
-
-            if let info = model.state.exit.info {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    if model.state.exit.isEnriching, info.location.isEmpty {
-                        ProgressView()
-                            .controlSize(.mini)
-                    } else {
-                        Image(systemName: "mappin.and.ellipse")
-                    }
-
-                    Text(
-                        model.state.exit.isEnriching && info.location.isEmpty
-                            ? "正在补充位置与网络信息…"
-                            : (info.location.isEmpty ? "位置未返回" : info.location)
-                    )
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-                if !info.details.isEmpty {
-                    Label(info.details, systemImage: "building.2")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                if model.state.exit.isEnriching, !info.location.isEmpty {
-                    HStack(spacing: 6) {
-                        ProgressView()
-                            .controlSize(.mini)
-                        Text("正在补充网络信息…")
-                    }
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                }
-
-                exitIPMetadata
+        SettingRow(
+            title,
+            detail: detail,
+            systemImage: active ? "checkmark.circle.fill" : (ready ? "checkmark.circle" : "circle")
+        ) {
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .controlSize(.small)
             } else {
-                Text("检测后会显示当前出口、地址族、地区与网络服务商。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            if let error = model.state.exit.errorMessage {
-                inlineMessage(
-                    error,
-                    systemImage: "exclamationmark.circle.fill",
-                    tone: .negative
+                StatusBadge(
+                    active ? "已启用" : (ready ? "已就绪" : "未就绪"),
+                    tone: active ? .positive : (ready ? .accent : .warning)
                 )
             }
         }
-        .accessibilityElement(children: .contain)
     }
 
-    private var exitIPControls: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: VisualStyle.spacing8) {
-                exitIPModePicker
-                    .frame(width: 190)
-                exitIPDetectionButton
-                Spacer(minLength: 0)
-            }
-
-            VStack(alignment: .leading, spacing: VisualStyle.spacing8) {
-                exitIPModePicker
-                    .frame(maxWidth: 320)
-                exitIPDetectionButton
-            }
-        }
-    }
-
-    private var exitIPModePicker: some View {
-        Picker("地址族", selection: exitIPDetectionModeBinding) {
-            Text("自动").tag(ExitIPDetectionMode.automatic)
-            Text("IPv4").tag(ExitIPDetectionMode.ipv4)
-            Text("IPv6").tag(ExitIPDetectionMode.ipv6)
-        }
-        .pickerStyle(.segmented)
-        .controlSize(.small)
-        .disabled(model.state.exit.isDetecting)
-        .accessibilityLabel("出口 IP 地址族")
-    }
-
-    private var exitIPDetectionButton: some View {
-        Button {
-            model.detectExitIP()
-        } label: {
-            Label(
-                model.state.exit.isDetecting ? "检测中…" : "检测",
-                systemImage: model.state.exit.isDetecting ? "hourglass" : "arrow.clockwise"
-            )
-        }
-        .disabled(model.state.exit.isDetecting || isProxyTransitioning)
-        .accessibilityHint(model.state.isProxyRunning ? "通过本地代理检测出口" : "直接检测本机出口")
-    }
-
-    @ViewBuilder
-    private var exitIPMetadata: some View {
-        if let route = model.exitIPRouteDescription {
-            Label(route, systemImage: exitIPRouteIcon)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-        }
-
-        if let detectedAt = model.state.exit.detectedAt {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Image(systemName: "clock")
-                Text("检测于 ")
-                Text(detectedAt, style: .relative)
-            }
-            .font(.caption)
-            .foregroundStyle(.tertiary)
-            .help(detectedAt.formatted(date: .complete, time: .standard))
-        }
-
-        if model.exitIPResultIsStale {
-            Label("结果已过期，请重新检测", systemImage: "exclamationmark.circle.fill")
-                .font(.caption)
-                .foregroundStyle(VisualStyle.warning)
-        } else if showingPreviousExitIPResult {
-            Label("上次成功结果", systemImage: "clock.arrow.circlepath")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var runtimeBanner: some View {
+    private var nodeCard: some View {
         SurfaceCard {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: VisualStyle.spacing12) {
-                    runtimeStatusSummary
-                    Spacer(minLength: VisualStyle.spacing16)
-                    runtimeInstallButton
+            CardHeader("当前 IPv6 节点", systemImage: "network", tone: selectedNodeIsIPv6 ? .accent : .warning)
+            Divider()
+            VStack(alignment: .leading, spacing: VisualStyle.spacing12) {
+                Text(model.state.preferences.selectedIP.isEmpty ? "尚未选择" : model.state.preferences.selectedIP)
+                    .font(.title3.monospaced().weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+
+                if let result = currentNodeResult {
+                    Text(result.performanceSummary)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("选择 IPv6 优选地址后，ViaSix 会在运行时将它注入代理入口。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
-                VStack(alignment: .leading, spacing: VisualStyle.spacing12) {
-                    runtimeStatusSummary
-                    runtimeInstallButton
+                HStack {
+                    Button("选择节点", systemImage: "list.bullet", action: onSelectNodes)
+                    Button(configurationTestTitle, systemImage: "scope") {
+                        if configurationTestIsRunning {
+                            model.stopCurrentConfigurationTest()
+                        } else {
+                            model.startCurrentConfigurationTest()
+                        }
+                    }
+                    .disabled(
+                        !configurationTestIsRunning
+                            && model.currentConfigurationTestUnavailableReason != nil
+                    )
                 }
             }
             .padding(VisualStyle.spacing16)
         }
+        .frame(maxWidth: .infinity)
     }
 
-    private var runtimeStatusSummary: some View {
-        HStack(alignment: .top, spacing: VisualStyle.spacing12) {
-            Image(systemName: runtimeStatusIcon)
-                .font(.title3)
-                .foregroundStyle(runtimeStatusTone.color)
-                .frame(width: 28)
+    private var exitIPCard: some View {
+        SurfaceCard {
+            CardHeader("公网出口", systemImage: "location", tone: .neutral)
+            Divider()
+            VStack(alignment: .leading, spacing: VisualStyle.spacing12) {
+                HStack {
+                    Text(model.state.exit.info?.ip ?? "尚未检测")
+                        .font(.title3.monospaced().weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .textSelection(.enabled)
+                    Spacer()
+                    if model.state.exit.info != nil {
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(
+                                model.state.exit.info?.ip ?? "",
+                                forType: .string
+                            )
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(runtimeStatusTitle)
-                    .font(.callout.weight(.semibold))
-                Text(runtimeStatusDetail)
+                if let info = model.state.exit.info, !info.location.isEmpty {
+                    Text(info.location)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text("出口地址可能是 IPv4；它不代表客户端到代理入口所使用的地址族。")
                     .font(.caption)
-                    .foregroundStyle(
-                        model.state.runtimeOperationError == nil ? Color.secondary : VisualStyle.negative
-                    )
+                    .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+
+                HStack {
+                    Picker("地址族", selection: exitModeBinding) {
+                        Text("自动").tag(ExitIPDetectionMode.automatic)
+                        Text("IPv4").tag(ExitIPDetectionMode.ipv4)
+                        Text("IPv6").tag(ExitIPDetectionMode.ipv6)
+                    }
+                    .labelsHidden()
+                    .frame(width: 100)
+                    Button(
+                        model.state.exit.isDetecting ? "检测中…" : "检测",
+                        systemImage: "arrow.clockwise",
+                        action: model.detectExitIP
+                    )
+                    .disabled(model.state.exit.isDetecting)
+                }
             }
+            .padding(VisualStyle.spacing16)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func proxySelectionCard(_ groups: [MihomoProxyGroup]) -> some View {
+        SurfaceCard {
+            CardHeader("兼容模式代理组", systemImage: "wifi", tone: .warning) {
+                Button("刷新", systemImage: "arrow.clockwise", action: model.refreshMihomoRuntime)
+                    .controlSize(.small)
+                    .disabled(model.isMihomoActionBusy)
+            }
+            Divider()
+            VStack(spacing: 0) {
+                ForEach(groups) { group in
+                    SettingRow(group.name, detail: "本次运行有效，重新启动后恢复 YAML 默认值") {
+                        Picker(group.name, selection: proxyBinding(group)) {
+                            ForEach(group.candidates, id: \.self) { candidate in
+                                Text(candidate).tag(candidate)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 240)
+                        .disabled(model.state.mihomoRuntime.selectingProxyGroup != nil)
+                    }
+                    if group.id != groups.last?.id {
+                        Divider().padding(.leading, 52)
+                    }
+                }
+            }
+            .padding(.horizontal, VisualStyle.spacing16)
+            .padding(.bottom, VisualStyle.spacing12)
         }
     }
 
-    @ViewBuilder
-    private var runtimeInstallButton: some View {
-        if model.state.runtimeOperation != nil {
-            Button("取消", systemImage: "xmark.circle", action: model.cancelRuntimeOperation)
-                .disabled(model.state.runtimeOperation?.canCancel != true)
-        } else {
-            Button(
-                "管理组件",
-                systemImage: "shippingbox",
-                action: onManageRuntime
-            )
-        }
-    }
-
-    private func inlineMessage(
-        _ message: String,
-        systemImage: String,
-        tone: AppTone
-    ) -> some View {
-        Label(message, systemImage: systemImage)
-            .font(.caption)
-            .foregroundStyle(tone.color)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private var proxyPresentation: SidebarProxyPresentation {
-        SidebarProxyPresentation(
-            launchPhase: model.state.launchPhase,
-            proxyCorePhase: model.state.proxyCorePhase,
-            endpoint: model.state.proxyEndpoint
+    private func proxyBinding(_ group: MihomoProxyGroup) -> Binding<String> {
+        Binding(
+            get: { group.selected },
+            set: { model.selectProxy(group: group.name, proxy: $0) }
         )
     }
 
-    private var connectionStatusShortTitle: String {
+    private var proxyActionButton: some View {
+        Button(proxyActionTitle, systemImage: proxyActionIcon) {
+            model.state.isProxyRunning ? model.stopProxy() : model.startProxy()
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(proxyActionDisabled)
+        .help(model.proxyConfigurationIssue ?? proxyActionTitle)
+    }
+
+    private var proxyActionTitle: String {
         switch model.state.proxyCorePhase {
-        case .stopped: "未启动"
-        case .validating: "校验中"
-        case .starting: "启动中"
-        case .running: "运行中"
-        case .stopping: "停止中"
-        case .failed: "异常"
+        case .stopped, .failed: model.usesIPv6RequiredTransport ? "启动 IPv6 模式" : "启动代理"
+        case .validating, .starting: "正在启动"
+        case .running: model.usesIPv6RequiredTransport ? "停止 IPv6 模式" : "停止代理"
+        case .stopping: "正在停止"
         }
     }
 
-    private var currentNodeTitle: String {
-        if model.state.localProxyConfiguration.routingMode == .direct {
-            return "直连模式"
-        }
-        if let region = selectedResult?.region, !region.isEmpty {
-            return region
-        }
-        return selectedIP.isEmpty ? "配置默认节点" : "当前节点"
+    private var proxyActionIcon: String {
+        model.state.isProxyRunning ? "stop.fill" : "play.fill"
     }
 
-    private var currentNodeDetail: String {
-        if model.state.localProxyConfiguration.routingMode == .direct {
-            return "流量直接连接，不经过代理节点"
+    private var proxyActionDisabled: Bool {
+        switch model.state.proxyCorePhase {
+        case .validating, .starting, .stopping: true
+        case .running: false
+        case .stopped, .failed:
+            !model.isProxyConfigurationReady || !model.activeProxyRuntimeIsAvailable
+                || model.isTemplateOperationBusy || model.switchingIP != nil
         }
-        if selectedIP.isEmpty {
-            return "使用代理配置中的服务器或 Provider"
+    }
+
+    private var headerStatus: String {
+        if !model.usesIPv6RequiredTransport { return "兼容模式" }
+        return model.state.isProxyRunning ? "IPv6 已启用" : "IPv6 未启用"
+    }
+
+    private var headerTone: AppTone {
+        if !model.usesIPv6RequiredTransport { return .warning }
+        if case .failed = model.state.proxyCorePhase { return .negative }
+        return model.state.isProxyRunning ? .positive : .accent
+    }
+
+    private var headerIcon: String {
+        if !model.usesIPv6RequiredTransport { return "exclamationmark.triangle.fill" }
+        return model.state.isProxyRunning ? "checkmark.circle.fill" : "6.circle"
+    }
+
+    private var selectedNodeIsIPv6: Bool {
+        IPv6Address(
+            model.state.preferences.selectedIP.trimmingCharacters(in: .whitespacesAndNewlines)
+        ) != nil
+    }
+
+    private var selectedNodeDetail: String {
+        selectedNodeIsIPv6 ? model.state.preferences.selectedIP : "尚未选择有效 IPv6 地址"
+    }
+
+    private var configurationDetail: String {
+        model.state.proxySupportsNodeSelection
+            ? "主内联节点可注入当前 IPv6 地址"
+            : "Provider-only 或当前配置无法保证 IPv6 入口"
+    }
+
+    private var tunDetail: String {
+        if model.state.tun.isRunning { return "TUN 正在接管公网流量" }
+        return model.canUseTunMode ? "服务和固定签名内核已就绪" : "需要安装、批准或修复服务"
+    }
+
+    private var publicTrafficDetail: String {
+        if model.state.isProxyRunning {
+            return model.usesIPv6RequiredTransport
+                ? "私有地址直连，其余流量通过 IPv6 代理入口"
+                : "流量遵循兼容配置中的路由策略"
         }
-        return selectedIP
+        return model.proxyConfigurationIssue ?? "等待启动"
     }
 
-    private var currentNodeIcon: String {
-        model.state.localProxyConfiguration.routingMode == .direct
-            ? "arrow.up.right"
-            : "network"
-    }
-
-    private var currentNodeTone: AppTone {
-        if model.state.localProxyConfiguration.routingMode == .direct { return .neutral }
-        return selectedIP.isEmpty ? .neutral : .accent
-    }
-
-    private var selectedResult: ViaSixCore.SpeedTestResult? {
-        if let result = model.state.configurationTest.result, result.ip == selectedIP {
+    private var currentNodeResult: SpeedTestResult? {
+        if let result = model.state.configurationTest.result,
+            result.ip == model.state.preferences.selectedIP
+        {
             return result
         }
         return model.state.selectedResult
     }
 
-    private var selectedIP: String {
-        model.state.preferences.selectedIP
-    }
-
-    private var proxyEndpoint: String {
-        model.state.proxyEndpoint.displayAddress
-    }
-
-    private func performProxyPrimaryAction() {
-        switch proxyPresentation.action {
-        case .startProxy:
-            model.startProxy()
-        case .stopProxy:
-            model.stopProxy()
-        case .none:
-            break
-        }
-    }
-
-    private var displayedRoutingMode: ProxyRoutingMode {
-        optimisticRoutingMode ?? model.state.localProxyConfiguration.routingMode
-    }
-
-    private var routingModePickerDisabled: Bool {
-        guard model.state.launchPhase == .ready else { return true }
-        if model.isRoutingModeChanging
-            || model.isSystemProxyTransitioning
-            || model.isMihomoActionBusy
-            || model.state.runtimeOperation != nil
-            || model.isTemplateOperationBusy
-            || model.switchingIP != nil
-        {
-            return true
-        }
-        switch model.state.proxyCorePhase {
-        case .stopped, .running, .failed:
-            return false
-        case .validating, .starting, .stopping:
-            return true
-        }
-    }
-
-    private func selectRoutingMode(_ mode: ProxyRoutingMode) {
-        guard mode != displayedRoutingMode, !routingModePickerDisabled else { return }
-        model.setRoutingMode(mode)
-        optimisticRoutingMode = model.isRoutingModeChanging ? mode : nil
-    }
-
-    private var tunRequestedBinding: Binding<Bool> {
-        Binding {
-            model.state.localProxyConfiguration.networkAccessMode == .virtualInterface
-        } set: { enabled in
-            model.setNetworkAccessMode(enabled ? .virtualInterface : .localProxy)
-        }
-    }
-
-    private var systemProxyRequestedBinding: Binding<Bool> {
-        Binding {
-            model.state.localProxyConfiguration.systemProxyEnabled
-        } set: { enabled in
-            model.setSystemProxyEnabled(enabled)
-        }
-    }
-
-    private var systemProxyToggleDisabled: Bool {
-        guard model.state.launchPhase == .ready else { return true }
-        if model.isRoutingModeChanging
-            || model.isSystemProxyTransitioning
-            || model.state.runtimeOperation != nil
-            || model.isTemplateOperationBusy
-            || model.switchingIP != nil
-        {
-            return true
-        }
-        switch model.state.proxyCorePhase {
-        case .validating, .starting, .stopping:
-            return true
-        case .stopped, .running, .failed:
-            break
-        }
-        return switch model.state.systemProxyPhase {
-        case .enabling, .disabling:
-            true
-        case .disabled, .enabled, .failed:
-            false
-        }
-    }
-
-    private var tunToggleDisabled: Bool {
-        guard model.state.launchPhase == .ready else { return true }
-        if model.isRoutingModeChanging
-            || model.isSystemProxyTransitioning
-            || model.isTunTransitioning
-            || model.isNetworkAccessChanging
-            || model.state.runtimeOperation != nil
-            || model.isTemplateOperationBusy
-            || model.switchingIP != nil
-        {
-            return true
-        }
-        switch model.state.proxyCorePhase {
-        case .validating, .starting, .stopping:
-            return true
-        case .stopped, .running, .failed:
-            break
-        }
-        return !model.state.localProxyConfiguration.networkAccessMode.usesVirtualInterface
-            && !model.canUseTunMode
-    }
-
-    private var tunStatusText: String {
-        switch model.state.tun.sessionPhase {
-        case .inactive: model.canUseTunMode ? "已就绪" : "未就绪"
-        case .starting: "正在启动"
-        case .running: "运行中"
-        case .stopping: "正在停止"
-        case .recovering: "正在恢复"
-        case .recoveryRequired: "需要恢复"
-        case .failed: "运行异常"
-        }
-    }
-
-    private var networkAccessStatusText: String {
-        let systemProxy = model.state.localProxyConfiguration.systemProxyEnabled
-        let tun = model.state.localProxyConfiguration.networkAccessMode == .virtualInterface
-        return switch (systemProxy, tun) {
-        case (true, true): "系统代理 + TUN"
-        case (true, false): "系统代理"
-        case (false, true): "TUN"
-        case (false, false): "仅本地监听"
-        }
-    }
-
-    private var networkAccessTone: AppTone {
-        if case .failed = model.state.systemProxyPhase { return .negative }
-        if case .failed = model.state.tun.sessionPhase { return .negative }
-        if systemProxyIsTransitioning || model.isTunTransitioning { return .accent }
-        if model.state.localProxyConfiguration.systemProxyEnabled
-            || model.state.localProxyConfiguration.networkAccessMode == .virtualInterface
-        {
-            return .positive
-        }
-        return .neutral
-    }
-
-    private var networkAccessStatusSystemImage: String? {
-        if networkAccessTone == .negative { return "xmark.circle.fill" }
-        if systemProxyIsTransitioning || model.isTunTransitioning { return "hourglass" }
-        return networkAccessTone == .positive ? "checkmark.circle.fill" : "circle"
-    }
-
-    private var tunTone: AppTone {
-        switch model.state.tun.sessionPhase {
-        case .running: .positive
-        case .starting, .stopping, .recovering: .accent
-        case .recoveryRequired: .warning
-        case .failed: .negative
-        case .inactive:
-            model.state.localProxyConfiguration.networkAccessMode == .virtualInterface
-                ? (model.canUseTunMode ? .accent : .warning) : .neutral
-        }
-    }
-
-    private var tunStatusSystemImage: String? {
-        switch model.state.tun.sessionPhase {
-        case .running: "checkmark.circle.fill"
-        case .starting, .stopping, .recovering: "hourglass"
-        case .recoveryRequired: "exclamationmark.circle.fill"
-        case .failed: "xmark.circle.fill"
-        case .inactive: nil
-        }
-    }
-
-    private var systemProxyStatusText: String {
-        systemProxyPresentation.text
-    }
-
-    private var systemProxyIsTransitioning: Bool {
-        systemProxyPresentation.isTransitioning
-    }
-
-    private var systemProxyPresentation: SystemProxyStatusPresentation {
-        SystemProxyStatusPresentation(
-            phase: model.state.systemProxyPhase,
-            isRequested: model.state.localProxyConfiguration.systemProxyEnabled
-        )
-    }
-
-    private var exitIPDetectionModeBinding: Binding<ExitIPDetectionMode> {
-        Binding {
-            model.exitIPDetectionMode
-        } set: { mode in
-            model.exitIPDetectionMode = mode
-        }
-    }
-
-    private var showingPreviousExitIPResult: Bool {
-        guard model.state.exit.info != nil else { return false }
-        return model.state.exit.isDetecting || model.state.exit.errorMessage != nil
-    }
-
-    private var exitIPRouteIcon: String {
-        guard let route = model.state.exit.context?.route else { return "arrow.left.arrow.right" }
-        switch route {
-        case .direct:
-            return "arrow.up.right"
-        case .proxy:
-            return "point.3.connected.trianglepath.dotted"
-        }
-    }
-
-    private var isProxyTransitioning: Bool {
-        switch model.state.proxyCorePhase {
-        case .validating, .starting, .stopping:
-            true
-        case .stopped, .running, .failed:
-            false
-        }
-    }
-
-    private var proxyToggleDisabled: Bool {
-        guard model.state.launchPhase == .ready else { return true }
-        if model.state.runtimeOperation != nil || model.isTemplateOperationBusy { return true }
-        switch model.state.proxyCorePhase {
-        case .stopping:
-            return true
-        case .validating, .starting, .running:
-            return false
-        case .stopped, .failed:
-            return model.switchingIP != nil
-                || (model.state.localProxyConfiguration.networkAccessMode == .virtualInterface
-                    && model.hasForeignTunSession)
-                || !model.activeProxyRuntimeIsAvailable
-                || !model.isProxyConfigurationReady
-        }
-    }
-
-    private var proxyReadinessHint: String {
-        switch model.state.proxyCorePhase {
-        case .validating:
-            return "正在校验代理配置，可取消启动。"
-        case .starting:
-            return "正在启动本地代理，可取消启动。"
-        case .stopping:
-            return "正在停止本地代理并清理网络监听。"
-        case .running:
-            return "本地代理正在运行。"
-        case .stopped, .failed:
-            break
-        }
-        if model.state.runtimeOperation != nil {
-            return "运行组件安装中，完成后即可启动本地代理。"
-        }
-        if model.isTemplateOperationBusy {
-            return "代理配置操作进行中，完成后即可继续。"
-        }
-        if let issue = model.proxyConfigurationIssue {
-            return "代理配置尚未就绪：\(issue)。请在设置中导入或编辑配置。"
-        }
-        if model.state.localProxyConfiguration.networkAccessMode == .virtualInterface,
-            model.hasForeignTunSession
-        {
-            return "虚拟网卡会话正由其他登录用户使用，当前用户无法接管。"
-        }
-        if !model.activeProxyRuntimeIsAvailable {
-            if model.state.localProxyConfiguration.networkAccessMode == .virtualInterface {
-                return "虚拟网卡服务尚未就绪，请在设置中安装、批准或修复。"
-            }
-            return "尚未找到 Mihomo，请在设置中安装或指定路径。"
-        }
-        return "本地代理当前未启动。"
-    }
-
-    private func copyProxyEndpoint() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(proxyEndpoint, forType: .string)
-        copiedEndpoint = true
-
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(1.5))
-            copiedEndpoint = false
-        }
-    }
-
-    private func copyExitIP() {
-        guard let ip = model.state.exit.info?.ip else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(ip, forType: .string)
-        copiedExitIP = true
-
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(1.5))
-            copiedExitIP = false
-        }
-    }
-
-    private var runtimeNeedsAttention: Bool {
-        model.state.runtimePhase != .ready
-            || model.state.runtimeOperation != nil
-            || model.state.runtimeOperationError != nil
-            || model.runtimeIntegrityIssue != nil
-    }
-
-    private var isConfigurationTestRunning: Bool {
+    private var configurationTestIsRunning: Bool {
         switch model.state.configurationTest.phase {
         case .running, .stopping: true
         case .idle, .failed: false
         }
     }
 
-    private var configurationTestButtonTitle: String {
-        switch model.state.configurationTest.phase {
-        case .running: "停止测速"
-        case .stopping: "正在停止"
-        case .idle, .failed: "测试当前节点"
-        }
+    private var configurationTestTitle: String {
+        configurationTestIsRunning ? "停止测试" : "测试当前节点"
     }
 
-    private var configurationTestButtonIcon: String {
-        switch model.state.configurationTest.phase {
-        case .running: "stop.fill"
-        case .stopping: "hourglass"
-        case .idle, .failed: "gauge.with.dots.needle.67percent"
-        }
-    }
-
-    private var configurationTestButtonDisabled: Bool {
-        if case .stopping = model.state.configurationTest.phase { return true }
-        if isConfigurationTestRunning { return false }
-        return model.currentConfigurationTestUnavailableReason != nil
-    }
-
-    private var configurationTestButtonHelp: String {
-        switch model.state.configurationTest.phase {
-        case .running:
-            return "停止当前节点测速"
-        case .stopping:
-            return "正在停止当前节点测速"
-        case .idle, .failed:
-            if let reason = model.currentConfigurationTestUnavailableReason {
-                return "暂不可测速：\(reason)"
-            }
-            return "沿用当前协议、端口和下载设置；候选筛选条件不会影响本次结果。"
-        }
-    }
-
-    private var runtimeStatusTitle: String {
-        if let operation = model.state.runtimeOperation {
-            return operation.description
-        }
-        if model.state.runtimeOperationError != nil {
-            return "运行组件操作失败"
-        }
-        if model.runtimeIntegrityIssue != nil {
-            return "运行组件需要修复"
-        }
-        return switch model.state.runtimePhase {
-        case .ready: "运行组件已就绪"
-        case .checking: "正在检查运行组件"
-        case .missing: "运行组件未安装"
-        }
-    }
-
-    private var runtimeStatusDetail: String {
-        if let error = model.state.runtimeOperationError {
-            return error
-        }
-        if model.state.runtimeOperation != nil {
-            return "节点测速与本地代理会在操作完成后恢复。"
-        }
-        if let issue = model.runtimeIntegrityIssue {
-            return issue
-        }
-        return "CloudflareSpeedTest 与 Mihomo 可在设置中分别安装或指定自定义文件。"
-    }
-
-    private var runtimeStatusTone: AppTone {
-        if model.state.runtimeOperation != nil { return .accent }
-        if model.state.runtimeOperationError != nil { return .negative }
-        if model.runtimeIntegrityIssue != nil { return .warning }
-        return switch model.state.runtimePhase {
-        case .ready: .positive
-        case .checking: .neutral
-        case .missing: .warning
-        }
-    }
-
-    private var runtimeStatusIcon: String {
-        if model.state.runtimeOperation != nil { return "arrow.down.circle" }
-        if model.state.runtimeOperationError != nil { return "exclamationmark.triangle.fill" }
-        if model.runtimeIntegrityIssue != nil { return "exclamationmark.triangle.fill" }
-        return switch model.state.runtimePhase {
-        case .ready: "checkmark.circle.fill"
-        case .checking: "clock"
-        case .missing: "arrow.down.circle"
-        }
-    }
-}
-
-private struct ConnectionMetricChip: View {
-    let title: String
-    let systemImage: String
-
-    var body: some View {
-        Label(title, systemImage: systemImage)
-            .font(.caption.weight(.medium))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
-            .background(
-                VisualStyle.subtleFill,
-                in: Capsule(style: .continuous)
-            )
-            .lineLimit(1)
-    }
-}
-
-private struct OverviewPrimaryActionButtonStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.callout.weight(.semibold))
-            .foregroundStyle(isEnabled ? Color.white : Color.secondary)
-            .padding(.horizontal, 12)
-            .frame(minHeight: 30)
-            .background(
-                isEnabled ? VisualStyle.accent : VisualStyle.subtleFill,
-                in: RoundedRectangle(
-                    cornerRadius: VisualStyle.radiusSmall,
-                    style: .continuous
-                )
-            )
-            .overlay {
-                RoundedRectangle(
-                    cornerRadius: VisualStyle.radiusSmall,
-                    style: .continuous
-                )
-                .stroke(
-                    isEnabled ? VisualStyle.accent : VisualStyle.surfaceBorder,
-                    lineWidth: 1
-                )
-            }
-            .opacity(configuration.isPressed ? 0.76 : 1)
+    private var exitModeBinding: Binding<ExitIPDetectionMode> {
+        Binding(get: { model.exitIPDetectionMode }, set: { model.exitIPDetectionMode = $0 })
     }
 }

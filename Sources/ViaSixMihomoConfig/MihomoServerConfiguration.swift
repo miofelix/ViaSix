@@ -184,13 +184,38 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
         try validate(options: options, projection: projection)
 
         var serverRoot = server?.rawMapping() ?? [:]
+        if options.runtimePolicy == .ipv6Required {
+            guard let server, server.hasReplaceablePrimaryServer else {
+                throw MihomoConfigurationError.ipv6ManagedProfileRequired
+            }
+            let selectedAddress = address?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let storedAddress = server.rawMapping().mappings("proxies")?
+                .first(where: { $0.string("server")?.isEmpty == false })?
+                .string("server")
+            let managedAddress: String
+            if let selectedAddress, !selectedAddress.isEmpty {
+                guard isIPv6Address(selectedAddress) else {
+                    throw MihomoConfigurationError.selectedNodeMustBeIPv6
+                }
+                managedAddress = selectedAddress
+            } else if let storedAddress, isIPv6Address(storedAddress) {
+                managedAddress = storedAddress
+            } else {
+                throw MihomoConfigurationError.selectedNodeMustBeIPv6
+            }
+            serverRoot = try ipv6ManagedServerMapping(
+                from: server,
+                replacingPrimaryServerWith: managedAddress
+            )
+        }
         if options.routingMode != .direct,
+            options.runtimePolicy == .compatibility,
             server?.requiresSelectedPrimaryServer == true,
             address?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
         {
             throw MihomoConfigurationError.missingSelectedNodeAddress
         }
-        if let address {
+        if let address, options.runtimePolicy == .compatibility {
             guard let server else {
                 if options.routingMode != .direct {
                     throw MihomoConfigurationError.missingProxySource
@@ -203,7 +228,7 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
             }
             serverRoot = try server.replacingPrimaryServer(with: address).rawMapping()
         }
-        if options.routingMode != .direct {
+        if options.runtimePolicy == .ipv6Required || options.routingMode != .direct {
             try validateServerMapping(serverRoot)
         } else {
             serverRoot = [:]
@@ -229,6 +254,26 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
         // `canonicalData` was produced by this module and failure here would
         // indicate a programmer error rather than malformed user input.
         (try? MihomoYAML.mapping(from: canonicalData)) ?? [:]
+    }
+
+    private static func ipv6ManagedServerMapping(
+        from server: Self,
+        replacingPrimaryServerWith address: String
+    ) throws -> [String: Any] {
+        let root = server.rawMapping()
+        guard let proxies = root.mappings("proxies"),
+            let index = primaryServerIndex(in: root)
+        else {
+            throw MihomoConfigurationError.ipv6ManagedProfileRequired
+        }
+        var primary = proxies[index]
+        primary["server"] = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ["proxies": [primary]]
+    }
+
+    private static func isIPv6Address(_ value: String) -> Bool {
+        var address = in6_addr()
+        return value.withCString { inet_pton(AF_INET6, $0, &address) == 1 }
     }
 
     private static func serverMapping(from input: [String: Any]) throws -> [String: Any] {
@@ -344,7 +389,9 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
             "mixed-port": options.mixedPort,
             "allow-lan": false,
             "bind-address": options.listenAddress,
-            "mode": options.routingMode.rawValue,
+            "mode": options.runtimePolicy == .ipv6Required
+                ? MihomoRoutingMode.rule.rawValue
+                : options.routingMode.rawValue,
             "log-level": options.logLevel.rawValue,
             "ipv6": options.ipv6Enabled,
             "unified-delay": true,
@@ -363,7 +410,7 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
         // Direct mode must be independent from every remote proxy and provider.
         // Besides reducing attack surface, this guarantees that selecting
         // direct cannot trigger subscription refreshes or outbound handshakes.
-        if options.routingMode != .direct {
+        if options.runtimePolicy == .ipv6Required || options.routingMode != .direct {
             for key in runtimeServerKeys where server[key] != nil {
                 runtime[key] = server[key]
             }
@@ -393,7 +440,11 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
             ]
         }
 
-        try installManagedPolicy(in: &runtime, options: options)
+        if options.runtimePolicy == .ipv6Required {
+            try installIPv6ManagedPolicy(in: &runtime)
+        } else {
+            try installManagedPolicy(in: &runtime, options: options)
+        }
 
         if projection == .privilegedTun {
             guard let tun = options.tun else {
@@ -509,6 +560,30 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
             rules.append("MATCH,\(target)")
         }
         runtime["rules"] = rules
+    }
+
+    private static func installIPv6ManagedPolicy(in runtime: inout [String: Any]) throws {
+        guard let target = runtime.mappings("proxies")?.first?.string("name"),
+            !target.isEmpty
+        else {
+            throw MihomoConfigurationError.ipv6ManagedProfileRequired
+        }
+        runtime.removeValue(forKey: "proxy-providers")
+        runtime.removeValue(forKey: "proxy-groups")
+        runtime.removeValue(forKey: "rule-providers")
+        runtime.removeValue(forKey: "sub-rules")
+        runtime["rules"] = [
+            "IP-CIDR,10.0.0.0/8,DIRECT,no-resolve",
+            "IP-CIDR,100.64.0.0/10,DIRECT,no-resolve",
+            "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+            "IP-CIDR,169.254.0.0/16,DIRECT,no-resolve",
+            "IP-CIDR,172.16.0.0/12,DIRECT,no-resolve",
+            "IP-CIDR,192.168.0.0/16,DIRECT,no-resolve",
+            "IP-CIDR6,::1/128,DIRECT,no-resolve",
+            "IP-CIDR6,fc00::/7,DIRECT,no-resolve",
+            "IP-CIDR6,fe80::/10,DIRECT,no-resolve",
+            "MATCH,\(target)",
+        ]
     }
 
     private static func validate(

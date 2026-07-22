@@ -2,6 +2,7 @@
   "listenAddress": "127.0.0.1",
   "port": 11451,
   "controllerPort": 9090,
+  "ipv6TransportPolicy": "required",
   "udpEnabled": true,
   "sniffingEnabled": true,
   "bypassPrivateNetworks": true,

@@ -173,7 +173,7 @@ public actor AppBootstrapper {
         } catch {
             // Previously shipped examples intentionally contain this exact
             // sentinel. They are onboarding hints, not usable server profiles.
-            guard Self.isLegacyPlaceholder(migrationInput) || local.routingMode == .direct else {
+            guard Self.isLegacyPlaceholder(migrationInput) || Self.usesDirectRuntime(local) else {
                 throw error
             }
             return
@@ -288,7 +288,7 @@ public actor AppBootstrapper {
     public func writeConfig(ip: String? = nil) throws -> Bool {
         let sources = try loadConfigurationSources()
         guard
-            sources.local.routingMode != .direct,
+            !Self.usesDirectRuntime(sources.local),
             sources.profile?.hasReplaceablePrimaryServer == true
         else { return false }
         let config = try runtimeConfiguration(
@@ -331,7 +331,10 @@ public actor AppBootstrapper {
         selectedIP: String? = nil
     ) throws -> Data {
         let sources = try loadConfigurationSources()
-        guard sources.local.networkAccessMode == .virtualInterface else {
+        guard
+            sources.local.ipv6TransportPolicy == .required
+                || sources.local.networkAccessMode == .virtualInterface
+        else {
             throw AppBootstrapperError.virtualInterfaceRequiresPrivilegedService
         }
         return try runtimeConfiguration(
@@ -350,12 +353,15 @@ public actor AppBootstrapper {
         selectedIP: String? = nil
     ) throws -> Data {
         let sources = try loadConfigurationSources()
-        guard sources.local.networkAccessMode == .virtualInterface else {
+        guard
+            sources.local.ipv6TransportPolicy == .required
+                || sources.local.networkAccessMode == .virtualInterface
+        else {
             throw AppBootstrapperError.virtualInterfaceRequiresPrivilegedService
         }
         let local = try sources.local.validated()
         let replacement: String?
-        if local.routingMode == .direct {
+        if Self.usesDirectRuntime(local) {
             replacement = nil
         } else if sources.profile?.hasReplaceablePrimaryServer == true {
             replacement = Self.nonEmpty(
@@ -477,12 +483,12 @@ public actor AppBootstrapper {
         let local = try local.validated()
         let profileData = try regularFileDataIfPresent(at: paths.profileConfig)
         let profile: MihomoServerConfiguration?
-        if local.routingMode == .direct {
+        if Self.usesDirectRuntime(local) {
             profile = profileData.flatMap { try? MihomoServerConfiguration(data: $0) }
         } else {
             profile = try profileData.map(MihomoServerConfiguration.init(data:))
         }
-        if local.routingMode != .direct, profile == nil {
+        if !Self.usesDirectRuntime(local), profile == nil {
             throw MihomoConfigurationError.missingProxySource
         }
         let generated = try runtimeConfiguration(
@@ -519,10 +525,10 @@ public actor AppBootstrapper {
         let local = try loadLocalProxyConfiguration()
         let profileData = try regularFileDataIfPresent(at: paths.profileConfig)
         let profile =
-            local.routingMode == .direct
+            Self.usesDirectRuntime(local)
             ? nil : try profileData.map(MihomoServerConfiguration.init(data:))
 
-        guard local.routingMode == .direct || profile != nil else {
+        guard Self.usesDirectRuntime(local) || profile != nil else {
             try Self.removeRegularFileIfPresent(paths.generatedConfig, using: .default)
             return BootstrapConfiguration(
                 endpoint: local.endpoint,
@@ -534,18 +540,34 @@ public actor AppBootstrapper {
         }
 
         let supportsNodeSelection =
-            local.routingMode != .direct && profile?.hasReplaceablePrimaryServer == true
+            !Self.usesDirectRuntime(local) && profile?.hasReplaceablePrimaryServer == true
         let requestedIP = selectedIP?.trimmingCharacters(in: .whitespacesAndNewlines)
         // Only an explicit persisted selection is an override. Reading the
         // generated profile's original server back as a selection would turn a
         // domain such as origin.example into a fake "selected IP" on relaunch.
         let effectiveIP = supportsNodeSelection ? Self.nonEmpty(requestedIP) : nil
 
-        let expected = try runtimeConfiguration(
-            profile: profile,
-            local: local,
-            selectedIP: effectiveIP
-        )
+        let expected: Data
+        do {
+            expected = try runtimeConfiguration(
+                profile: profile,
+                local: local,
+                selectedIP: effectiveIP
+            )
+        } catch let issue as MihomoConfigurationError
+            where local.ipv6TransportPolicy == .required
+            && (issue == .selectedNodeMustBeIPv6
+                || issue == .ipv6ManagedProfileRequired)
+        {
+            try Self.removeRegularFileIfPresent(paths.generatedConfig, using: .default)
+            return BootstrapConfiguration(
+                endpoint: local.endpoint,
+                local: local,
+                effectiveIP: effectiveIP,
+                supportsNodeSelection: supportsNodeSelection,
+                launchIssue: issue
+            )
+        }
         if try !configurationFileMatches(expected, at: paths.generatedConfig) {
             try replaceSingleConfigurationFile(expected, at: paths.generatedConfig)
         }
@@ -563,16 +585,20 @@ public actor AppBootstrapper {
         return value
     }
 
+    private static func usesDirectRuntime(_ local: LocalProxyConfiguration) -> Bool {
+        local.ipv6TransportPolicy == .compatibility && local.routingMode == .direct
+    }
+
     private func loadConfigurationSources() throws -> ConfigurationSources {
         let local = try loadLocalProxyConfiguration()
         let profileData = try regularFileDataIfPresent(at: paths.profileConfig)
         let profile: MihomoServerConfiguration?
-        if local.routingMode == .direct {
+        if Self.usesDirectRuntime(local) {
             profile = profileData.flatMap { try? MihomoServerConfiguration(data: $0) }
         } else {
             profile = try profileData.map(MihomoServerConfiguration.init(data:))
         }
-        if local.routingMode != .direct, profile == nil {
+        if !Self.usesDirectRuntime(local), profile == nil {
             throw MihomoConfigurationError.missingProxySource
         }
         return ConfigurationSources(profile: profile, local: local)
@@ -627,7 +653,10 @@ public actor AppBootstrapper {
                     strictRoute: local.tunStrictRoute,
                     mtu: local.tunMTU
                 )
-                : nil
+                : nil,
+            runtimePolicy: local.ipv6TransportPolicy == .required
+                ? .ipv6Required
+                : .compatibility
         )
     }
 

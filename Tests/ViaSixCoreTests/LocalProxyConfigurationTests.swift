@@ -13,10 +13,29 @@ final class LocalProxyConfigurationTests: XCTestCase {
         let local = try JSONDecoder().decode(LocalProxyConfiguration.self, from: legacy)
 
         XCTAssertEqual(local.routingMode, .rule)
+        XCTAssertEqual(local.ipv6TransportPolicy, .compatibility)
         XCTAssertEqual(local.networkAccessMode, .localProxy)
         XCTAssertEqual(local.controllerPort, AppMetadata.controllerPort)
         XCTAssertEqual(local.endpoint, ProxyEndpoint(host: "127.0.0.2", port: 18_080))
         XCTAssertFalse(local.udpEnabled)
+    }
+
+    func testNewInstallationUsesIPv6RequiredTransportPolicy() throws {
+        let paths = AppPaths(
+            root: FileManager.default.temporaryDirectory.appendingPathComponent(
+                "LocalProxyConfigurationTests-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        )
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+
+        try DefaultResourceInstaller.install(into: paths)
+        let local = try JSONDecoder().decode(
+            LocalProxyConfiguration.self,
+            from: Data(contentsOf: paths.localProxyConfig)
+        )
+
+        XCTAssertEqual(local.ipv6TransportPolicy, .required)
     }
 
     func testControllerPortMustBeValidAndDistinctFromProxyPort() throws {

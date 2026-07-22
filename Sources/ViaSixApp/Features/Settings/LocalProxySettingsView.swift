@@ -53,24 +53,32 @@ struct LocalProxySettingsView: View {
     private var editor: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: VisualStyle.spacing16) {
-                LazyVGrid(
-                    columns: [
-                        GridItem(
-                            .flexible(),
-                            spacing: VisualStyle.spacing16,
-                            alignment: .top
-                        ),
-                        GridItem(.flexible(), alignment: .top),
-                    ],
-                    alignment: .leading,
-                    spacing: VisualStyle.spacing16
-                ) {
-                    routingModeSection
-                    networkAccessSection
+                transportPolicySection
+
+                if configuration.ipv6TransportPolicy == .required {
+                    requiredTransportSection
+                } else {
+                    LazyVGrid(
+                        columns: [
+                            GridItem(
+                                .flexible(),
+                                spacing: VisualStyle.spacing16,
+                                alignment: .top
+                            ),
+                            GridItem(.flexible(), alignment: .top),
+                        ],
+                        alignment: .leading,
+                        spacing: VisualStyle.spacing16
+                    ) {
+                        routingModeSection
+                        networkAccessSection
+                    }
                 }
 
                 listenerSection
-                if configuration.networkAccessMode == .virtualInterface {
+                if configuration.ipv6TransportPolicy == .required
+                    || configuration.networkAccessMode == .virtualInterface
+                {
                     tunSection
                 }
                 behaviorSection
@@ -87,6 +95,55 @@ struct LocalProxySettingsView: View {
             .padding(VisualStyle.spacing20)
         }
         .scrollbarSafeContent()
+    }
+
+    private var transportPolicySection: some View {
+        ConfigurationSection("传输策略", systemImage: "6.circle") {
+            Picker("传输策略", selection: $configuration.ipv6TransportPolicy) {
+                ForEach(IPv6TransportPolicy.allCases, id: \.self) { policy in
+                    Text(policy.displayName).tag(policy)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .disabled(isSaving)
+            .onChange(of: configuration.ipv6TransportPolicy) { _, policy in
+                guard policy == .required else { return }
+                configuration.routingMode = .rule
+                configuration.networkAccessMode = .virtualInterface
+                configuration.systemProxyEnabled = false
+                configuration.bypassPrivateNetworks = true
+            }
+
+            Text(
+                configuration.ipv6TransportPolicy == .required
+                    ? "推荐。客户端到远程代理入口必须使用 IPv6；网站最终出口仍可能是 IPv4。"
+                    : "用于旧配置或特殊应用，可使用 IPv4、系统代理、Provider 与自定义规则。"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var requiredTransportSection: some View {
+        ConfigurationSection("IPv6 接入", systemImage: "checkmark.shield.fill") {
+            Label("TUN 为必需项", systemImage: "checkmark.circle.fill")
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(.green)
+
+            Text("私有、回环和链路本地地址保持直连，其余被接管的流量统一通过当前 IPv6 节点。代理模式、系统代理和本地代理接入选项在此模式下不生效。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !model.canUseTunMode {
+                Label(tunAvailabilityDescription, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     private var routingModeSection: some View {

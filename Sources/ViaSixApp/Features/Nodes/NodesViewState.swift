@@ -1,4 +1,5 @@
 import AppKit
+import Network
 import SwiftUI
 import UniformTypeIdentifiers
 import ViaSixCore
@@ -219,6 +220,7 @@ extension NodesView {
 
     var applySelectionDisabled: Bool {
         guard let candidateSelection else { return true }
+        if model.usesIPv6RequiredTransport, IPv6Address(candidateSelection) == nil { return true }
         guard model.state.proxySupportsNodeSelection else { return true }
         guard model.state.speedTestResultsAreCurrent else { return true }
         guard case .idle = model.state.speedTest.phase else { return true }
@@ -242,6 +244,9 @@ extension NodesView {
 
     var applySelectionHelp: String {
         guard let candidateSelection else { return "请先选择一个候选节点" }
+        if model.usesIPv6RequiredTransport, IPv6Address(candidateSelection) == nil {
+            return "IPv6 模式只能应用 IPv6 节点"
+        }
         guard model.state.proxySupportsNodeSelection else {
             return "当前代理配置不支持直接应用测速节点"
         }

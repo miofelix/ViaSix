@@ -131,6 +131,8 @@ final class AppBootstrapperTests: XCTestCase {
         )
         try template.write(to: paths.legacyTemplateConfig)
 
+        try installCompatibilityConfiguration(at: paths)
+
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
 
@@ -254,6 +256,7 @@ final class AppBootstrapperTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: paths.root) }
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
+        try await enableCompatibilityMode(bootstrapper)
         try await bootstrapper.replaceProfile(with: validProfile())
 
         let existing = LocalProxyConfiguration(
@@ -361,7 +364,7 @@ final class AppBootstrapperTests: XCTestCase {
         } catch {
             XCTAssertEqual(
                 error.localizedDescription,
-                "配置不包含节点地址，请先在 ViaSix 中测速并选择一个当前节点"
+                "IPv6 模式需要选择有效的 IPv6 节点"
             )
         }
 
@@ -375,6 +378,7 @@ final class AppBootstrapperTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: paths.root) }
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
+        try await enableCompatibilityMode(bootstrapper)
         try await bootstrapper.replaceProfile(
             with: providerOnlyProfile(),
             selectedIP: "203.0.113.10"
@@ -438,6 +442,7 @@ final class AppBootstrapperTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: paths.root) }
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
+        try await enableCompatibilityMode(bootstrapper)
         try await bootstrapper.replaceProfile(with: validProfile(address: "inline.example"))
         var local = try await bootstrapper.loadLocalProxyConfiguration()
         local.routingMode = .direct
@@ -455,6 +460,7 @@ final class AppBootstrapperTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: paths.root) }
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
+        try await enableCompatibilityMode(bootstrapper)
         try await bootstrapper.replaceProfile(
             with: validProfile(address: "origin.example"),
             selectedIP: nil
@@ -494,6 +500,7 @@ final class AppBootstrapperTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: paths.root) }
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
+        try await enableCompatibilityMode(bootstrapper)
         try await bootstrapper.replaceProfile(with: validProfile())
         var tunnel = try await bootstrapper.loadLocalProxyConfiguration()
         tunnel.networkAccessMode = .virtualInterface
@@ -542,6 +549,7 @@ final class AppBootstrapperTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: paths.root) }
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
+        try await enableCompatibilityMode(bootstrapper)
         try await bootstrapper.replaceProfile(with: validProfile())
 
         for mode in [NetworkAccessMode.localProxy, .systemProxy] {
@@ -576,6 +584,7 @@ final class AppBootstrapperTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: paths.root) }
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
+        try await enableCompatibilityMode(bootstrapper)
         try await bootstrapper.replaceProfile(with: providerOnlyProfile())
 
         var local = try await bootstrapper.loadLocalProxyConfiguration()
@@ -621,6 +630,7 @@ final class AppBootstrapperTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: paths.root) }
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
+        try await enableCompatibilityMode(bootstrapper)
         try await bootstrapper.replaceProfile(with: validProfile(address: "first.example"))
         let oldProfile = try Data(contentsOf: paths.profileConfig)
         let oldLocal = try Data(contentsOf: paths.localProxyConfig)
@@ -650,6 +660,7 @@ final class AppBootstrapperTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: paths.root) }
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
+        try await enableCompatibilityMode(bootstrapper)
         try await bootstrapper.replaceProfile(with: validProfile(address: "stable.example"))
         let oldProfile = try Data(contentsOf: paths.profileConfig)
         let oldLocal = try Data(contentsOf: paths.localProxyConfig)
@@ -708,6 +719,7 @@ final class AppBootstrapperTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: paths.root) }
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
+        try await enableCompatibilityMode(bootstrapper)
         try await bootstrapper.replaceProfile(with: validProfile(address: "first.example"))
         let opened = try Data(contentsOf: paths.profileConfig)
         let external = validProfile(address: "external.example")
@@ -782,6 +794,20 @@ final class AppBootstrapperTests: XCTestCase {
                 isDirectory: true
             )
         )
+    }
+
+    private func enableCompatibilityMode(_ bootstrapper: AppBootstrapper) async throws {
+        var local = try await bootstrapper.loadLocalProxyConfiguration()
+        local.ipv6TransportPolicy = .compatibility
+        let data = try JSONEncoder.pretty.encode(local)
+        let paths = await bootstrapper.paths
+        try data.write(to: paths.localProxyConfig, options: .atomic)
+    }
+
+    private func installCompatibilityConfiguration(at paths: AppPaths) throws {
+        try paths.prepare()
+        let data = try JSONEncoder().encode(LocalProxyConfiguration())
+        try data.write(to: paths.localProxyConfig, options: .atomic)
     }
 
     private func validProfile(

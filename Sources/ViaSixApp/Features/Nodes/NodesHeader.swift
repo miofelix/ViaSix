@@ -5,8 +5,8 @@ extension NodesView {
 
     var pageHeader: some View {
         AppPageHeader(
-            "节点测速",
-            subtitle: "比较候选节点，确认后应用到本地代理"
+            "IPv6 节点优选",
+            subtitle: "测速并选择客户端连接远程代理时使用的 IPv6 入口"
         ) {
             HStack(spacing: VisualStyle.spacing12) {
                 currentNodeSummary

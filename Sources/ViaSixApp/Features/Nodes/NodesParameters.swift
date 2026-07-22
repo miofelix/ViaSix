@@ -157,7 +157,7 @@ extension NodesView {
                     }
                 )
             ) {
-                ForEach(IPSourceMode.allCases, id: \.rawValue) { mode in
+                ForEach(availableSourceModes, id: \.rawValue) { mode in
                     Text(mode.title).tag(mode.rawValue)
                 }
             }
@@ -168,7 +168,9 @@ extension NodesView {
             case .range:
                 ParameterField(
                     label: "自定义 CIDR / IP",
-                    hint: "多个地址用英文逗号分隔，例如 2606:4700::/32, 104.16.0.0/12"
+                    hint: model.usesIPv6RequiredTransport
+                        ? "多个 IPv6 地址或 CIDR 用英文逗号分隔，例如 2606:4700::/32"
+                        : "多个地址用英文逗号分隔，例如 2606:4700::/32, 104.16.0.0/12"
                 ) {
                     TextField("输入 IP、CIDR 或逗号分隔的组合", text: parameterBinding(\.ipRange))
                         .textFieldStyle(.roundedBorder)
@@ -216,11 +218,19 @@ extension NodesView {
                 .background(.green.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
             }
 
-            ToggleSetting(
-                title: "测速 IPv4 网段中的全部 IP",
-                hint: "默认每个 /24 网段随机选择一个 IP；开启后测速时间会显著增加。",
-                isOn: parameterBinding(\.allIP)
-            )
+            if !model.usesIPv6RequiredTransport {
+                ToggleSetting(
+                    title: "测速 IPv4 网段中的全部 IP",
+                    hint: "默认每个 /24 网段随机选择一个 IP；开启后测速时间会显著增加。",
+                    isOn: parameterBinding(\.allIP)
+                )
+            }
+        }
+    }
+
+    private var availableSourceModes: [IPSourceMode] {
+        IPSourceMode.allCases.filter { mode in
+            !model.usesIPv6RequiredTransport || mode != .ipv4
         }
     }
 

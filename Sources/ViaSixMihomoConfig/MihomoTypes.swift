@@ -105,6 +105,11 @@ public enum MihomoRuntimeProjection: Equatable, Sendable {
     case privilegedTun
 }
 
+public enum MihomoRuntimePolicy: String, Codable, Equatable, Sendable {
+    case compatibility
+    case ipv6Required = "ipv6-required"
+}
+
 public struct MihomoTunConfiguration: Codable, Equatable, Sendable {
     public var stack: MihomoTunStack
     public var strictRoute: Bool
@@ -135,6 +140,7 @@ public struct MihomoRuntimeOptions: Codable, Equatable, Sendable {
     public var bypassPrivateNetworks: Bool
     public var externalController: MihomoExternalControllerConfiguration?
     public var tun: MihomoTunConfiguration?
+    public var runtimePolicy: MihomoRuntimePolicy
 
     public init(
         listenAddress: String = "127.0.0.1",
@@ -146,7 +152,8 @@ public struct MihomoRuntimeOptions: Codable, Equatable, Sendable {
         sniffingEnabled: Bool = true,
         bypassPrivateNetworks: Bool = true,
         externalController: MihomoExternalControllerConfiguration? = nil,
-        tun: MihomoTunConfiguration? = nil
+        tun: MihomoTunConfiguration? = nil,
+        runtimePolicy: MihomoRuntimePolicy = .compatibility
     ) {
         self.listenAddress = listenAddress
         self.mixedPort = mixedPort
@@ -158,6 +165,7 @@ public struct MihomoRuntimeOptions: Codable, Equatable, Sendable {
         self.bypassPrivateNetworks = bypassPrivateNetworks
         self.externalController = externalController
         self.tun = tun
+        self.runtimePolicy = runtimePolicy
     }
 }
 
@@ -180,6 +188,8 @@ public enum MihomoConfigurationError: LocalizedError, Equatable, Sendable {
     case missingProxySource
     case missingInlineProxy
     case missingSelectedNodeAddress
+    case selectedNodeMustBeIPv6
+    case ipv6ManagedProfileRequired
     case invalidProxy(String)
     case unsupportedProtocol(String)
     case invalidServerPort
@@ -223,6 +233,10 @@ public enum MihomoConfigurationError: LocalizedError, Equatable, Sendable {
             "配置没有可由 ViaSix 更新地址的内联代理节点"
         case .missingSelectedNodeAddress:
             "配置不包含节点地址，请先在 ViaSix 中测速并选择一个当前节点"
+        case .selectedNodeMustBeIPv6:
+            "IPv6 模式需要选择有效的 IPv6 节点"
+        case .ipv6ManagedProfileRequired:
+            "IPv6 模式需要包含可由 ViaSix 注入地址的内联节点"
         case .invalidProxy(let reason):
             "代理节点配置无效：\(reason)"
         case .unsupportedProtocol(let name):

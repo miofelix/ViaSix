@@ -6,7 +6,7 @@ final class AppSectionTests: XCTestCase {
     func testAllSectionsHaveDisplayMetadata() {
         XCTAssertEqual(
             AppSection.allCases,
-            [.overview, .proxies, .profiles, .connections, .rules, .logs, .nodes, .settings]
+            [.overview, .nodes, .profiles, .logs, .settings]
         )
 
         for section in AppSection.allCases {

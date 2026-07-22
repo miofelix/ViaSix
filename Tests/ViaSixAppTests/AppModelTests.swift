@@ -8,6 +8,85 @@ import XCTest
 
 @MainActor
 final class AppModelTests: XCTestCase {
+    func testIPv6RequiredModeBlocksStartupWithoutIPv6SelectionOrTunReadiness() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let store = PreferencesStore(fileURL: paths.preferences)
+        let bootstrapper = AppBootstrapper(paths: paths)
+        try await bootstrapper.prepareDefaults()
+        try await bootstrapper.replaceProfile(
+            with: validProfile(),
+            selectedIP: "2606:4700::10"
+        )
+        try await store.save(
+            UserPreferences(parameters: .defaults(ipv6File: paths.ipv6List))
+        )
+        let tunCoordinator = ControlledTunModeCoordinator(registration: .notRegistered)
+        let model = makeModel(
+            paths: paths,
+            store: store,
+            bootstrapper: bootstrapper,
+            tunCoordinator: tunCoordinator
+        )
+
+        model.start()
+        try await waitUntilReady(model)
+        XCTAssertTrue(model.usesIPv6RequiredTransport)
+        XCTAssertEqual(model.ipv6TransportReadinessIssue, "IPv6 模式需要先选择有效的 IPv6 节点")
+
+        model.startProxy()
+        try await Task.sleep(for: .milliseconds(40))
+        let startCountWithoutNode = await tunCoordinator.startCount
+        XCTAssertEqual(startCountWithoutNode, 0)
+
+        model.selectIP("2606:4700::10")
+        try await waitUntil { model.switchingIP == nil }
+        XCTAssertEqual(model.state.preferences.selectedIP, "2606:4700::10")
+        XCTAssertEqual(model.ipv6TransportReadinessIssue, "IPv6 模式需要先准备虚拟网卡服务")
+
+        model.startProxy()
+        try await Task.sleep(for: .milliseconds(40))
+        let startCountWithoutTun = await tunCoordinator.startCount
+        XCTAssertEqual(startCountWithoutTun, 0)
+        await model.shutdown()
+    }
+
+    func testIPv6RequiredModeBlocksProviderOnlyProfile() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let store = PreferencesStore(fileURL: paths.preferences)
+        let bootstrapper = AppBootstrapper(paths: paths)
+        try await bootstrapper.prepareDefaults()
+        try providerOnlyProfile().write(to: paths.profileConfig, options: .atomic)
+        try await store.save(
+            UserPreferences(
+                parameters: .defaults(ipv6File: paths.ipv6List),
+                selectedIP: "2606:4700::11"
+            )
+        )
+        let tunCoordinator = ControlledTunModeCoordinator()
+        let model = makeModel(
+            paths: paths,
+            store: store,
+            bootstrapper: bootstrapper,
+            tunCoordinator: tunCoordinator
+        )
+
+        model.start()
+        try await waitUntilReady(model)
+
+        XCTAssertFalse(model.state.proxySupportsNodeSelection)
+        XCTAssertEqual(
+            model.ipv6TransportReadinessIssue,
+            "当前配置无法注入 IPv6 节点，请更换内联配置或启用兼容模式"
+        )
+        model.startProxy()
+        try await Task.sleep(for: .milliseconds(40))
+        let startCount = await tunCoordinator.startCount
+        XCTAssertEqual(startCount, 0)
+        await model.shutdown()
+    }
+
     func testSystemProxyCanToggleWhileTunKeepsRunning() async throws {
         let paths = makePaths()
         defer { try? FileManager.default.removeItem(at: paths.root) }
@@ -456,6 +535,7 @@ final class AppModelTests: XCTestCase {
         let store = PreferencesStore(fileURL: paths.preferences)
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
+        try await enableCompatibilityMode(bootstrapper)
         try await bootstrapper.replaceProfile(with: validProfile())
         try FileManager.default.removeItem(at: paths.generatedConfig)
         try await store.save(
@@ -581,6 +661,7 @@ final class AppModelTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: paths.root) }
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
+        try await enableCompatibilityMode(bootstrapper)
         try await bootstrapper.replaceProfile(with: validProfile())
         _ = try await bootstrapper.replaceLocalProxyConfiguration(
             with: LocalProxyConfiguration(
@@ -650,6 +731,7 @@ final class AppModelTests: XCTestCase {
         let store = PreferencesStore(fileURL: paths.preferences)
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
+        try await enableCompatibilityMode(bootstrapper)
 
         let executableURL = paths.root.appendingPathComponent("mihomo-test")
         let invocationMarkerURL = paths.root.appendingPathComponent("mihomo-invoked.txt")
@@ -743,6 +825,8 @@ final class AppModelTests: XCTestCase {
         let paths = makePaths()
         defer { try? FileManager.default.removeItem(at: paths.root) }
         let bootstrapper = AppBootstrapper(paths: paths)
+        try await bootstrapper.prepareDefaults()
+        try await enableCompatibilityMode(bootstrapper)
         let model = makeModel(paths: paths, bootstrapper: bootstrapper)
         model.start()
         try await waitUntilReady(model)
@@ -773,6 +857,7 @@ final class AppModelTests: XCTestCase {
         let store = PreferencesStore(fileURL: paths.preferences)
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
+        try await enableCompatibilityMode(bootstrapper)
         _ = try await bootstrapper.replaceLocalProxyConfiguration(
             with: LocalProxyConfiguration(routingMode: .direct),
             selectedIP: nil
@@ -843,6 +928,7 @@ final class AppModelTests: XCTestCase {
         let store = PreferencesStore(fileURL: paths.preferences)
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
+        try await enableCompatibilityMode(bootstrapper)
         try await bootstrapper.replaceProfile(with: providerOnlyProfile())
         let executableURL = try makeExecutable(in: paths)
         try await store.save(
@@ -901,6 +987,7 @@ final class AppModelTests: XCTestCase {
         let store = PreferencesStore(fileURL: paths.preferences)
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
+        try await enableCompatibilityMode(bootstrapper)
         try await bootstrapper.replaceProfile(with: validProfile(address: "origin.example"))
         let local = LocalProxyConfiguration(
             listenAddress: "127.0.0.4",
@@ -950,7 +1037,7 @@ final class AppModelTests: XCTestCase {
         await model.shutdown()
     }
 
-    func testMihomoMonitoringResumesAfterProxyRestart() async throws {
+    func testMihomoProxySelectionRefreshesAfterProxyRestart() async throws {
         let paths = makePaths()
         defer { try? FileManager.default.removeItem(at: paths.root) }
         let store = PreferencesStore(fileURL: paths.preferences)
@@ -981,7 +1068,6 @@ final class AppModelTests: XCTestCase {
         try await waitUntilAsync {
             await apiClient.snapshotCount > 0 && model.state.mihomoRuntime.phase == .available
         }
-        XCTAssertFalse(model.state.mihomoRuntime.trafficSamples.isEmpty)
         let snapshotCountBeforeRestart = await apiClient.snapshotCount
 
         model.restartProxy()
@@ -997,7 +1083,7 @@ final class AppModelTests: XCTestCase {
         await model.shutdown()
     }
 
-    func testMihomoMonitoringKeepsClosedConnectionHistoryUntilCleared() async throws {
+    func testCompatibilityModeCanSelectProxyGroup() async throws {
         let paths = makePaths()
         defer { try? FileManager.default.removeItem(at: paths.root) }
         let store = PreferencesStore(fileURL: paths.preferences)
@@ -1012,169 +1098,15 @@ final class AppModelTests: XCTestCase {
                 parameters: .defaults(ipv6File: paths.ipv6List),
                 mihomoPath: executableURL.path
             ))
-        let connection = MihomoConnection(
-            id: "connection-1",
-            metadata: MihomoConnection.Metadata(
-                network: "tcp",
-                type: "HTTP",
-                sourceIP: "127.0.0.1",
-                destinationIP: "1.1.1.1",
-                sourcePort: "50000",
-                destinationPort: "443",
-                host: "example.com",
-                dnsMode: "normal",
-                processPath: "/Applications/Test.app/Contents/MacOS/Test",
-                process: "Test"
-            ),
-            upload: 128,
-            download: 256,
-            start: "2026-07-21T10:00:00Z",
-            chains: ["edge", "GLOBAL"],
-            rule: "Match",
-            rulePayload: ""
-        )
-        let apiClient = ControlledMihomoAPIClient(
-            connectionSnapshots: [[connection], []]
-        )
-        let proxyCore = ControlledMihomoController()
-        let model = makeModel(
-            paths: paths,
-            store: store,
-            bootstrapper: bootstrapper,
-            proxyCoreControllerFactory: { _ in proxyCore },
-            mihomoAPIClientFactory: { _ in apiClient }
-        )
-
-        model.start()
-        try await waitUntilReady(model)
-        model.startProxy()
-        try await waitUntil {
-            model.state.mihomoRuntime.closedConnections.count == 1
-        }
-
-        XCTAssertEqual(
-            model.state.mihomoRuntime.closedConnections.first?.connection,
-            connection
-        )
-        XCTAssertEqual(model.state.mihomoRuntime.connectionMonitorPhase, .streaming)
-        model.clearClosedConnections()
-        XCTAssertTrue(model.state.mihomoRuntime.closedConnections.isEmpty)
-        await model.shutdown()
-    }
-
-    func testMihomoConnectionStreamReconnectsAfterFailure() async throws {
-        let paths = makePaths()
-        defer { try? FileManager.default.removeItem(at: paths.root) }
-        let store = PreferencesStore(fileURL: paths.preferences)
-        let bootstrapper = AppBootstrapper(paths: paths)
-        try await bootstrapper.prepareDefaults()
-        _ = try await bootstrapper.replaceLocalProxyConfiguration(
-            with: LocalProxyConfiguration(routingMode: .direct)
-        )
-        let executableURL = try makeExecutable(in: paths)
-        try await store.save(
-            UserPreferences(
-                parameters: .defaults(ipv6File: paths.ipv6List),
-                mihomoPath: executableURL.path
-            ))
-        let connection = MihomoConnection(
-            id: "reconnected",
-            metadata: MihomoConnection.Metadata(
-                network: "tcp",
-                type: "HTTPS",
-                sourceIP: "127.0.0.1",
-                destinationIP: "1.0.0.1",
-                sourcePort: "50001",
-                destinationPort: "443",
-                host: "example.net",
-                dnsMode: "normal",
-                processPath: nil,
-                process: nil
-            ),
-            upload: 64,
-            download: 128,
-            start: "2026-07-21T10:00:00Z",
-            chains: ["DIRECT"],
-            rule: "Match",
-            rulePayload: ""
-        )
-        let apiClient = ControlledMihomoAPIClient(
-            connectionSnapshots: [[], [connection]],
-            failFirstConnectionStream: true,
-            failInitialSnapshot: true
-        )
-        let proxyCore = ControlledMihomoController()
-        let model = makeModel(
-            paths: paths,
-            store: store,
-            bootstrapper: bootstrapper,
-            proxyCoreControllerFactory: { _ in proxyCore },
-            mihomoAPIClientFactory: { _ in apiClient }
-        )
-
-        model.start()
-        try await waitUntilReady(model)
-        model.startProxy()
-        try await waitUntilAsync {
-            await apiClient.connectionStreamCount >= 2
-                && model.state.mihomoRuntime.connectionMonitorPhase == .streaming
-                && model.state.mihomoRuntime.snapshot?.connections.first?.id == "reconnected"
-        }
-
-        await model.shutdown()
-    }
-
-    func testMihomoRuntimeActionsTestGroupsAndUpdateProviders() async throws {
-        let paths = makePaths()
-        defer { try? FileManager.default.removeItem(at: paths.root) }
-        let store = PreferencesStore(fileURL: paths.preferences)
-        let bootstrapper = AppBootstrapper(paths: paths)
-        try await bootstrapper.prepareDefaults()
-        _ = try await bootstrapper.replaceLocalProxyConfiguration(
-            with: LocalProxyConfiguration(routingMode: .direct)
-        )
-        let executableURL = try makeExecutable(in: paths)
-        try await store.save(
-            UserPreferences(
-                parameters: .defaults(ipv6File: paths.ipv6List),
-                mihomoPath: executableURL.path
-            ))
-        let providers = MihomoProviderSnapshot(
-            proxyProviders: [
-                MihomoProxyProvider(
-                    name: "subscription",
-                    type: "Proxy",
-                    vehicleType: "HTTP",
-                    proxyCount: 1,
-                    testURL: "https://example.com/generate_204",
-                    expectedStatus: "204",
-                    updatedAt: nil,
-                    subscriptionInfo: nil
-                )
-            ],
-            ruleProviders: [
-                MihomoRuleProvider(
-                    name: "geosite",
-                    type: "Rule",
-                    vehicleType: "HTTP",
-                    behavior: "Domain",
-                    format: "YamlRule",
-                    ruleCount: 42,
-                    updatedAt: nil
-                )
-            ]
-        )
         let apiClient = ControlledMihomoAPIClient(
             proxyGroups: [
                 MihomoProxyGroup(
                     name: "GLOBAL",
                     type: "Selector",
-                    selected: "edge",
-                    candidates: ["edge"]
+                    selected: "edge-a",
+                    candidates: ["edge-a", "edge-b"]
                 )
-            ],
-            providerValue: providers,
-            groupDelayResults: ["GLOBAL": ["edge": 128]]
+            ]
         )
         let proxyCore = ControlledMihomoController()
         let model = makeModel(
@@ -1188,37 +1120,16 @@ final class AppModelTests: XCTestCase {
         model.start()
         try await waitUntilReady(model)
         model.startProxy()
-        try await waitUntil { model.state.mihomoRuntime.phase == .available }
-
-        model.refreshMihomoProviders()
         try await waitUntil {
-            model.state.mihomoRuntime.providersPhase == .available
-                && model.state.mihomoRuntime.providerSnapshot == providers
+            model.state.mihomoRuntime.phase == .available
         }
 
-        model.testProxyGroup("GLOBAL", url: "https://example.com/generate_204")
-        try await waitUntil {
-            !model.isMihomoActionBusy
-                && model.state.mihomoRuntime.snapshot?.proxyGroups.first?.delays["edge"] == 128
-        }
-
-        model.updateProxyProvider("subscription")
+        model.selectProxy(group: "GLOBAL", proxy: "edge-b")
         try await waitUntilAsync {
-            await apiClient.updatedProxyProviders == ["subscription"]
-                && !model.isMihomoActionBusy
-        }
-        model.updateRuleProvider("geosite")
-        try await waitUntilAsync {
-            await apiClient.updatedRuleProviders == ["geosite"]
-                && !model.isMihomoActionBusy
+            await apiClient.selections == ["GLOBAL=edge-b"]
+                && model.state.mihomoRuntime.snapshot?.proxyGroups.first?.selected == "edge-b"
         }
 
-        let testedGroups = await apiClient.testedGroups
-        XCTAssertEqual(testedGroups, ["GLOBAL"])
-        let testedURLs = await apiClient.testedURLs
-        XCTAssertEqual(testedURLs, ["https://example.com/generate_204"])
-        XCTAssertTrue(model.state.mihomoRuntime.updatingProxyProviders.isEmpty)
-        XCTAssertTrue(model.state.mihomoRuntime.updatingRuleProviders.isEmpty)
         await model.shutdown()
     }
 
@@ -1228,6 +1139,7 @@ final class AppModelTests: XCTestCase {
         let store = PreferencesStore(fileURL: paths.preferences)
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
+        try await enableCompatibilityMode(bootstrapper)
         try await bootstrapper.replaceProfile(with: twoProxyProfile())
         try FileManager.default.removeItem(at: paths.generatedConfig)
         try await store.save(
@@ -1771,6 +1683,7 @@ final class AppModelTests: XCTestCase {
         let store = PreferencesStore(fileURL: paths.preferences)
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
+        try await enableCompatibilityMode(bootstrapper)
         try await bootstrapper.replaceProfile(with: validProfile(), selectedIP: "2606::40")
         try await store.save(
             UserPreferences(
@@ -1829,6 +1742,7 @@ final class AppModelTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: paths.root) }
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
+        try await enableCompatibilityMode(bootstrapper)
         try await bootstrapper.replaceProfile(with: validProfile(address: "opened.example"))
         _ = try await bootstrapper.replaceLocalProxyConfiguration(
             with: LocalProxyConfiguration(
@@ -1860,6 +1774,7 @@ final class AppModelTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: paths.root) }
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
+        try await enableCompatibilityMode(bootstrapper)
         try await bootstrapper.replaceProfile(with: validProfile(address: "opened.example"))
         let openedProfile = try Data(contentsOf: paths.profileConfig)
         let externalProfile = validProfile(address: "external.example")
@@ -1887,6 +1802,7 @@ final class AppModelTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: paths.root) }
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
+        try await enableCompatibilityMode(bootstrapper)
         let importedProfile = validProfile(address: "imported.example")
         let importURL = paths.root.appendingPathComponent("imported-profile.yaml")
         try importedProfile.write(to: importURL, options: .atomic)
@@ -1918,6 +1834,7 @@ final class AppModelTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: paths.root) }
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
+        try await enableCompatibilityMode(bootstrapper)
         try await bootstrapper.replaceProfile(with: validProfile(address: "stable.example"))
         let model = makeModel(paths: paths, bootstrapper: bootstrapper)
         model.start()
@@ -1955,6 +1872,7 @@ final class AppModelTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: paths.root) }
         let bootstrapper = AppBootstrapper(paths: paths)
         try await bootstrapper.prepareDefaults()
+        try await enableCompatibilityMode(bootstrapper)
         try await bootstrapper.replaceProfile(with: validProfile())
         let model = makeModel(paths: paths, bootstrapper: bootstrapper)
         let importURL = paths.root.appendingPathComponent("imported-profile.yaml")
@@ -2855,6 +2773,14 @@ final class AppModelTests: XCTestCase {
         )
     }
 
+    private func enableCompatibilityMode(_ bootstrapper: AppBootstrapper) async throws {
+        var local = try await bootstrapper.loadLocalProxyConfiguration()
+        local.ipv6TransportPolicy = .compatibility
+        let data = try JSONEncoder.pretty.encode(local)
+        let paths = await bootstrapper.paths
+        try data.write(to: paths.localProxyConfig, options: .atomic)
+    }
+
     private func corruptPreferenceBackups(in paths: AppPaths) throws -> [URL] {
         try FileManager.default.contentsOfDirectory(
             at: paths.preferences.deletingLastPathComponent(),
@@ -3274,120 +3200,32 @@ private actor ControlledMihomoController: ProxyCoreControlling {
 
 private actor ControlledMihomoAPIClient: MihomoAPIControlling {
     private(set) var snapshotCount = 0
-    private(set) var testedGroups: [String] = []
-    private(set) var testedURLs: [String] = []
-    private(set) var updatedProxyProviders: [String] = []
-    private(set) var updatedRuleProviders: [String] = []
-    private(set) var connectionStreamCount = 0
+    private(set) var selections: [String] = []
     private var proxyGroups: [MihomoProxyGroup]
-    private let providerValue: MihomoProviderSnapshot
-    private let groupDelayResults: [String: [String: Int]]
-    private let storedConnectionSnapshots: [[MihomoConnection]]
-    private let failFirstConnectionStream: Bool
-    private let failInitialSnapshot: Bool
 
-    init(
-        proxyGroups: [MihomoProxyGroup] = [],
-        providerValue: MihomoProviderSnapshot = MihomoProviderSnapshot(
-            proxyProviders: [],
-            ruleProviders: []
-        ),
-        groupDelayResults: [String: [String: Int]] = [:],
-        connectionSnapshots: [[MihomoConnection]] = [],
-        failFirstConnectionStream: Bool = false,
-        failInitialSnapshot: Bool = false
-    ) {
+    init(proxyGroups: [MihomoProxyGroup] = []) {
         self.proxyGroups = proxyGroups
-        self.providerValue = providerValue
-        self.groupDelayResults = groupDelayResults
-        storedConnectionSnapshots = connectionSnapshots
-        self.failFirstConnectionStream = failFirstConnectionStream
-        self.failInitialSnapshot = failInitialSnapshot
     }
 
-    func snapshot() async throws -> MihomoRuntimeSnapshot {
+    func proxySelectionSnapshot() async throws -> MihomoProxySelectionSnapshot {
         snapshotCount += 1
-        if failInitialSnapshot, snapshotCount == 1 {
-            throw URLError(.cannotConnectToHost)
-        }
-        let connections =
-            storedConnectionSnapshots.isEmpty
-            ? []
-            : storedConnectionSnapshots[
-                min(snapshotCount - 1, storedConnectionSnapshots.count - 1)
-            ]
-        return MihomoRuntimeSnapshot(
+        return MihomoProxySelectionSnapshot(
             version: "test",
-            proxyGroups: proxyGroups,
-            connections: connections,
-            rules: [],
-            uploadTotal: Int64(snapshotCount * 100),
-            downloadTotal: Int64(snapshotCount * 200),
-            memoryUsage: 8_388_608
+            proxyGroups: proxyGroups
         )
     }
 
-    func runtimeMetadata() async throws -> MihomoRuntimeMetadata {
-        MihomoRuntimeMetadata(version: "test", proxyGroups: proxyGroups, rules: [])
-    }
-
-    func connectionSnapshots() async -> AsyncThrowingStream<MihomoConnectionsSnapshot, Error> {
-        connectionStreamCount += 1
-        if failFirstConnectionStream, connectionStreamCount == 1 {
-            return AsyncThrowingStream { continuation in
-                continuation.finish(throwing: URLError(.networkConnectionLost))
-            }
-        }
-        let snapshots = storedConnectionSnapshots.dropFirst()
-        return AsyncThrowingStream { continuation in
-            for (index, connections) in snapshots.enumerated() {
-                continuation.yield(
-                    MihomoConnectionsSnapshot(
-                        downloadTotal: Int64((index + 2) * 200),
-                        uploadTotal: Int64((index + 2) * 100),
-                        memoryUsage: 8_388_608,
-                        connections: connections
-                    )
-                )
-            }
-        }
-    }
-
-    func providerSnapshot() async throws -> MihomoProviderSnapshot {
-        providerValue
-    }
-
-    func testProxyGroup(
-        group: String,
-        url: String,
-        timeoutMilliseconds _: Int
-    ) async throws -> [String: Int] {
-        testedGroups.append(group)
-        testedURLs.append(url)
-        let delays = groupDelayResults[group] ?? [:]
+    func selectProxy(group: String, proxy: String) async throws {
+        selections.append("\(group)=\(proxy)")
         proxyGroups = proxyGroups.map { proxyGroup in
             guard proxyGroup.name == group else { return proxyGroup }
             return MihomoProxyGroup(
                 name: proxyGroup.name,
                 type: proxyGroup.type,
-                selected: proxyGroup.selected,
-                candidates: proxyGroup.candidates,
-                delays: proxyGroup.delays.merging(delays) { _, latest in latest },
-                candidateTypes: proxyGroup.candidateTypes
+                selected: proxy,
+                candidates: proxyGroup.candidates
             )
         }
-        return delays
-    }
-
-    func selectProxy(group _: String, proxy _: String) async throws {}
-    func closeConnection(id _: String) async throws {}
-    func closeAllConnections() async throws {}
-    func updateProxyProvider(name: String) async throws {
-        updatedProxyProviders.append(name)
-    }
-
-    func updateRuleProvider(name: String) async throws {
-        updatedRuleProviders.append(name)
     }
 }
 

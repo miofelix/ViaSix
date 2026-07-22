@@ -82,7 +82,9 @@ public enum MihomoPrivilegedEnvelope {
             remainingNodes: &remainingNodes
         )
         let server: MihomoServerConfiguration?
-        if wire.options.routingMode == .direct || serverMapping.isEmpty {
+        if (wire.options.runtimePolicy == .compatibility
+            && wire.options.routingMode == .direct) || serverMapping.isEmpty
+        {
             server = nil
         } else {
             server = try MihomoServerConfiguration(

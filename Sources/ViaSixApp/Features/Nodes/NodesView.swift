@@ -27,12 +27,17 @@ struct NodesView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
+            normalizeSourceForTransportPolicy()
             syncCandidateSelection()
         }
         .onChange(of: model.state.results) {
             syncCandidateSelection()
         }
         .onChange(of: model.state.preferences.selectedIP) {
+            syncCandidateSelection()
+        }
+        .onChange(of: model.state.localProxyConfiguration.ipv6TransportPolicy) {
+            normalizeSourceForTransportPolicy()
             syncCandidateSelection()
         }
         .sheet(isPresented: $showsParameters) {
@@ -53,6 +58,12 @@ struct NodesView: View {
             }
         } message: {
             Text("本地代理会短暂中断，并使用所选节点重新连接。")
+        }
+    }
+
+    private func normalizeSourceForTransportPolicy() {
+        if model.usesIPv6RequiredTransport, model.ipSourceMode == .ipv4 {
+            model.selectIPSource(.ipv6)
         }
     }
 }
