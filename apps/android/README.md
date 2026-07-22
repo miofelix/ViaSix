@@ -21,9 +21,11 @@ ViaSix **全平台**产品中的 Android 端。跨端总览见根 [README](../..
 
 ```bash
 cd apps/android
-gradle :core:test            # contracts fixtures
+gradle :core:test            # contracts + CFST 解析/参数
+gradle :app:test             # app 单元测试（CFST runner 失败路径等）
 gradle :app:assembleDebug    # 生成 debug APK（需 Android SDK）
-node scripts/fetch-mihomo.mjs  # 可选：下载 arm64 mihomo 到 assets（尚未接线）
+node scripts/fetch-mihomo.mjs  # 可选：下载 arm64 mihomo 到 assets
+node scripts/fetch-cfst.mjs    # 可选：下载 arm64 CFST 到 assets（IPv6 优选）
 ```
 
 仓库根：
@@ -40,7 +42,7 @@ make android-skeleton
 | 分区 | 说明 |
 | --- | --- |
 | 首页 | IPv6 链路步骤、代理模式、网络接入、流量、IP / 应用信息 |
-| IPv6 优选 | 手动指定入口 IPv6（测速后续对齐） |
+| IPv6 优选 | CFST 测速、结果表、应用 / 应用并重连 + 手动入口 |
 | 连接配置 | Profile YAML 编辑 + 运行配置投影预览 |
 | 日志 | 会话活动时间线 |
 | 设置 | 全量隧道开关、运行组件、关于 |
@@ -68,7 +70,7 @@ make android-skeleton
 | 完整 UDP / 成熟 TCP 状态机 / IPv6 转发 | 用户态简化，后续可换 hev/native |
 | 会话偏好持久化 | ✓ SharedPreferences（含候选/出口设置） |
 | mihomo 资产拉取脚本 | ✓ `scripts/fetch-mihomo.mjs` |
-| CloudflareSpeedTest 测速 | 未实现（候选列表 API 已预留） |
+| CloudflareSpeedTest 测速 | ✓（arm64 CFST + 取消 + 结果应用/重连；`fetch-cfst.mjs`） |
 
 ## 契约
 

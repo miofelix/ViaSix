@@ -15,6 +15,7 @@ ViaSix **全平台**产品中的 Android 端（移动网络接入语义与桌面
 | 投影 | `:core` JVM 库，contracts 对齐 |
 | 虚拟网卡 | `ViaSixVpnService`（`VpnService`） |
 | 代理内核 | 预编译 mihomo（assets `mihomo-arm64`，`fetch-mihomo.mjs`） |
+| 测速 | CloudflareSpeedTest arm64（assets `cfst-arm64`，`fetch-cfst.mjs`；linux_arm64 上游） |
 | 网络接入 | VpnService 全量路由 + 用户态 TCP/DNS 转发；可选仅 HTTP 代理 |
 | 系统代理 | 不支持 |
 
@@ -29,7 +30,7 @@ ViaSix **全平台**产品中的 Android 端（移动网络接入语义与桌面
 | `TrafficStatsView` | 速率（累计差分）+ 曲线 + 内存 + 连接数 |
 | 出口 IP 检测 | `ExitIPDetector`（端点/模式/地理 enrichment 对齐） |
 | 配置延迟测试 | `ControllerClient.proxyDelay` |
-| `NodesView` | IPv6 校验、候选库、应用/应用并重连 |
+| `NodesView` / CFST | IPv6 校验、候选库、CFST 测速起停与结果表、应用/应用并重连 |
 | `ProfilesView` | 摘要解析、文件导入、YAML 编辑、投影预览 |
 | `LogsView` | 来源/级别过滤、搜索、排序 + VPN 事件合并 |
 | `VisualStyle` / `SurfaceCard` | `ui/theme/VisualStyle` + 组件 |
@@ -38,8 +39,9 @@ ViaSix **全平台**产品中的 Android 端（移动网络接入语义与桌面
 
 - `TrafficSampler`：与 Windows 相同，由 `/connections` 累计差分得瞬时速率
 - `ViaSixVpnService`：重启栈（节点应用并重连）、环形事件日志
-- `ProfileSummaryParser` / `Ipv6Address` / `ByteRateFormatter`：`:core` 可测纯逻辑
-- 会话偏好扩展：候选节点、出口检测端点与模式
+- `ProfileSummaryParser` / `Ipv6Address` / `ByteRateFormatter` / `SpeedTestResultParser`：`:core` 可测纯逻辑
+- 会话偏好扩展：候选节点、出口检测端点与模式、测速 IP 源
+- CFST：`CfstInstaller`（assets → filesDir）+ `CfstRunner`（可取消）+ Nodes UI
 
 ## 验证
 

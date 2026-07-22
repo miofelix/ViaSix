@@ -104,13 +104,18 @@ android-skeleton:
 	@test -f "$(ANDROID_DIR)/app/src/main/java/dev/viasix/app/MainActivity.kt"
 	@test -f "$(ANDROID_DIR)/app/src/main/java/dev/viasix/app/vpn/ViaSixVpnService.kt"
 	@test -f "$(ANDROID_DIR)/core/src/main/kotlin/dev/viasix/core/projection/MihomoProjection.kt"
+	@test -f "$(ANDROID_DIR)/core/src/main/kotlin/dev/viasix/core/speedtest/SpeedTestResultParser.kt"
 	@test -f "$(ANDROID_DIR)/app/src/main/java/dev/viasix/app/mihomo/MihomoInstaller.kt"
 	@test -f "$(ANDROID_DIR)/app/src/main/java/dev/viasix/app/mihomo/MihomoProcess.kt"
+	@test -f "$(ANDROID_DIR)/app/src/main/java/dev/viasix/app/cfst/CfstInstaller.kt"
+	@test -f "$(ANDROID_DIR)/app/src/main/java/dev/viasix/app/cfst/CfstRunner.kt"
 	@test -f "$(ANDROID_DIR)/scripts/fetch-mihomo.mjs"
+	@test -f "$(ANDROID_DIR)/scripts/fetch-cfst.mjs"
+	@test -f "$(ANDROID_DIR)/app/src/main/assets/cfst/ipv6.txt"
 	@echo "android skeleton OK"
 
 android-test:
-	cd "$(ANDROID_DIR)" && gradle :core:test --no-daemon
+	cd "$(ANDROID_DIR)" && gradle :core:test :app:test --no-daemon
 
 android-assemble:
 	cd "$(ANDROID_DIR)" && gradle :app:assembleDebug --no-daemon
