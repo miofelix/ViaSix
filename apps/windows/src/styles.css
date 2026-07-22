@@ -113,6 +113,19 @@ textarea {
   line-height: 1.45;
 }
 
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.check input {
+  width: auto;
+}
+
 .actions {
   display: flex;
   flex-wrap: wrap;

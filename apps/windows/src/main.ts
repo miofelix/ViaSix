@@ -7,6 +7,18 @@ type CoreStatus = {
   pid: number | null;
   message: string;
 };
+type SystemProxyStatus = {
+  enabled: boolean;
+  managedByViasix: boolean;
+  endpoint: { host: string; port: number } | null;
+  message: string;
+};
+type ExitIpResult = {
+  ip: string;
+  family: string;
+  source: string;
+  message: string;
+};
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) {
@@ -17,7 +29,7 @@ app.innerHTML = `
   <main class="shell">
     <header>
       <h1>ViaSix <span class="badge">Windows MVP</span></h1>
-      <p class="muted">IPv6-first · 契约对齐投影 · 用户态 Mihomo</p>
+      <p class="muted">IPv6-first · 契约投影 · 用户态 Mihomo · 系统代理 · 出口检测</p>
     </header>
 
     <section class="card">
@@ -40,12 +52,21 @@ app.innerHTML = `
           </select>
         </label>
       </div>
+      <label class="check">
+        <input id="sys-proxy" type="checkbox" />
+        <span>启用系统代理（127.0.0.1:11451，仅 Windows 生效）</span>
+      </label>
       <div class="actions">
         <button id="btn-project" type="button">生成运行配置</button>
         <button id="btn-start" type="button" class="primary">启动 Mihomo</button>
         <button id="btn-stop" type="button">停止</button>
+        <button id="btn-proxy-apply" type="button">应用系统代理</button>
+        <button id="btn-proxy-clear" type="button">清除系统代理</button>
+        <button id="btn-exit-ip" type="button">检测出口 IP</button>
       </div>
       <p id="status" class="status muted">就绪</p>
+      <p id="proxy-status" class="status muted"></p>
+      <p id="exit-ip" class="status muted"></p>
     </section>
 
     <section class="card">
@@ -58,8 +79,11 @@ app.innerHTML = `
 const profileEl = document.querySelector<HTMLTextAreaElement>("#profile")!;
 const selectedIpEl = document.querySelector<HTMLInputElement>("#selected-ip")!;
 const modeEl = document.querySelector<HTMLSelectElement>("#mode")!;
+const sysProxyEl = document.querySelector<HTMLInputElement>("#sys-proxy")!;
 const runtimeEl = document.querySelector<HTMLPreElement>("#runtime-yaml")!;
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
+const proxyStatusEl = document.querySelector<HTMLParagraphElement>("#proxy-status")!;
+const exitIpEl = document.querySelector<HTMLParagraphElement>("#exit-ip")!;
 
 function setStatus(text: string, isError = false) {
   statusEl.textContent = text;
@@ -74,6 +98,16 @@ async function refreshCoreStatus() {
     }
   } catch {
     // ignore when not in tauri webview
+  }
+}
+
+async function refreshProxyStatus() {
+  try {
+    const status = await invoke<SystemProxyStatus>("system_proxy_status");
+    proxyStatusEl.textContent = status.message;
+    sysProxyEl.checked = status.enabled && status.managedByViasix;
+  } catch (error) {
+    proxyStatusEl.textContent = `系统代理状态不可用：${error}`;
   }
 }
 
@@ -100,8 +134,10 @@ document.querySelector("#btn-start")!.addEventListener("click", async () => {
       profileYaml: profileEl.value,
       selectedAddress: mode === "direct" ? null : selectedIpEl.value || null,
       routingMode: mode,
+      enableSystemProxy: sysProxyEl.checked,
     });
     setStatus(status.message);
+    await refreshProxyStatus();
   } catch (error) {
     setStatus(`启动失败：${error}`, true);
   }
@@ -111,8 +147,50 @@ document.querySelector("#btn-stop")!.addEventListener("click", async () => {
   try {
     const status = await invoke<CoreStatus>("stop_core");
     setStatus(status.message);
+    await refreshProxyStatus();
   } catch (error) {
     setStatus(`停止失败：${error}`, true);
+  }
+});
+
+document.querySelector("#btn-proxy-apply")!.addEventListener("click", async () => {
+  try {
+    const status = await invoke<SystemProxyStatus>("set_system_proxy", {
+      enabled: true,
+      host: "127.0.0.1",
+      port: 11451,
+    });
+    proxyStatusEl.textContent = status.message;
+    sysProxyEl.checked = true;
+  } catch (error) {
+    proxyStatusEl.textContent = `应用系统代理失败：${error}`;
+    proxyStatusEl.classList.add("error");
+  }
+});
+
+document.querySelector("#btn-proxy-clear")!.addEventListener("click", async () => {
+  try {
+    const status = await invoke<SystemProxyStatus>("set_system_proxy", {
+      enabled: false,
+    });
+    proxyStatusEl.textContent = status.message;
+    proxyStatusEl.classList.remove("error");
+    sysProxyEl.checked = false;
+  } catch (error) {
+    proxyStatusEl.textContent = `清除系统代理失败：${error}`;
+    proxyStatusEl.classList.add("error");
+  }
+});
+
+document.querySelector("#btn-exit-ip")!.addEventListener("click", async () => {
+  exitIpEl.textContent = "检测中…";
+  exitIpEl.classList.remove("error");
+  try {
+    const result = await invoke<ExitIpResult>("detect_exit_ip");
+    exitIpEl.textContent = `${result.message}（来源 ${result.source}）`;
+  } catch (error) {
+    exitIpEl.textContent = `出口检测失败：${error}`;
+    exitIpEl.classList.add("error");
   }
 });
 
@@ -136,3 +214,4 @@ x-viasix:
 `;
 
 void refreshCoreStatus();
+void refreshProxyStatus();

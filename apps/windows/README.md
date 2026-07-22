@@ -42,7 +42,9 @@ make windows-skeleton         # 目录/文件校验
 | contracts 投影（rule/global/direct + 拒绝用例） | ✓ |
 | UI：导入 YAML、选 IPv6、生成运行配置 | ✓ |
 | 用户态 Mihomo 启停 | ✓（需 `prebuild`） |
-| 系统代理 | 未做 |
+| 系统代理（WinINET 注册表 + 快照恢复） | ✓（仅 Windows 构建） |
+| 出口 IP 检测（ipify HTTPS） | ✓ |
+| 测速（CFST） | 未做 |
 | Wintun / Service | 未做（二期） |
 
 ## 契约

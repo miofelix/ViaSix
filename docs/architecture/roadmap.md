@@ -14,8 +14,9 @@
 - [x] Rust 投影引擎 + contracts fixtures（`cargo test`）
 - [x] 基础 UI：YAML 导入、IPv6、模式、运行配置预览
 - [x] 用户态 Mihomo 启停（需 `pnpm prebuild`）
-- [ ] 系统代理
-- [ ] 测速 / 出口检测
+- [x] 系统代理（Windows 注册表 + 快照恢复；非 Windows stub）
+- [x] 出口 IP 检测
+- [ ] 测速（CFST）
 - [ ] TUN / Windows Service（二期）
 - [ ] 正式 NSIS 发布流水线（Windows runner）
 

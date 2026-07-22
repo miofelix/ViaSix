@@ -11,7 +11,8 @@
 | UI / 宿主 | **Tauri 2** + Vite/TypeScript |
 | 投影 | Rust `src-tauri/src/projection`（contracts 对齐） |
 | 代理内核 | 预编译 mihomo（`pnpm prebuild`） |
-| 系统代理 | 未实现 |
+| 系统代理 | WinINET 注册表（`ProxyEnable` / `ProxyServer`）+ 快照恢复 |
+| 出口检测 | HTTPS ipify（`detect_exit_ip`） |
 | 虚拟网卡 | Windows Service + Wintun（二期） |
 
 ## 验证
