@@ -54,6 +54,7 @@ export type AppModel = {
   nodeTestMessage: string;
   connectivityMessage: string;
   coreLog: string;
+  tunPreflight: import("./types").TunPreflight | null;
   core: CoreStatus | null;
   proxy: SystemProxyStatus | null;
   virtualNetwork: VirtualNetworkStatus | null;
@@ -124,6 +125,7 @@ export function createInitialModel(): AppModel {
     nodeTestMessage: "对当前选中 IPv6 运行 CFST（对齐 macOS 配置测速）",
     connectivityMessage: "启动代理后可检测混合端口出口连通性",
     coreLog: "",
+    tunPreflight: null,
     core: null,
     proxy: null,
     virtualNetwork: null,
@@ -382,6 +384,15 @@ export function readinessIssues(model: AppModel): ReadinessIssue[] {
       message: "已请求虚拟网卡，但 Wintun 不可用",
       action: "openSettings",
     });
+  }
+  if (model.tunPreflight?.requested && !model.tunPreflight.ready) {
+    for (const issue of model.tunPreflight.issues) {
+      issues.push({
+        code: "network",
+        message: issue,
+        action: "openSettings",
+      });
+    }
   }
   return issues;
 }

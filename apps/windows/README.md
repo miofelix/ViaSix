@@ -59,7 +59,9 @@ make windows-skeleton         # 目录/文件校验
 | UI：Profile 文件导入 + 后端 YAML 摘要 | ✓ |
 | IPv6 预设段 / 内置 ipv6.txt 列表源、可取消测速、当前节点测速 | ✓ |
 | Profile 数据目录落盘（profile.yaml 保存/加载） | ✓ |
-| 托盘实时上下行 tooltip | ✓ |
+| 托盘实时上下行 tooltip + 动态菜单标签 | ✓ |
+| TUN 预检（Wintun/平台；启动前拦截） | ✓ |
+| 日志页并入内核 mihomo 日志 | ✓ |
 | 代理连通性探测（经 mixed 端口） | ✓ |
 | 内核 mihomo 日志尾部 | ✓ |
 | TUN stack/MTU、UDP/嗅探可配 | ✓ |

@@ -409,6 +409,14 @@ async function handleAction(action: string, el: HTMLElement): Promise<void> {
       await refreshCoreLog();
       paint();
       return;
+    case "import-kernel-logs":
+      await importKernelLogs();
+      return;
+    case "refresh-tun-preflight":
+      await refreshTunPreflight();
+      paint();
+      toast(model.tunPreflight?.message || "已刷新 TUN 预检", "info");
+      return;
     case "apply-preset": {
       const id = el.dataset.preset;
       const preset = model.ipPresets.find((p) => p.id === id);
@@ -572,15 +580,21 @@ async function setVirtualNetwork(enabled: boolean): Promise<void> {
     const status = await api.setVirtualNetwork(enabled);
     model.virtualNetwork = status;
     model.virtualNetworkEnabled = status.enabled;
+    await refreshTunPreflight();
     pushLog(model, "info", "network", status.message);
     if (status.enabled) {
-      toast("已请求 TUN：请重新启动 Mihomo 以应用（通常需管理员）", "info", "openSettings");
+      if (model.tunPreflight && !model.tunPreflight.ready) {
+        toast(model.tunPreflight.message, "error", "openSettings");
+      } else {
+        toast("已请求 TUN：请重新启动 Mihomo 以应用（通常需管理员）", "info", "openSettings");
+      }
     } else {
       toast("已关闭虚拟网卡请求", "info");
     }
     paint();
   } catch (error) {
     model.virtualNetworkEnabled = false;
+    await refreshTunPreflight();
     pushLog(model, "error", "network", `虚拟网卡切换失败：${error}`);
     toast(`虚拟网卡切换失败：${error}`, "error", "openSettings");
     paint();
@@ -963,6 +977,37 @@ async function refreshCoreLog(): Promise<void> {
   }
 }
 
+async function importKernelLogs(): Promise<void> {
+  try {
+    const text = await api.tailCoreLog(120);
+    model.coreLog = text;
+    if (!text.trim()) {
+      toast("内核日志为空（启动 Mihomo 后才会写入）", "info");
+      return;
+    }
+    const lines = text
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .slice(-80);
+    for (const line of lines) {
+      pushLog(model, "info", "core", `[mihomo] ${line}`);
+    }
+    toast(`已并入 ${lines.length} 行内核日志`, "success");
+    paint();
+  } catch (error) {
+    toast(`并入内核日志失败：${error}`, "error");
+  }
+}
+
+async function refreshTunPreflight(): Promise<void> {
+  try {
+    model.tunPreflight = await api.tunPreflight();
+  } catch {
+    model.tunPreflight = null;
+  }
+}
+
 async function applyBest(): Promise<void> {
   const sorted = sortedSpeedResults(model);
   if (sorted.length === 0) {
@@ -1022,6 +1067,7 @@ async function refreshVirtualNetwork(): Promise<void> {
   try {
     model.virtualNetwork = await api.virtualNetworkStatus();
     model.virtualNetworkEnabled = model.virtualNetwork.enabled;
+    await refreshTunPreflight();
   } catch (error) {
     pushLog(model, "warn", "network", `虚拟网卡状态不可用：${error}`);
   }

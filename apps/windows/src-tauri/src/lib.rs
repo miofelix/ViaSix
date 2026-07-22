@@ -11,6 +11,7 @@ mod runtime;
 mod speed_test;
 mod system_proxy;
 mod traffic;
+mod tray_presentation;
 mod virtual_network;
 
 use activity_log::{ActivityEntry, ActivityLog};
@@ -31,11 +32,18 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, RunEvent, State, WindowEvent,
 };
-use traffic::format_rate as format_traffic_rate;
+use tray_presentation::tray_menu_presentation;
 use virtual_network::{
-    stage_wintun_beside_mihomo, VirtualNetworkCapability, VirtualNetworkManager,
+    stage_wintun_beside_mihomo, TunPreflight, VirtualNetworkCapability, VirtualNetworkManager,
     VirtualNetworkStatus,
 };
+
+/// Keeps tray menu items so labels/enabled can track proxy state (macOS menu-bar style).
+struct TrayMenuItems {
+    status: MenuItem<tauri::Wry>,
+    start: MenuItem<tauri::Wry>,
+    stop: MenuItem<tauri::Wry>,
+}
 
 struct AppServices {
     core: SharedCore,
@@ -86,24 +94,22 @@ fn apply_proxy_flags(
     }
 }
 
-fn update_tray_tooltip(app: &AppHandle, text: impl AsRef<str>) {
+fn refresh_tray_chrome(app: &AppHandle, running: bool, snap: Option<&TrafficSnapshot>) {
+    let (up, down) = snap
+        .filter(|s| s.live)
+        .map(|s| (Some(s.up_bps), Some(s.down_bps)))
+        .unwrap_or((None, None));
+    let presentation = tray_menu_presentation(running, up, down);
     if let Some(tray) = app.tray_by_id("main") {
-        let _ = tray.set_tooltip(Some(text.as_ref()));
+        let _ = tray.set_tooltip(Some(presentation.tooltip.as_str()));
     }
-}
-
-fn tray_status_tooltip(running: bool, snap: Option<&TrafficSnapshot>) -> String {
-    if !running {
-        return "ViaSix · 本地代理未启动".into();
+    if let Some(items) = app.try_state::<TrayMenuItems>() {
+        let _ = items.status.set_text(presentation.status_label);
+        let _ = items.start.set_text(presentation.start_label);
+        let _ = items.start.set_enabled(presentation.start_enabled);
+        let _ = items.stop.set_text(presentation.stop_label);
+        let _ = items.stop.set_enabled(presentation.stop_enabled);
     }
-    if let Some(s) = snap.filter(|s| s.live) {
-        return format!(
-            "ViaSix · ↑ {}/s  ↓ {}/s",
-            format_traffic_rate(s.up_bps),
-            format_traffic_rate(s.down_bps)
-        );
-    }
-    "ViaSix · 本地代理运行中".into()
 }
 
 #[tauri::command]
@@ -178,6 +184,17 @@ fn start_core(
 
     let want_tun = services.virtual_network.lock().is_enabled();
     if want_tun {
+        let pre = services.virtual_network.lock().preflight();
+        if !pre.ready {
+            push_log(
+                &services,
+                Some(&app),
+                "error",
+                "network",
+                pre.message.clone(),
+            );
+            return Err(pre.message);
+        }
         let mut tun = TunOptions::default();
         if let Some(stack) = tun_stack
             .map(|s| s.trim().to_string())
@@ -284,10 +301,7 @@ fn start_core(
         "core",
         status.message.clone(),
     );
-    update_tray_tooltip(
-        &app,
-        tray_status_tooltip(status.running, None),
-    );
+    refresh_tray_chrome(&app, status.running, None);
     Ok(status)
 }
 
@@ -311,7 +325,7 @@ fn stop_core(app: AppHandle, services: State<'_, SharedServices>) -> Result<Core
     };
     let message = format!("{}; {proxy_note}", status.message);
     push_log(&services, Some(&app), "info", "core", message.clone());
-    update_tray_tooltip(&app, tray_status_tooltip(false, None));
+    refresh_tray_chrome(&app, false, None);
     Ok(CoreStatus {
         running: status.running,
         pid: status.pid,
@@ -655,7 +669,7 @@ async fn sample_traffic(
     let running = services.core.status().running;
     let Some((port, secret)) = services.core.controller_credentials() else {
         services.traffic.lock().reset();
-        update_tray_tooltip(&app, tray_status_tooltip(running, None));
+        refresh_tray_chrome(&app, running, None);
         return Ok(TrafficSnapshot {
             live: false,
             up_bps: 0,
@@ -673,7 +687,7 @@ async fn sample_traffic(
     };
     let snap = sampler.sample("127.0.0.1", port, &secret).await;
     *services.traffic.lock() = sampler;
-    update_tray_tooltip(&app, tray_status_tooltip(true, Some(&snap)));
+    refresh_tray_chrome(&app, true, Some(&snap));
     Ok(snap)
 }
 
@@ -741,13 +755,23 @@ fn set_virtual_network(
     let mut mgr = services.virtual_network.lock();
     let result = if enabled { mgr.enable() } else { mgr.disable() };
     match &result {
-        Ok(status) => push_log(
-            &services,
-            Some(&app),
-            "info",
-            "network",
-            status.message.clone(),
-        ),
+        Ok(status) => {
+            push_log(
+                &services,
+                Some(&app),
+                "info",
+                "network",
+                status.message.clone(),
+            );
+            let pre = services.virtual_network.lock().preflight();
+            push_log(
+                &services,
+                Some(&app),
+                if pre.ready { "info" } else { "warn" },
+                "network",
+                pre.message.clone(),
+            );
+        }
         Err(err) => push_log(
             &services,
             Some(&app),
@@ -757,6 +781,11 @@ fn set_virtual_network(
         ),
     }
     result
+}
+
+#[tauri::command]
+fn tun_preflight(services: State<'_, SharedServices>) -> TunPreflight {
+    services.virtual_network.lock().preflight()
 }
 
 fn resolve_mihomo_binary(app: &AppHandle) -> Result<PathBuf, String> {
@@ -831,11 +860,32 @@ fn show_main_window(app: &AppHandle) {
 }
 
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
+    let presentation = tray_menu_presentation(false, None, None);
     let show_i = MenuItem::with_id(app, "show", "显示 ViaSix", true, None::<&str>)?;
-    let start_i = MenuItem::with_id(app, "start", "启动代理", true, None::<&str>)?;
-    let stop_i = MenuItem::with_id(app, "stop", "停止代理", true, None::<&str>)?;
+    let status_i =
+        MenuItem::with_id(app, "status", presentation.status_label.as_str(), false, None::<&str>)?;
+    let start_i = MenuItem::with_id(
+        app,
+        "start",
+        presentation.start_label.as_str(),
+        presentation.start_enabled,
+        None::<&str>,
+    )?;
+    let stop_i = MenuItem::with_id(
+        app,
+        "stop",
+        presentation.stop_label.as_str(),
+        presentation.stop_enabled,
+        None::<&str>,
+    )?;
     let quit_i = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show_i, &start_i, &stop_i, &quit_i])?;
+    let menu = Menu::with_items(app, &[&show_i, &status_i, &start_i, &stop_i, &quit_i])?;
+
+    app.manage(TrayMenuItems {
+        status: status_i,
+        start: start_i,
+        stop: stop_i,
+    });
 
     let icon = app
         .default_window_icon()
@@ -845,12 +895,18 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     TrayIconBuilder::with_id("main")
         .icon(icon)
         .menu(&menu)
-        .tooltip("ViaSix")
+        .tooltip(presentation.tooltip)
         .on_menu_event(|app, event| match event.id.as_ref() {
-            "show" => show_main_window(app),
+            "show" | "status" => show_main_window(app),
             "start" => {
-                // Frontend owns full start payload; tray just focuses UI for now
-                // and emits a request event.
+                let running = app
+                    .try_state::<SharedServices>()
+                    .map(|s| s.core.status().running)
+                    .unwrap_or(false);
+                if running {
+                    return;
+                }
+                // Frontend owns full start payload; tray focuses UI and requests start.
                 let _ = app.emit("tray-action", "start");
                 show_main_window(app);
             }
@@ -867,7 +923,7 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
                                 "core",
                                 format!("托盘停止: {}", status.message),
                             );
-                            update_tray_tooltip(app, tray_status_tooltip(false, None));
+                            refresh_tray_chrome(app, false, None);
                             let _ = app.emit("core-stopped", status);
                         }
                         Err(err) => push_log(
@@ -946,7 +1002,7 @@ pub fn run() {
             if let Err(err) = setup_tray(app.handle()) {
                 eprintln!("tray setup failed: {err}");
             } else {
-                update_tray_tooltip(app.handle(), tray_status_tooltip(false, None));
+                refresh_tray_chrome(app.handle(), false, None);
             }
             Ok(())
         })
@@ -1005,7 +1061,8 @@ pub fn run() {
             sample_traffic,
             virtual_network_capability,
             virtual_network_status,
-            set_virtual_network
+            set_virtual_network,
+            tun_preflight
         ])
         .build(tauri::generate_context!())
         .expect("error while building ViaSix Windows")

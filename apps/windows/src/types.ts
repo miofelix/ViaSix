@@ -121,6 +121,15 @@ export type ConnectivityResult = {
   message: string;
 };
 
+export type TunPreflight = {
+  ready: boolean;
+  requested: boolean;
+  wintunAvailable: boolean;
+  onWindows: boolean;
+  issues: string[];
+  message: string;
+};
+
 export type SpeedTestParams = {
   threads: number;
   pingCount: number;

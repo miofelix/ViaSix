@@ -11,6 +11,7 @@ import type {
   SpeedTestResponse,
   SystemProxyStatus,
   TrafficSnapshot,
+  TunPreflight,
   VirtualNetworkStatus,
 } from "./types";
 
@@ -173,6 +174,10 @@ export async function virtualNetworkStatus(): Promise<VirtualNetworkStatus> {
 
 export async function setVirtualNetwork(enabled: boolean): Promise<VirtualNetworkStatus> {
   return invoke<VirtualNetworkStatus>("set_virtual_network", { enabled });
+}
+
+export async function tunPreflight(): Promise<TunPreflight> {
+  return invoke<TunPreflight>("tun_preflight");
 }
 
 export async function listActivityLogs(): Promise<ActivityEntry[]> {

@@ -812,6 +812,9 @@ function renderLogs(model: AppModel): string {
        <button type="button" class="btn btn-ghost btn-sm" data-action="toggle-log-order" title="切换排序">
          ${icon("sort", 14)} ${model.logNewestFirst ? "最新在上" : "最新在下"}
        </button>
+       <button type="button" class="btn btn-ghost btn-sm" data-action="import-kernel-logs" title="将 mihomo.log 尾部并入会话日志">
+         ${icon("logs", 14)} 并入内核日志
+       </button>
        <button type="button" class="btn btn-ghost btn-sm" data-action="export-logs" ${model.logs.length === 0 ? "disabled" : ""}>
          ${icon("export", 14)} 导出
        </button>
@@ -851,7 +854,7 @@ function renderLogs(model: AppModel): string {
             </select>
           </label>
         </div>
-        <p class="help-text muted">${visible.length} / ${model.logs.length} 条 · 客户端会话日志（最多保留约 800 条）</p>
+        <p class="help-text muted">${visible.length} / ${model.logs.length} 条 · 会话日志 + 可选内核日志并入（最多约 800 条）</p>
       </div>
     </section>
     <section class="card">
@@ -962,8 +965,21 @@ function renderSettings(model: AppModel): string {
       <div class="card-body stack-8">
         <div class="kv"><span>后端</span><span>${escapeHtml(virt?.backend || "—")}</span></div>
         <div class="kv"><span>Wintun</span><span class="mono small">${escapeHtml(virt?.wintunPath || "未找到")}</span></div>
+        <div class="kv"><span>预检</span><span>${escapeHtml(model.tunPreflight?.message || "—")}</span></div>
         <p class="help-text">${escapeHtml(virt?.message || "")}</p>
-        <p class="help-text muted">Windows 使用进程内 Mihomo TUN + Wintun.dll（通常需管理员）。与 macOS 特权 LaunchDaemon 路径不同，但产品开关语义一致：可与系统代理同时启用；切换后需重新启动 Mihomo。</p>
+        ${
+          model.tunPreflight?.requested && !model.tunPreflight.ready
+            ? `<div class="callout tone-warning"><div class="callout-title">${icon("warn", 14)} TUN 预检未通过</div>
+                 <ul class="issue-list">${model.tunPreflight.issues.map((i) => `<li><span>${escapeHtml(i)}</span></li>`).join("")}</ul>
+               </div>`
+            : model.tunPreflight?.requested && model.tunPreflight.ready
+              ? `<p class="help-text" style="color:var(--positive)">${escapeHtml(model.tunPreflight.message)}</p>`
+              : ""
+        }
+        <p class="help-text muted">Windows 使用进程内 Mihomo TUN + Wintun.dll（通常需管理员）。与 macOS 特权 LaunchDaemon 路径不同，但产品开关语义一致：可与系统代理同时启用；切换后需重新启动 Mihomo。启动前会执行 TUN 预检。</p>
+        <div class="inline-actions">
+          <button type="button" class="btn btn-sm" data-action="refresh-tun-preflight">${icon("refresh", 14)} 刷新预检</button>
+        </div>
         <label class="check">
           <input type="checkbox" id="settings-virt-net" ${model.virtualNetworkEnabled ? "checked" : ""} ${virt && !virt.available ? "disabled" : ""} />
           <span>启用虚拟网卡（下次启动 Mihomo 时生效）</span>

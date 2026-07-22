@@ -99,6 +99,68 @@ impl VirtualNetworkManager {
         self.enabled = false;
         Ok(self.status())
     }
+
+    pub fn preflight(&self) -> TunPreflight {
+        evaluate_tun_preflight(
+            self.enabled,
+            find_wintun(&self.sidecar_dir).is_some(),
+            cfg!(windows),
+        )
+    }
+}
+
+/// Preflight result for TUN/Wintun before (re)starting Mihomo.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TunPreflight {
+    pub ready: bool,
+    pub requested: bool,
+    pub wintun_available: bool,
+    pub on_windows: bool,
+    pub issues: Vec<String>,
+    pub message: String,
+}
+
+/// Pure evaluation of TUN readiness (unit-tested; used by commands and start path).
+pub fn evaluate_tun_preflight(
+    requested: bool,
+    wintun_available: bool,
+    on_windows: bool,
+) -> TunPreflight {
+    if !requested {
+        return TunPreflight {
+            ready: true,
+            requested: false,
+            wintun_available,
+            on_windows,
+            issues: Vec::new(),
+            message: "未请求虚拟网卡（用户态本地代理）".into(),
+        };
+    }
+
+    let mut issues = Vec::new();
+    if !on_windows {
+        issues.push("虚拟网卡 TUN 仅在 Windows 构建可用".into());
+    }
+    if !wintun_available {
+        issues.push("缺少 wintun.dll — 请在 Windows 上执行 pnpm prebuild（fetch-wintun）".into());
+    }
+
+    let ready = issues.is_empty();
+    let message = if ready {
+        "虚拟网卡预检通过（Wintun 可用；启动 Mihomo 通常仍需管理员）".into()
+    } else {
+        format!("虚拟网卡预检未通过：{}", issues.join("；"))
+    };
+
+    TunPreflight {
+        ready,
+        requested: true,
+        wintun_available,
+        on_windows,
+        issues,
+        message,
+    }
 }
 
 pub fn find_wintun(sidecar_dir: &Path) -> Option<PathBuf> {
@@ -129,6 +191,28 @@ mod tests {
     use super::*;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn preflight_ok_when_not_requested() {
+        let p = evaluate_tun_preflight(false, false, true);
+        assert!(p.ready);
+        assert!(p.issues.is_empty());
+    }
+
+    #[test]
+    fn preflight_fails_without_wintun_when_requested() {
+        let p = evaluate_tun_preflight(true, false, true);
+        assert!(!p.ready);
+        assert!(!p.issues.is_empty());
+        assert!(p.message.contains("预检未通过"));
+    }
+
+    #[test]
+    fn preflight_ok_when_requested_and_wintun_present_on_windows() {
+        let p = evaluate_tun_preflight(true, true, true);
+        assert!(p.ready);
+        assert!(p.issues.is_empty());
+    }
 
     #[test]
     fn enable_requires_wintun_file() {
