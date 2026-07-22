@@ -12,3 +12,5 @@ captures/
 *.dex
 app/src/main/assets/mihomo/mihomo-*
 !app/src/main/assets/mihomo/.gitkeep
+app/src/main/assets/cfst/cfst-*
+!app/src/main/assets/cfst/ipv6.txt
