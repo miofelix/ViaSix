@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import ViaSixCore
 
 struct AppState: Equatable, Sendable {
@@ -242,7 +243,23 @@ struct AppState: Equatable, Sendable {
 
     var selectedResult: SpeedTestResult? {
         guard speedTestResultsAreCurrent else { return nil }
-        return results.first { $0.ip == preferences.selectedIP }
+        let selected = preferences.selectedIP
+        return results.first { Self.ipAddressesAreEquivalent($0.ip, selected) }
+    }
+
+    /// Matches AppModel configuration-test comparison so compressed and expanded
+    /// IPv6 spellings of the same address resolve to the same result row.
+    private static func ipAddressesAreEquivalent(_ lhs: String, _ rhs: String) -> Bool {
+        let lhs = lhs.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rhs = rhs.trimmingCharacters(in: .whitespacesAndNewlines)
+        if lhs == rhs { return true }
+        if let lhs = IPv4Address(lhs), let rhs = IPv4Address(rhs) {
+            return lhs.rawValue == rhs.rawValue
+        }
+        if let lhs = IPv6Address(lhs), let rhs = IPv6Address(rhs) {
+            return lhs.rawValue == rhs.rawValue
+        }
+        return false
     }
 
     var isProxyRunning: Bool {

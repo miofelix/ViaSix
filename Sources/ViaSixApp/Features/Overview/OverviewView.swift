@@ -456,7 +456,14 @@ struct OverviewView: View {
 
     private var proxyActionButton: some View {
         Button(proxyActionTitle, systemImage: proxyActionIcon) {
-            model.state.isProxyRunning ? model.stopProxy() : model.startProxy()
+            switch model.state.proxyCorePhase {
+            case .running, .validating, .starting:
+                model.stopProxy()
+            case .stopped, .failed:
+                model.startProxy()
+            case .stopping:
+                break
+            }
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.regular)
@@ -469,20 +476,24 @@ struct OverviewView: View {
     private var proxyActionTitle: String {
         switch model.state.proxyCorePhase {
         case .stopped, .failed: "启动连接"
-        case .validating, .starting: "正在启动"
+        case .validating, .starting: "取消启动"
         case .running: "停止连接"
         case .stopping: "正在停止"
         }
     }
 
     private var proxyActionIcon: String {
-        model.state.isProxyRunning ? "stop.fill" : "play.fill"
+        switch model.state.proxyCorePhase {
+        case .running, .validating, .starting: "stop.fill"
+        case .stopped, .failed: "play.fill"
+        case .stopping: "hourglass"
+        }
     }
 
     private var proxyActionDisabled: Bool {
         switch model.state.proxyCorePhase {
-        case .validating, .starting, .stopping: true
-        case .running: false
+        case .validating, .starting, .running: false
+        case .stopping: true
         case .stopped, .failed:
             !model.isProxyConfigurationReady || !model.activeProxyRuntimeIsAvailable
                 || model.isTemplateOperationBusy || model.switchingIP != nil
@@ -690,10 +701,23 @@ struct OverviewView: View {
     }
 
     private var currentNodeResult: SpeedTestResult? {
-        if let result = model.state.configurationTest.result,
-            result.ip == model.state.preferences.selectedIP
-        {
-            return result
+        if let result = model.state.configurationTest.result {
+            let selected = model.state.preferences.selectedIP
+            let left = result.ip.trimmingCharacters(in: .whitespacesAndNewlines)
+            let right = selected.trimmingCharacters(in: .whitespacesAndNewlines)
+            if left == right {
+                return result
+            }
+            if let leftAddress = IPv6Address(left), let rightAddress = IPv6Address(right),
+                leftAddress.rawValue == rightAddress.rawValue
+            {
+                return result
+            }
+            if let leftAddress = IPv4Address(left), let rightAddress = IPv4Address(right),
+                leftAddress.rawValue == rightAddress.rawValue
+            {
+                return result
+            }
         }
         return model.state.selectedResult
     }

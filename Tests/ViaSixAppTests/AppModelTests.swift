@@ -472,6 +472,56 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(didShutdown)
     }
 
+    func testRecoverTunSessionRestoresRunningProxyPhase() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let bootstrapper = AppBootstrapper(paths: paths)
+        try await bootstrapper.prepareDefaults()
+        _ = try await bootstrapper.replaceLocalProxyConfiguration(
+            with: LocalProxyConfiguration(
+                routingMode: .direct,
+                networkAccessMode: .virtualInterface
+            ),
+            selectedIP: nil
+        )
+        // Bootstrap starts clean so it does not auto-recover during launch.
+        let tunCoordinator = ControlledTunModeCoordinator(
+            sessionPhase: .inactive,
+            sessionOwnedByCaller: false
+        )
+        let model = makeModel(
+            paths: paths,
+            bootstrapper: bootstrapper,
+            tunCoordinator: tunCoordinator
+        )
+
+        model.start()
+        try await waitUntilReady(model)
+        XCTAssertEqual(model.state.proxyCorePhase, .stopped)
+
+        await tunCoordinator.seedRecoveryRequiredSession()
+        await tunCoordinator.setRecoverRestoresRunningSession(true)
+        model.refreshTunState()
+        try await waitUntil {
+            model.state.tun.sessionPhase == .recoveryRequired
+                && model.canRecoverTunSession
+        }
+
+        model.recoverTunSession()
+        try await waitUntil {
+            model.state.tun.sessionPhase == .running
+                && model.state.proxyCorePhase == .running
+        }
+
+        let recoverCount = await tunCoordinator.recoverCount
+        XCTAssertEqual(recoverCount, 1)
+        XCTAssertTrue(model.state.traffic.isMonitoring)
+        XCTAssertTrue(model.state.notice?.message.contains("恢复运行") == true)
+
+        let didShutdown = await model.shutdown()
+        XCTAssertTrue(didShutdown)
+    }
+
     func testFailedTunSessionWithCompletedCleanupAllowsMaintenance() async throws {
         let paths = makePaths()
         defer { try? FileManager.default.removeItem(at: paths.root) }
@@ -1501,6 +1551,8 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(isSystemProxyActiveAfterFailure)
         XCTAssertTrue(isProxyCoreRunningAfterFailure)
         XCTAssertEqual(stopCountAfterFailure, 0)
+        XCTAssertEqual(model.state.proxyCorePhase, .running)
+        XCTAssertTrue(model.state.traffic.isMonitoring)
         XCTAssertTrue(model.state.notice?.message.contains("无法安全退出") == true)
 
         await systemProxy.setDisableFailure(nil)
@@ -1510,6 +1562,69 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(secondShutdownResult)
         XCTAssertFalse(isSystemProxyActiveAfterRetry)
         XCTAssertFalse(isProxyCoreRunningAfterRetry)
+    }
+
+    func testStopDuringLocalProxyStartDoesNotLeaveZombieController() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let store = PreferencesStore(fileURL: paths.preferences)
+        let bootstrapper = AppBootstrapper(paths: paths)
+        try await bootstrapper.prepareDefaults()
+        _ = try await bootstrapper.replaceLocalProxyConfiguration(
+            with: LocalProxyConfiguration(
+                routingMode: .direct,
+                networkAccessMode: .localProxy,
+                systemProxyEnabled: true
+            ),
+            selectedIP: nil
+        )
+        let executableURL = try makeExecutable(in: paths)
+        try await store.save(
+            UserPreferences(
+                parameters: .defaults(ipv6File: paths.ipv6List),
+                mihomoPath: executableURL.path
+            ))
+        let systemProxy = ControlledSystemProxyManager(suspendNextEnable: true)
+        let proxyCore = ControlledMihomoController()
+        let model = makeModel(
+            paths: paths,
+            store: store,
+            bootstrapper: bootstrapper,
+            systemProxyManager: systemProxy,
+            proxyCoreControllerFactory: { _ in proxyCore }
+        )
+        model.start()
+        try await waitUntilReady(model)
+
+        model.startProxy()
+        try await waitUntilAsync {
+            let isActive = await systemProxy.isActive
+            let isRunning = await proxyCore.isRunning
+            return isActive
+                && isRunning
+                && model.state.systemProxyPhase == .enabling
+        }
+
+        model.stopProxy()
+        await systemProxy.resumeEnable()
+        try await waitUntil {
+            model.state.proxyCorePhase == .stopped
+                && model.state.systemProxyPhase != .enabling
+                && model.state.systemProxyPhase != .disabling
+        }
+
+        let isRunning = await proxyCore.isRunning
+        let stopCount = await proxyCore.stopCount
+        XCTAssertFalse(isRunning)
+        XCTAssertGreaterThanOrEqual(stopCount, 1)
+
+        // Start must be available again after the cancelled start.
+        model.startProxy()
+        try await waitUntil { model.state.proxyCorePhase == .running }
+        let startCount = await proxyCore.startCount
+        XCTAssertGreaterThanOrEqual(startCount, 2)
+
+        await model.shutdown()
     }
 
     func testLocalProxyStartPreservesBootstrapSystemProxyRecoveryFailure() async throws {
@@ -3035,12 +3150,32 @@ private actor ControlledTunModeCoordinator: TunModeCoordinating {
         return try snapshot()
     }
 
+    private var recoverRestoresRunningSession = false
+
+    func setRecoverRestoresRunningSession(_ value: Bool) {
+        recoverRestoresRunningSession = value
+    }
+
+    func seedRecoveryRequiredSession() {
+        sessionPhase = .recoveryRequired
+        sessionIdentifier = UUID()
+        sessionOwnedByCaller = true
+        recoveryRequired = true
+    }
+
     func recover() throws -> TunHelperStatusSnapshot {
         recoverCount += 1
-        sessionPhase = .inactive
-        sessionIdentifier = nil
-        sessionOwnedByCaller = false
-        recoveryRequired = false
+        if recoverRestoresRunningSession {
+            sessionPhase = .running
+            sessionIdentifier = sessionIdentifier ?? UUID()
+            sessionOwnedByCaller = true
+            recoveryRequired = false
+        } else {
+            sessionPhase = .inactive
+            sessionIdentifier = nil
+            sessionOwnedByCaller = false
+            recoveryRequired = false
+        }
         return try snapshot()
     }
 
