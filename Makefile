@@ -1,88 +1,74 @@
-SWIFT := swift
-SWIFT_SOURCES := Sources Tests Package.swift
-APP_BUNDLE := $(CURDIR)/dist/ViaSix.app
-SHELL_SCRIPTS := $(shell find Scripts Server -type f -name '*.sh' 2>/dev/null | LC_ALL=C sort)
+# ViaSix monorepo orchestrator.
+# Platform-specific builds live under apps/*; this file only delegates.
+
+MACOS_DIR := apps/macos
+WINDOWS_DIR := apps/windows
+ANDROID_DIR := apps/android
+CONTRACTS_DIR := contracts
 
 .PHONY: \
-	build \
-	build-release \
-	run \
-	test \
-	format \
-	format-check \
-	lint \
-	lint-scripts \
-	lint-metadata \
-	lint-docs \
-	lint-licenses \
+	help \
+	macos-build \
+	macos-test \
+	macos-check \
+	macos-app \
+	macos-clean \
+	windows-skeleton \
+	android-skeleton \
+	contracts-check \
 	check \
-	icon \
-	app \
-	app-debug \
-	verify-app \
-	clean
+	check-all
 
-build:
-	$(SWIFT) build
+help:
+	@echo "ViaSix monorepo targets:"
+	@echo "  make macos-check       - lint, build, test macOS app"
+	@echo "  make macos-app         - package ad-hoc ViaSix.app"
+	@echo "  make macos-build       - swift build (macOS)"
+	@echo "  make macos-test        - swift test (macOS)"
+	@echo "  make macos-clean       - clean macOS build artifacts"
+	@echo "  make contracts-check   - verify contracts layout and fixtures"
+	@echo "  make windows-skeleton  - verify Windows placeholder tree"
+	@echo "  make android-skeleton  - verify Android placeholder tree"
+	@echo "  make check             - contracts + macOS check (default CI)"
+	@echo "  make check-all         - check + platform skeletons"
 
-build-release:
-	$(SWIFT) build -c release
+macos-build:
+	$(MAKE) -C $(MACOS_DIR) build
 
-run:
-	$(SWIFT) run ViaSix
+macos-test:
+	$(MAKE) -C $(MACOS_DIR) test
 
-test:
-	$(SWIFT) test -Xswiftc -warnings-as-errors
+macos-check:
+	$(MAKE) -C $(MACOS_DIR) check
 
-format:
-	$(SWIFT) format format --in-place --parallel --recursive $(SWIFT_SOURCES)
+macos-app:
+	$(MAKE) -C $(MACOS_DIR) app
 
-format-check:
-	$(SWIFT) format lint --strict --parallel --recursive $(SWIFT_SOURCES)
+macos-clean:
+	$(MAKE) -C $(MACOS_DIR) clean
 
-lint-scripts:
-	@for script in $(SHELL_SCRIPTS); do /bin/zsh -n "$$script"; done
+contracts-check:
+	@test -f "$(CONTRACTS_DIR)/VERSION"
+	@test -f "$(CONTRACTS_DIR)/schemas/local-proxy.schema.json"
+	@test -f "$(CONTRACTS_DIR)/schemas/x-viasix.schema.json"
+	@test -f "$(CONTRACTS_DIR)/fixtures/mihomo-config/rule-replace-server.in.yaml"
+	@test -f "$(CONTRACTS_DIR)/fixtures/mihomo-config/rule-replace-server.out.yaml"
+	@echo "contracts layout OK (version $$(cat "$(CONTRACTS_DIR)/VERSION"))"
 
-lint-metadata:
-	@plutil -lint \
-		Packaging/Info.plist \
-		Packaging/LaunchDaemons/com.felix.viasix.tun-helper.plist \
-		Packaging/Entitlements/ViaSix.entitlements \
-		Packaging/Entitlements/ViaSixTunHelper.entitlements >/dev/null
-	@plutil -convert xml1 -o /dev/null Sources/ViaSixCore/Resources/local-proxy.json
-	@test ! -e Sources/ViaSixCore/Resources/server.json
-	@test ! -e Sources/ViaSixCore/Resources/template.json
+windows-skeleton:
+	@test -f "$(WINDOWS_DIR)/README.md"
+	@test -f "$(WINDOWS_DIR)/scripts/fetch-mihomo.ps1"
+	@test -d "$(WINDOWS_DIR)/src"
+	@test -d "$(WINDOWS_DIR)/packaging"
+	@echo "windows skeleton OK"
 
-lint-docs:
-	@./Scripts/check-doc-links.sh
+android-skeleton:
+	@test -f "$(ANDROID_DIR)/README.md"
+	@test -f "$(ANDROID_DIR)/settings.gradle.kts"
+	@test -f "$(ANDROID_DIR)/app/src/main/AndroidManifest.xml"
+	@test -f "$(ANDROID_DIR)/app/src/main/java/dev/viasix/app/Placeholder.kt"
+	@echo "android skeleton OK"
 
-lint-licenses:
-	@test -f LICENSE
-	@grep -Fqx "MIT License" LICENSE
-	@grep -Fqx "Copyright (c) 2026 ViaSix contributors" LICENSE
-	@test "$$(shasum -a 256 ThirdPartyLicenses/CloudflareSpeedTest-GPL-3.0.txt | awk '{print $$1}')" = "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
-	@test "$$(shasum -a 256 ThirdPartyLicenses/mihomo-GPL-3.0.txt | awk '{print $$1}')" = "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
-	@test "$$(shasum -a 256 ThirdPartyLicenses/Yams-MIT.txt | awk '{print $$1}')" = "0354b0ea403d2e78059c5ae0510a2cfae9f8eb306fcef094ac9fff5b47e20bed"
-	@test ! -e ThirdPartyLicenses/Xray-core-MPL-2.0.txt
+check: contracts-check macos-check
 
-lint: format-check lint-scripts lint-metadata lint-docs lint-licenses
-
-check: lint
-	$(SWIFT) build -c release -Xswiftc -warnings-as-errors
-	$(MAKE) test
-
-icon:
-	./Scripts/generate-icon.sh
-
-app:
-	./Scripts/package-app.sh release
-
-app-debug:
-	./Scripts/package-app.sh debug
-
-verify-app:
-	./Scripts/verify-app.sh "$(APP_BUNDLE)"
-
-clean:
-	$(SWIFT) package clean
-	rm -rf "$(CURDIR)/dist"
+check-all: check windows-skeleton android-skeleton

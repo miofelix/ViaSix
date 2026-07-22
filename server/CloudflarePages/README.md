@@ -54,7 +54,7 @@ Cloudflare TCP Sockets 不允许连接 Cloudflare 自身 IP 段或形成 TCP loo
 进入部署目录：
 
 ```bash
-cd Server/CloudflarePages
+cd server/CloudflarePages
 ```
 
 ## 2. 创建私有 UUID

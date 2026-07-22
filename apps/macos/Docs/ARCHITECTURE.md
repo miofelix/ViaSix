@@ -1,6 +1,8 @@
 # ViaSix 架构说明
 
-本文描述 ViaSix 的 IPv6-first 运行模型、配置投影、独立网络接入控制和特权 TUN 信任边界。
+本文描述 **macOS 客户端** 的 IPv6-first 运行模型、配置投影、独立网络接入控制和特权 TUN 信任边界。
+
+跨端 monorepo 布局与平台矩阵见仓库根 [`docs/architecture/repo-layout.md`](../../../docs/architecture/repo-layout.md)。配置字段与投影 fixture 以 [`contracts/`](../../../contracts/) 为跨端约定。
 
 ## 总体结构
 

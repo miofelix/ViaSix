@@ -4,9 +4,10 @@
 
 ## 验证
 
-- [ ] 已运行 `make format`
-- [ ] 已运行 `make check`
-- [ ] 涉及打包或资源时，已运行 `make app`
+- [ ] 已运行 `make check`（仓库根：contracts + macOS；或 `cd apps/macos && make check`）
+- [ ] 涉及 Swift 格式时，已在 `apps/macos` 运行 `make format`
+- [ ] 涉及打包或资源时，已运行 `make macos-app`（或 `cd apps/macos && make app`）
+- [ ] 涉及跨端配置语义时，已更新 `contracts/` 并说明各端影响
 - [ ] 已补充或更新相关测试
 - [ ] 已同步更新相关文档、版本或第三方声明
 

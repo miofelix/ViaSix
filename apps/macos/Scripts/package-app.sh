@@ -4,6 +4,8 @@ set -euo pipefail
 
 script_dir=${0:A:h}
 project_root=${script_dir:h}
+# Shared legal/docs files live at the monorepo root (parent of apps/).
+monorepo_root=${project_root:h:h}
 configuration=${1:-release}
 dist_dir="$project_root/dist"
 final_app_bundle="$dist_dir/ViaSix.app"
@@ -78,19 +80,19 @@ cp \
     "$contents_dir/Library/LaunchDaemons/com.felix.viasix.tun-helper.plist"
 cp "$project_root/Packaging/Info.plist" "$contents_dir/Info.plist"
 cp "$project_root/Docs/USER_GUIDE.md" "$contents_dir/Resources/Docs/USER_GUIDE.md"
-cp "$project_root/CHANGELOG.md" "$contents_dir/Resources/CHANGELOG.md"
-cp "$project_root/PRIVACY.md" "$contents_dir/Resources/PRIVACY.md"
-cp "$project_root/SECURITY.md" "$contents_dir/Resources/SECURITY.md"
-cp "$project_root/LICENSE" "$contents_dir/Resources/LICENSE"
-cp "$project_root/THIRD_PARTY_NOTICES.md" "$contents_dir/Resources/THIRD_PARTY_NOTICES.md"
+cp "$monorepo_root/CHANGELOG.md" "$contents_dir/Resources/CHANGELOG.md"
+cp "$monorepo_root/PRIVACY.md" "$contents_dir/Resources/PRIVACY.md"
+cp "$monorepo_root/SECURITY.md" "$contents_dir/Resources/SECURITY.md"
+cp "$monorepo_root/LICENSE" "$contents_dir/Resources/LICENSE"
+cp "$monorepo_root/THIRD_PARTY_NOTICES.md" "$contents_dir/Resources/THIRD_PARTY_NOTICES.md"
 cp \
-    "$project_root/ThirdPartyLicenses/CloudflareSpeedTest-GPL-3.0.txt" \
+    "$monorepo_root/ThirdPartyLicenses/CloudflareSpeedTest-GPL-3.0.txt" \
     "$contents_dir/Resources/ThirdPartyLicenses/CloudflareSpeedTest-GPL-3.0.txt"
 cp \
-    "$project_root/ThirdPartyLicenses/mihomo-GPL-3.0.txt" \
+    "$monorepo_root/ThirdPartyLicenses/mihomo-GPL-3.0.txt" \
     "$contents_dir/Resources/ThirdPartyLicenses/mihomo-GPL-3.0.txt"
 cp \
-    "$project_root/ThirdPartyLicenses/Yams-MIT.txt" \
+    "$monorepo_root/ThirdPartyLicenses/Yams-MIT.txt" \
     "$contents_dir/Resources/ThirdPartyLicenses/Yams-MIT.txt"
 "$project_root/Scripts/generate-icon.sh" \
     "$project_root/Packaging/AppIcon.svg" \

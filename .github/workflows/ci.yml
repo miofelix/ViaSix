@@ -13,8 +13,24 @@ permissions:
   contents: read
 
 jobs:
-  build-test-package:
-    name: Build, test, and package (${{ matrix.architecture }})
+  contracts:
+    name: Contracts layout
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Verify contracts and platform skeletons
+        run: |
+          make contracts-check
+          make windows-skeleton
+          make android-skeleton
+
+  macos:
+    name: macOS build, test, package (${{ matrix.architecture }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     env:
@@ -39,9 +55,9 @@ jobs:
           xcodebuild -version
 
       - name: Run quality checks
-        run: make check
+        run: make macos-check
 
       - name: Verify application packaging
         env:
           VIASIX_EXPECTED_ARCHITECTURE: ${{ matrix.architecture }}
-        run: make app
+        run: make macos-app

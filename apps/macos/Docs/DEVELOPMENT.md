@@ -1,6 +1,6 @@
 # ViaSix 开发说明
 
-本文面向 ViaSix 的开发者和贡献者。终端用户请阅读 [README](../README.md) 和 [用户指南](USER_GUIDE.md)。
+本文面向 ViaSix 的开发者和贡献者。终端用户请阅读 [README](../../../README.md) 和 [用户指南](USER_GUIDE.md)。
 
 ## 目录
 
@@ -105,6 +105,11 @@ make clean
 
 ## 工程结构
 
+> 本应用位于 monorepo 的 `apps/macos/`。跨端布局见仓库根 [`docs/architecture/repo-layout.md`](../../../docs/architecture/repo-layout.md)。
+
+以下路径均相对于 **本目录**（`apps/macos`）：
+
+
 ```text
 Sources/
   ViaSixMihomoConfig/       Mihomo YAML、Profile 与旧配置迁移
@@ -128,7 +133,11 @@ Tests/                      各目标单元和集成测试
 Packaging/                  Info.plist、entitlements、LaunchDaemon plist 与图标
 Scripts/                    图标、应用打包、文档链接与 bundle 验证
 Docs/                       用户、开发、架构与发布文档
-ThirdPartyLicenses/         固定上游版本的许可证原文
+
+仓库根目录另有：
+  contracts/                跨端 schema 与投影 fixture
+  ThirdPartyLicenses/       固定上游版本的许可证原文
+  server/                   Cloudflare Pages 等服务端资产
 ```
 
 SwiftPM 的主要边界：
@@ -179,7 +188,7 @@ Sources/ViaSixCore/Runtime/RuntimeManifest.swift
 - 更新 `RuntimeManifest.swift` 的版本、URL、资产名、压缩格式和双重校验值
 - 同步更新 `Scripts/fetch-mihomo.sh` 的嵌入资产清单与打包验签预期
 - 更新测试中的预期值
-- 更新[第三方声明](../THIRD_PARTY_NOTICES.md)和离线许可证
+- 更新[第三方声明](../../../THIRD_PARTY_NOTICES.md)和离线许可证
 - 在 arm64 与 x86_64 对应环境验证下载、校验和启动
 - 确认旧 Runtime 在新资产校验失败时仍可用
 

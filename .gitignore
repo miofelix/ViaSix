@@ -3,6 +3,7 @@
 .swiftpm/
 DerivedData/
 dist/
+**/dist/
 *.xcuserstate
 xcuserdata/
 *.xcarchive/
@@ -19,3 +20,20 @@ xcuserdata/
 # Local runtime payloads and generated data
 .runtime/
 *.log
+
+# Android / Gradle (future)
+**/.gradle/
+**/local.properties
+**/build/
+**/.cxx/
+*.apk
+*.aab
+*.iml
+.idea/
+
+# Windows / Node / Rust (future desktop shell)
+**/node_modules/
+**/target/
+*.exe
+*.msi
+*.msix

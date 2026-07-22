@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://viasix.dev/schemas/x-viasix.schema.json",
+  "title": "ViaSix x-viasix YAML extension",
+  "description": "Optional Mihomo profile extension. Cannot override routing, TUN, listen, DNS, or logging.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "primary-server"],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 1
+    },
+    "primary-server": {
+      "type": "string",
+      "const": "selected-ip",
+      "description": "Placeholder: runtime replaces proxy server with the selected IPv6."
+    }
+  }
+}

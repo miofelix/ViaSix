@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Skeleton only: not a buildable application yet. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- VPN capability will be declared when VpnService is implemented. -->
+    <application
+        android:label="ViaSix"
+        android:supportsRtl="true" />
+</manifest>

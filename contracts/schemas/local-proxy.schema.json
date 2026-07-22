@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://viasix.dev/schemas/local-proxy.schema.json",
+  "title": "ViaSix local-proxy.json",
+  "description": "Local proxy, routing, and network-access preferences. Platform UIs may hide unsupported fields (e.g. systemProxy on Android).",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "listenAddress": {
+      "type": "string",
+      "description": "Mixed proxy bind address; must be a loopback address.",
+      "default": "127.0.0.1"
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535,
+      "default": 11451
+    },
+    "controllerPort": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535,
+      "default": 9090
+    },
+    "routingMode": {
+      "type": "string",
+      "enum": ["rule", "global", "direct"],
+      "default": "rule"
+    },
+    "networkAccessMode": {
+      "type": "string",
+      "enum": ["localProxy", "virtualInterface"],
+      "default": "virtualInterface",
+      "description": "localProxy = user-space core only; virtualInterface = TUN/VpnService path when available."
+    },
+    "systemProxyEnabled": {
+      "type": "boolean",
+      "default": false,
+      "description": "Desktop system proxy. Android implementations should ignore or force false."
+    },
+    "tunStack": {
+      "type": "string",
+      "enum": ["mixed", "system", "gvisor"],
+      "default": "mixed"
+    },
+    "tunMTU": {
+      "type": "integer",
+      "minimum": 1280,
+      "maximum": 9000,
+      "default": 1500
+    }
+  }
+}

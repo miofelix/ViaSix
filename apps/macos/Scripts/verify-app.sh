@@ -4,6 +4,7 @@ set -euo pipefail
 
 script_dir=${0:A:h}
 project_root=${script_dir:h}
+monorepo_root=${project_root:h:h}
 app_bundle=${1:-"$project_root/dist/ViaSix.app"}
 contents_dir="$app_bundle/Contents"
 info_plist="$contents_dir/Info.plist"
@@ -172,7 +173,7 @@ for document_name in CHANGELOG.md LICENSE PRIVACY.md SECURITY.md THIRD_PARTY_NOT
     [[ -f "$contents_dir/Resources/$document_name" ]] \
         || fail "missing bundled document: $document_name"
 done
-cmp -s "$project_root/LICENSE" "$contents_dir/Resources/LICENSE" \
+cmp -s "$monorepo_root/LICENSE" "$contents_dir/Resources/LICENSE" \
     || fail "bundled LICENSE does not match the repository copy"
 
 for license_specification in \
