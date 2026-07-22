@@ -3,6 +3,7 @@ mod connectivity;
 mod controller;
 mod exit_ip;
 mod ip_lists;
+mod local_proxy;
 mod prefs;
 mod profile;
 mod profile_store;
@@ -72,12 +73,33 @@ fn push_log(
     }
 }
 
-fn apply_ports(options: &mut ProjectOptions, mixed_port: Option<u16>, controller_port: Option<u16>) {
-    if let Some(port) = mixed_port.filter(|p| *p > 0) {
-        options.mixed_port = port;
+fn apply_ports(
+    options: &mut ProjectOptions,
+    mixed_port: Option<u16>,
+    controller_port: Option<u16>,
+) -> Result<(), String> {
+    if let Some(port) = mixed_port {
+        options.mixed_port = local_proxy::validate_port(port, "mixedPort")?;
     }
-    if let Some(port) = controller_port.filter(|p| *p > 0) {
-        options.controller_port = port;
+    if let Some(port) = controller_port {
+        options.controller_port = local_proxy::validate_port(port, "controllerPort")?;
+    }
+    // Product invariant: mixed proxy is loopback-only (macOS LocalProxyConfiguration).
+    options.listen_address =
+        local_proxy::validate_listen_address(&options.listen_address)?;
+    Ok(())
+}
+
+fn ingest_kernel_log_into_activity(
+    services: &AppServices,
+    app: Option<&AppHandle>,
+    max_lines: usize,
+) {
+    let Ok(raw) = services.core.tail_log(max_lines.max(1)) else {
+        return;
+    };
+    for line in local_proxy::kernel_log_lines_for_activity(&raw, max_lines) {
+        push_log(services, app, "info", "core", line);
     }
 }
 
@@ -126,7 +148,7 @@ fn project_runtime_config(
     let mut options = ProjectOptions::default();
     options.routing_mode = mode;
     options.selected_address = selected_address;
-    apply_ports(&mut options, mixed_port, controller_port);
+    apply_ports(&mut options, mixed_port, controller_port)?;
     apply_proxy_flags(&mut options, udp_enabled, sniffing_enabled);
     let profile = if mode == RoutingMode::Direct {
         None
@@ -156,6 +178,30 @@ fn read_text_file(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn write_text_file(path: String, contents: String) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    if contents.len() > 2 * 1024 * 1024 {
+        return Err("content too large (max 2 MiB)".into());
+    }
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&p, contents).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn ingest_core_log(
+    app: AppHandle,
+    services: State<'_, SharedServices>,
+    max_lines: Option<usize>,
+) -> Result<usize, String> {
+    let before = services.activity.lock().list().len();
+    ingest_kernel_log_into_activity(&services, Some(&app), max_lines.unwrap_or(80));
+    let after = services.activity.lock().list().len();
+    Ok(after.saturating_sub(before))
+}
+
+#[tauri::command]
 fn core_status(services: State<'_, SharedServices>) -> CoreStatus {
     services.core.status()
 }
@@ -179,7 +225,10 @@ fn start_core(
     let mut options = ProjectOptions::default();
     options.routing_mode = mode;
     options.selected_address = selected_address;
-    apply_ports(&mut options, mixed_port, controller_port);
+    apply_ports(&mut options, mixed_port, controller_port).map_err(|e| {
+        push_log(&services, Some(&app), "error", "config", e.clone());
+        e
+    })?;
     apply_proxy_flags(&mut options, udp_enabled, sniffing_enabled);
 
     let want_tun = services.virtual_network.lock().is_enabled();
@@ -254,6 +303,8 @@ fn start_core(
 
     let mut status = services.core.start(profile, &options, &bin).map_err(|e| {
         push_log(&services, Some(&app), "error", "core", e.clone());
+        // Auto-merge kernel log into activity stream (macOS-style unified diagnostics).
+        ingest_kernel_log_into_activity(&services, Some(&app), 40);
         e
     })?;
     services.traffic.lock().reset();
@@ -1042,6 +1093,8 @@ pub fn run() {
             project_runtime_config,
             summarize_profile,
             read_text_file,
+            write_text_file,
+            ingest_core_log,
             core_status,
             start_core,
             stop_core,

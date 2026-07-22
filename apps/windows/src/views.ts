@@ -742,6 +742,7 @@ function renderProfiles(model: AppModel): string {
         </div>
         <div class="inline-actions wrap">
           <button type="button" class="btn" data-action="import-profile">${icon("export", 14)} 导入文件</button>
+          <button type="button" class="btn" data-action="export-profile-file">导出 YAML…</button>
           <button type="button" class="btn" data-action="save-profile-file">${icon("profile", 14)} 保存到数据目录</button>
           <button type="button" class="btn" data-action="reload-profile-file">从数据目录加载</button>
           <button type="button" class="btn btn-primary" data-action="project-config" ${model.busy.project ? "disabled" : ""}>
@@ -884,6 +885,10 @@ function renderSettings(model: AppModel): string {
       <div class="card-body">
         <div class="form-row">
           <label class="field">
+            <span>监听地址</span>
+            <input type="text" value="127.0.0.1" readonly title="产品不变量：仅允许回环地址" />
+          </label>
+          <label class="field">
             <span>Mixed 端口</span>
             <input id="settings-mixed-port" type="number" min="1" max="65535" value="${model.mixedPort}" ${model.core?.running ? "disabled" : ""} />
           </label>
@@ -892,7 +897,7 @@ function renderSettings(model: AppModel): string {
             <input id="settings-controller-port" type="number" min="1" max="65535" value="${model.controllerPort}" ${model.core?.running ? "disabled" : ""} />
           </label>
         </div>
-        <p class="help-text muted">对齐 macOS local-proxy 端口语义；运行中不可修改。默认 11451 / 9090。</p>
+        <p class="help-text muted">对齐 macOS local-proxy：监听固定回环（127.0.0.1 / ::1）；端口 1–65535；运行中不可改端口。</p>
         <div class="form-row" style="margin-top:10px">
           <label class="check">
             <input type="checkbox" id="settings-udp" ${model.udpEnabled ? "checked" : ""} ${model.core?.running ? "disabled" : ""} />

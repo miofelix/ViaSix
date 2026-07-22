@@ -1,6 +1,6 @@
 import "./styles.css";
 import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import * as api from "./api";
 import { copyText, isLikelyIPv6 } from "./format";
@@ -411,6 +411,9 @@ async function handleAction(action: string, el: HTMLElement): Promise<void> {
       return;
     case "import-kernel-logs":
       await importKernelLogs();
+      return;
+    case "export-profile-file":
+      await exportProfileFile();
       return;
     case "refresh-tun-preflight":
       await refreshTunPreflight();
@@ -979,24 +982,47 @@ async function refreshCoreLog(): Promise<void> {
 
 async function importKernelLogs(): Promise<void> {
   try {
-    const text = await api.tailCoreLog(120);
-    model.coreLog = text;
-    if (!text.trim()) {
+    // Prefer first-class backend ingest (shared shaping with start_core failure path).
+    const added = await api.ingestCoreLog(80);
+    try {
+      model.coreLog = await api.tailCoreLog(240);
+    } catch {
+      // ignore tail failure if ingest worked
+    }
+    // Reload activity so UI matches backend stream (events may have been missed offline).
+    try {
+      const entries = await api.listActivityLogs();
+      for (const entry of entries) {
+        mergeBackendLog(model, entry);
+      }
+    } catch {
+      // browser preview
+    }
+    if (added === 0) {
       toast("内核日志为空（启动 Mihomo 后才会写入）", "info");
-      return;
+    } else {
+      toast(`已并入 ${added} 行内核日志`, "success");
     }
-    const lines = text
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean)
-      .slice(-80);
-    for (const line of lines) {
-      pushLog(model, "info", "core", `[mihomo] ${line}`);
-    }
-    toast(`已并入 ${lines.length} 行内核日志`, "success");
     paint();
   } catch (error) {
     toast(`并入内核日志失败：${error}`, "error");
+  }
+}
+
+async function exportProfileFile(): Promise<void> {
+  try {
+    const path = await save({
+      defaultPath: "profile.yaml",
+      filters: [{ name: "YAML", extensions: ["yaml", "yml"] }],
+    });
+    if (!path) return;
+    await api.writeTextFile(path, model.profileYaml);
+    pushLog(model, "success", "config", `已导出 profile → ${path}`);
+    toast(`已导出 ${path}`, "success");
+  } catch (error) {
+    const msg = String(error);
+    if (/cancel/i.test(msg)) return;
+    toast(`导出失败：${error}`, "error");
   }
 }
 

@@ -47,6 +47,15 @@ export async function readTextFile(path: string): Promise<string> {
   return invoke<string>("read_text_file", { path });
 }
 
+export async function writeTextFile(path: string, contents: string): Promise<void> {
+  await invoke("write_text_file", { path, contents });
+}
+
+/** First-class kernel log ingest into activity (returns lines added). */
+export async function ingestCoreLog(maxLines = 80): Promise<number> {
+  return invoke<number>("ingest_core_log", { maxLines });
+}
+
 export async function coreStatus(): Promise<CoreStatus> {
   return invoke<CoreStatus>("core_status");
 }
