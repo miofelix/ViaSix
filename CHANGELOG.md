@@ -4,6 +4,12 @@
 
 ## [未发布]
 
+### 变更
+
+- 文档：明确 ViaSix 为 **全平台** 产品（macOS / Windows / Android / Linux），而非仅 macOS；根 README 以平台状态矩阵为入口。
+- 文档：路线图增加 **阶段 4 — Linux 桌面**（Tauri，复用 Windows 栈；当前未开发），并新增 `docs/platforms/linux.md`。
+- 文档：同步更新 `PRIVACY` / `SECURITY` / `CONTRIBUTING`、架构完成边界与各平台说明中的定位表述。
+
 ### 新增
 
 - Monorepo 布局：`contracts/`、`apps/macos|windows|android`、`server/`、`docs/architecture`；跨端契约与平台骨架就位。

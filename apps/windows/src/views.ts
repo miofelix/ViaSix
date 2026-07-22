@@ -461,7 +461,7 @@ function renderOverview(model: AppModel): string {
           <div class="row-divider"></div>
           ${infoRow("模式", routingModeLabel(model.routingMode))}
           <div class="app-links">
-            <a class="btn btn-sm" href="https://github.com/miofelix/ViaSix" target="_blank" rel="noreferrer">仓库</a>
+            <a class="btn btn-sm" href="https://github.com/miofelix/viasix" target="_blank" rel="noreferrer">仓库</a>
             <button type="button" class="btn btn-sm" data-action="goto-settings">设置</button>
             <button type="button" class="btn btn-sm" data-action="goto-logs">日志</button>
           </div>

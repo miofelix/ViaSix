@@ -2,7 +2,9 @@
 
 实现位置：[`apps/android`](../../apps/android)。
 
-**状态**：MVP（投影 + VpnService 会话 + 对齐 macOS 的分区 UI）。
+ViaSix **全平台**产品中的 Android 端（移动网络接入语义与桌面不同：无系统代理，以 VpnService 为主）。
+
+**状态**：MVP（投影 + VpnService 会话 + 对齐桌面的分区 UI）。
 
 ## 技术选型
 

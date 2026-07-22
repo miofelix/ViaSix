@@ -15,8 +15,8 @@ public enum AppMetadata {
     public static let controllerPort = 9_090
     public static let proxyDelayTestURL = "https://www.gstatic.com/generate_204"
     public static let proxyDelayTimeoutMilliseconds = 5_000
-    public static let repositoryURL = URL(string: "https://github.com/miofelix/ViaSix")!
-    public static let issuesURL = URL(string: "https://github.com/miofelix/ViaSix/issues")!
+    public static let repositoryURL = URL(string: "https://github.com/miofelix/viasix")!
+    public static let issuesURL = URL(string: "https://github.com/miofelix/viasix/issues")!
     public static let fallbackVersion = "1.0.0"
 
     /// Marketing version from the app bundle, with a package fallback for `swift run`.

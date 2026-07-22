@@ -1,6 +1,6 @@
 # ViaSix for macOS
 
-原生 macOS 客户端（SwiftUI + SwiftPM）。本目录是可独立构建的应用根。
+ViaSix **全平台**产品中的原生 macOS 客户端（SwiftUI + SwiftPM）。本目录是可独立构建的应用根；跨端契约见仓库 [`contracts/`](../../contracts/)，总览见根 [README](../../README.md)。
 
 ## 要求
 

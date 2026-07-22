@@ -1,6 +1,8 @@
 # ViaSix for Android
 
-**状态：MVP 骨架（contracts 投影 + VpnService 会话）**
+ViaSix **全平台**产品中的 Android 端。跨端总览见根 [README](../../README.md)。
+
+**状态：MVP（contracts 投影 + VpnService 会话 + 分区 UI）**
 
 ## 模块
 

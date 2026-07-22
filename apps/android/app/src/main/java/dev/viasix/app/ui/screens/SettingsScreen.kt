@@ -240,7 +240,7 @@ fun SettingsScreen(
                 HorizontalDivider(color = colors.surfaceBorder, modifier = Modifier.padding(start = 40.dp))
                 CompactInfoRow("契约", "contracts/fixtures · 与桌面端对齐")
                 TextButton(
-                    onClick = { uriHandler.openUri("https://github.com/miofelix/ViaSix") },
+                    onClick = { uriHandler.openUri("https://github.com/miofelix/viasix") },
                     modifier = Modifier.padding(horizontal = VisualStyle.spacing8),
                 ) {
                     Text("打开 GitHub 仓库")
