@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Network
 
@@ -162,19 +163,24 @@ public struct SpeedTestParameters: Codable, Equatable, Sendable {
     }
 
     private static func validateIPFile(_ path: String) throws {
-        let fileManager = FileManager.default
-        var isDirectory = ObjCBool(false)
-        guard fileManager.fileExists(atPath: path, isDirectory: &isDirectory) else {
+        var fileStatus = stat()
+        guard lstat(path, &fileStatus) == 0 else {
             throw ValidationError.ipFileNotFound(path)
         }
-        guard !isDirectory.boolValue, fileManager.isReadableFile(atPath: path) else {
+
+        let fileType = fileStatus.st_mode & S_IFMT
+        // Refuse symlinks so CFST cannot be pointed at an arbitrary file via a
+        // redirected IP list path chosen in preferences.
+        guard fileType != S_IFLNK else {
+            throw ValidationError.ipFileIsSymbolicLink(path)
+        }
+        guard fileType == S_IFREG else {
             throw ValidationError.ipFileUnreadable(path)
         }
-
-        let fileURL = URL(fileURLWithPath: path)
-        if let fileSize = try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-            fileSize == 0
-        {
+        guard FileManager.default.isReadableFile(atPath: path) else {
+            throw ValidationError.ipFileUnreadable(path)
+        }
+        guard fileStatus.st_size > 0 else {
             throw ValidationError.ipFileEmpty(path)
         }
     }
@@ -276,6 +282,7 @@ public enum SpeedTestParameterError: LocalizedError, Equatable, Sendable {
     case missingIPSource
     case ipFileNotFound(String)
     case ipFileUnreadable(String)
+    case ipFileIsSymbolicLink(String)
     case ipFileEmpty(String)
     case invalidIPRange(String)
     case invalidURL
@@ -286,6 +293,7 @@ public enum SpeedTestParameterError: LocalizedError, Equatable, Sendable {
         case .missingIPSource: "请选择 IP 文件或填写 IP 段"
         case .ipFileNotFound(let path): "找不到 IP 地址文件：\(path)"
         case .ipFileUnreadable(let path): "无法读取 IP 地址文件：\(path)"
+        case .ipFileIsSymbolicLink(let path): "IP 地址文件不能是符号链接：\(path)"
         case .ipFileEmpty(let path): "IP 地址文件为空：\(path)"
         case .invalidIPRange(let value): "IP 段格式无效：\(value)"
         case .invalidURL: "测速 URL 必须是有效的 HTTP 或 HTTPS 地址"

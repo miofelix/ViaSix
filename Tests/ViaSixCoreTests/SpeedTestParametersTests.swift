@@ -49,6 +49,26 @@ final class SpeedTestParametersTests: XCTestCase {
         }
     }
 
+    func testValidationRejectsSymbolicLinkIPFilesBeforeLaunch() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ViaSix-IPLink-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let target = root.appendingPathComponent("outside.txt")
+        let link = root.appendingPathComponent("ipv6.txt")
+        try Data("2606:4700::1\n".utf8).write(to: target)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+
+        XCTAssertThrowsError(try SpeedTestParameters(ipFile: link.path).validated()) { error in
+            XCTAssertEqual(error as? SpeedTestParameterError, .ipFileIsSymbolicLink(link.path))
+        }
+        // Directory is also not a usable IP list.
+        XCTAssertThrowsError(try SpeedTestParameters(ipFile: root.path).validated()) { error in
+            XCTAssertEqual(error as? SpeedTestParameterError, .ipFileUnreadable(root.path))
+        }
+    }
+
     func testValidationRejectsMalformedIPRangesBeforeLaunch() {
         for value in [
             "not-an-ip",

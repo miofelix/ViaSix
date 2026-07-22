@@ -24,6 +24,7 @@ public enum MihomoControllerError: Error, Equatable, LocalizedError, Sendable {
     case executableNotExecutable(String)
     case configNotFound(String)
     case configNotReadable(String)
+    case configIsSymbolicLink(String)
     case homeNotFound(String)
     case homeIsSymbolicLink(String)
     case homeNotDirectory(String)
@@ -51,6 +52,8 @@ public enum MihomoControllerError: Error, Equatable, LocalizedError, Sendable {
             "未找到 Mihomo 配置文件：\(path)"
         case .configNotReadable(let path):
             "Mihomo 配置文件不可读取：\(path)"
+        case .configIsSymbolicLink(let path):
+            "Mihomo 配置文件不能是符号链接：\(path)"
         case .homeNotFound(let path):
             "未找到 Mihomo 数据目录：\(path)"
         case .homeIsSymbolicLink(let path):
@@ -395,13 +398,26 @@ public actor MihomoController {
     private func validateRuntimeFiles() throws {
         try validateExecutable()
         try validateHome()
+        try validateConfig()
+    }
 
+    private func validateConfig() throws {
         let configPath = configURL.path
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: configPath, isDirectory: &isDirectory) else {
+        var fileStatus = stat()
+        guard lstat(configPath, &fileStatus) == 0 else {
             throw MihomoControllerError.configNotFound(configPath)
         }
-        guard !isDirectory.boolValue, FileManager.default.isReadableFile(atPath: configPath) else {
+
+        let fileType = fileStatus.st_mode & S_IFMT
+        // Fail closed on symlinks: FileManager readability checks follow links
+        // and would otherwise let Mihomo load an attacker-chosen config.
+        guard fileType != S_IFLNK else {
+            throw MihomoControllerError.configIsSymbolicLink(configPath)
+        }
+        guard fileType == S_IFREG else {
+            throw MihomoControllerError.configNotReadable(configPath)
+        }
+        guard FileManager.default.isReadableFile(atPath: configPath) else {
             throw MihomoControllerError.configNotReadable(configPath)
         }
     }

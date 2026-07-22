@@ -226,6 +226,27 @@ final class MihomoControllerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.invocationsURL.path))
     }
 
+    func testSymbolicLinkConfigIsRejectedBeforeLaunch() async throws {
+        let fixture = try MihomoControllerFixture(behavior: "normal")
+        defer { fixture.remove() }
+        let outsideConfig = fixture.directoryURL.appendingPathComponent("outside-config.yaml")
+        try Data("mixed-port: 1\n".utf8).write(to: outsideConfig)
+        try FileManager.default.removeItem(at: fixture.configURL)
+        try FileManager.default.createSymbolicLink(
+            at: fixture.configURL,
+            withDestinationURL: outsideConfig
+        )
+        let controller = makeController(fixture: fixture) { _, _ in false }
+
+        do {
+            try await controller.start()
+            XCTFail("Expected symbolic-link config error")
+        } catch let error as MihomoControllerError {
+            XCTAssertEqual(error, .configIsSymbolicLink(fixture.configURL.path))
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.invocationsURL.path))
+    }
+
     func testRegularFileHomeIsRejectedBeforeLaunch() async throws {
         let fixture = try MihomoControllerFixture(behavior: "normal")
         defer { fixture.remove() }
