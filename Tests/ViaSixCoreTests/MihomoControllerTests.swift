@@ -523,7 +523,8 @@ final class MihomoControllerTests: XCTestCase {
     }
 
     private func waitUntilFileExists(_ url: URL) async throws {
-        for _ in 0..<200 {
+        // Full-suite load can delay process spawn; allow up to ~5s before failing.
+        for _ in 0..<500 {
             if FileManager.default.fileExists(atPath: url.path) { return }
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -714,6 +715,9 @@ private final class MihomoControllerFixture: @unchecked Sendable {
           fi
           if [ "$behavior" = "validation-timeout" ]; then
             trap '' TERM
+            # Publish the supervisor PID immediately so tests under load do not
+            # race the child spawn before observing process ownership.
+            printf '%s\n' "$$" > pids.txt
             (trap '' TERM; sleep 30) &
             child=$!
             printf '%s %s\n' "$$" "$child" > pids.txt

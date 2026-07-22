@@ -454,6 +454,31 @@ final class CfstRunnerTests: XCTestCase {
         XCTAssertTrue(fixture.temporaryResultURLs.isEmpty)
     }
 
+    func testSymbolicLinkExecutableIsRejectedBeforeLaunch() async throws {
+        let fixture = try CfstRunnerFixture(
+            script: #"""
+                #!/bin/sh
+                exit 0
+                """#
+        )
+        defer { fixture.remove() }
+
+        let realExecutable = fixture.directoryURL.appendingPathComponent("real-cfst")
+        try FileManager.default.moveItem(at: fixture.executableURL, to: realExecutable)
+        try FileManager.default.createSymbolicLink(
+            at: fixture.executableURL,
+            withDestinationURL: realExecutable
+        )
+
+        let runner = CfstRunner(executableURL: fixture.executableURL)
+        do {
+            _ = try await runner.run(parameters: .init(ipRange: "2606:4700::/32"))
+            XCTFail("Expected symbolic-link executable error")
+        } catch let error as CfstRunnerError {
+            XCTAssertEqual(error, .executableIsSymbolicLink(fixture.executableURL.path))
+        }
+    }
+
     private func waitUntilFileExists(_ url: URL) async throws {
         for _ in 0..<300 {
             if FileManager.default.fileExists(atPath: url.path) { return }

@@ -7,6 +7,7 @@ public enum CfstRunnerError: Error, Equatable, LocalizedError, Sendable {
     case alreadyRunning
     case executableNotFound(String)
     case executableNotExecutable(String)
+    case executableIsSymbolicLink(String)
     case cannotPromoteResult(path: String, reason: String)
     case launchFailed(path: String, reason: String)
     case outputReadFailed(String)
@@ -25,6 +26,8 @@ public enum CfstRunnerError: Error, Equatable, LocalizedError, Sendable {
             "未找到 CFST 可执行文件：\(path)"
         case .executableNotExecutable(let path):
             "CFST 文件不可执行：\(path)"
+        case .executableIsSymbolicLink(let path):
+            "CFST 可执行文件不能是符号链接：\(path)"
         case .cannotPromoteResult(let path, let reason):
             "无法保存测速结果 \(path)：\(reason)"
         case .launchFailed(let path, let reason):
@@ -283,8 +286,19 @@ public actor CfstRunner {
 
     private func validateExecutable() throws {
         let path = executableURL.path
-        guard FileManager.default.fileExists(atPath: path) else {
+        var fileStatus = stat()
+        guard lstat(path, &fileStatus) == 0 else {
             throw CfstRunnerError.executableNotFound(path)
+        }
+
+        let fileType = fileStatus.st_mode & S_IFMT
+        // Fail closed on symlinks so a replaced Runtime/cfst link cannot
+        // redirect the speed-test launcher to an arbitrary executable.
+        guard fileType != S_IFLNK else {
+            throw CfstRunnerError.executableIsSymbolicLink(path)
+        }
+        guard fileType == S_IFREG else {
+            throw CfstRunnerError.executableNotExecutable(path)
         }
         guard FileManager.default.isExecutableFile(atPath: path) else {
             throw CfstRunnerError.executableNotExecutable(path)
