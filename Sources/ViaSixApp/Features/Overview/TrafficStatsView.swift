@@ -6,31 +6,41 @@ struct TrafficStatsView: View {
     let snapshot: TrafficSnapshot
     let isProxyRunning: Bool
 
+    private static let graphHeight: CGFloat = 128
+    private static let metricHeight: CGFloat = 56
+    private static let footerHeight: CGFloat = 16
+
     var body: some View {
         SurfaceCard {
             CardHeader("流量统计", systemImage: "chart.xyaxis.line", tone: headerTone) {
-                if isProxyRunning {
-                    StatusBadge(
-                        snapshot.isLive ? "实时" : "连接中",
-                        tone: snapshot.isLive ? .positive : .warning,
-                        systemImage: snapshot.isLive ? "antenna.radiowaves.left.and.right" : "hourglass"
-                    )
-                } else {
-                    StatusBadge("未连接", tone: .neutral, systemImage: "circle")
-                }
+                StatusBadge(
+                    statusTitle,
+                    tone: statusTone,
+                    systemImage: statusIcon
+                )
+                .frame(minWidth: 72, alignment: .trailing)
             }
             Divider()
 
             VStack(alignment: .leading, spacing: VisualStyle.spacing12) {
                 trafficGraph
-                    .frame(height: 132)
+                    .frame(height: Self.graphHeight)
+                    .frame(maxWidth: .infinity)
                     .clipShape(RoundedRectangle(cornerRadius: VisualStyle.radiusMedium, style: .continuous))
                     .background(
                         RoundedRectangle(cornerRadius: VisualStyle.radiusMedium, style: .continuous)
                             .fill(VisualStyle.subtleFill)
                     )
 
-                HStack(spacing: VisualStyle.spacing12) {
+                // Fixed 2×3 grid keeps metric tiles aligned regardless of value length.
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: VisualStyle.spacing12),
+                        GridItem(.flexible(), spacing: VisualStyle.spacing12),
+                        GridItem(.flexible(), spacing: VisualStyle.spacing12),
+                    ],
+                    spacing: VisualStyle.spacing12
+                ) {
                     metricTile(
                         title: "上传",
                         value: ByteRateFormatter.formatRate(snapshot.up),
@@ -49,9 +59,6 @@ struct TrafficStatsView: View {
                         systemImage: "memorychip",
                         tone: .warning
                     )
-                }
-
-                HStack(spacing: VisualStyle.spacing12) {
                     metricTile(
                         title: "总上传",
                         value: ByteRateFormatter.formatBytes(snapshot.uploadTotal),
@@ -64,14 +71,20 @@ struct TrafficStatsView: View {
                         systemImage: "arrow.down.to.line.circle.fill",
                         tone: .positive
                     )
+                    metricTile(
+                        title: "状态",
+                        value: isProxyRunning ? (snapshot.isLive ? "实时采集" : "连接中") : "未连接",
+                        systemImage: isProxyRunning ? "waveform.path.ecg" : "pause.circle",
+                        tone: isProxyRunning ? .positive : .neutral
+                    )
                 }
 
-                if !isProxyRunning {
-                    Text("启动连接后显示实时上下行速率、累计流量、流量曲线与 Mihomo 内存占用。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text(footerText)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, minHeight: Self.footerHeight, alignment: .leading)
+                    .opacity(0.85)
             }
             .padding(VisualStyle.spacing16)
         }
@@ -80,6 +93,28 @@ struct TrafficStatsView: View {
     private var headerTone: AppTone {
         if !isProxyRunning { return .neutral }
         return snapshot.isLive ? .positive : .accent
+    }
+
+    private var statusTitle: String {
+        if !isProxyRunning { return "未连接" }
+        return snapshot.isLive ? "实时" : "连接中"
+    }
+
+    private var statusTone: AppTone {
+        if !isProxyRunning { return .neutral }
+        return snapshot.isLive ? .positive : .warning
+    }
+
+    private var statusIcon: String {
+        if !isProxyRunning { return "circle" }
+        return snapshot.isLive ? "antenna.radiowaves.left.and.right" : "hourglass"
+    }
+
+    private var footerText: String {
+        if isProxyRunning {
+            return "速率来自 /traffic，累计来自 /connections，内存来自 /memory"
+        }
+        return "启动连接后显示实时上下行速率、累计流量、流量曲线与内存占用"
     }
 
     @ViewBuilder
@@ -101,7 +136,10 @@ struct TrafficStatsView: View {
                     )
                     .foregroundStyle(
                         LinearGradient(
-                            colors: [VisualStyle.positive.opacity(0.28), VisualStyle.positive.opacity(0.02)],
+                            colors: [
+                                VisualStyle.positive.opacity(0.28),
+                                VisualStyle.positive.opacity(0.02),
+                            ],
                             startPoint: .top,
                             endPoint: .bottom
                         )
@@ -164,23 +202,25 @@ struct TrafficStatsView: View {
     ) -> some View {
         HStack(spacing: VisualStyle.spacing8) {
             Image(systemName: systemImage)
-                .font(.title3)
+                .font(.body.weight(.semibold))
                 .foregroundStyle(tone.color)
-                .frame(width: 28, height: 28)
+                .frame(width: 24, height: 24)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
                 Text(value)
                     .font(.callout.monospacedDigit().weight(.semibold))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    .minimumScaleFactor(0.7)
+                    .help(value)
             }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, VisualStyle.spacing12)
-        .padding(.vertical, VisualStyle.spacing8)
+        .frame(maxWidth: .infinity, minHeight: Self.metricHeight, maxHeight: Self.metricHeight, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: VisualStyle.radiusMedium, style: .continuous)
                 .fill(tone.color.opacity(0.08))
@@ -189,7 +229,6 @@ struct TrafficStatsView: View {
             RoundedRectangle(cornerRadius: VisualStyle.radiusMedium, style: .continuous)
                 .strokeBorder(tone.color.opacity(0.14), lineWidth: 1)
         )
-        .frame(maxWidth: .infinity)
     }
 
     private func axisRateLabel(_ rate: Double) -> String {
@@ -197,7 +236,8 @@ struct TrafficStatsView: View {
         if clamped < 1_024 {
             return "\(Int(clamped)) B"
         }
-        return ByteRateFormatter.formatCompactRate(UInt64(clamped)).replacingOccurrences(of: "/s", with: "")
+        return ByteRateFormatter.formatCompactRate(UInt64(clamped))
+            .replacingOccurrences(of: "/s", with: "")
     }
 }
 

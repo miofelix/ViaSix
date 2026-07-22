@@ -23,8 +23,9 @@ struct OverviewView: View {
                 VStack(alignment: .leading, spacing: VisualStyle.spacing12) {
                     ipv6LinkCard
 
-                    HStack(alignment: .top, spacing: VisualStyle.spacing12) {
+                    equalHeightRow {
                         routingModeCard
+                    } right: {
                         networkAccessCard
                     }
 
@@ -33,8 +34,9 @@ struct OverviewView: View {
                         isProxyRunning: model.state.isProxyRunning
                     )
 
-                    HStack(alignment: .top, spacing: VisualStyle.spacing12) {
+                    equalHeightRow {
                         ipInfoCard
+                    } right: {
                         appInfoCard
                     }
                 }
@@ -46,12 +48,27 @@ struct OverviewView: View {
         }
     }
 
+    /// Side-by-side cards stretch to the same height so state changes on one
+    /// side do not leave uneven gaps or reflow the row.
+    private func equalHeightRow<Left: View, Right: View>(
+        @ViewBuilder left: () -> Left,
+        @ViewBuilder right: () -> Right
+    ) -> some View {
+        HStack(alignment: .top, spacing: VisualStyle.spacing12) {
+            left()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            right()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+    }
+
     // MARK: - Link card
 
     private var ipv6LinkCard: some View {
         SurfaceCard {
             CardHeader("IPv6 链路", systemImage: "6.circle.fill", tone: headerTone) {
                 proxyActionButton
+                    .frame(minWidth: 108, alignment: .trailing)
             }
             Divider()
 
@@ -112,15 +129,19 @@ struct OverviewView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .disabled(routingControlsDisabled)
+                .frame(height: 28)
 
                 Text(routingModeDescription)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, minHeight: 32, alignment: .topLeading)
+
+                Spacer(minLength: 0)
             }
             .padding(VisualStyle.spacing16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity)
     }
 
     private var networkAccessCard: some View {
@@ -149,146 +170,97 @@ struct OverviewView: View {
                         .labelsHidden()
                         .disabled(networkControlsDisabled || (!tunIsRequested && !model.canUseTunMode))
                 }
+
+                Spacer(minLength: 0)
             }
             .padding(.horizontal, VisualStyle.spacing16)
             .padding(.bottom, VisualStyle.spacing12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity)
     }
 
     // MARK: - IP info (entry + exit)
 
     private var ipInfoCard: some View {
         SurfaceCard {
-            CardHeader("IP 信息", systemImage: "globe.asia.australia.fill", tone: selectedNodeIsIPv6 ? .accent : .warning) {
+            CardHeader(
+                "IP 信息",
+                systemImage: "globe.asia.australia.fill",
+                tone: selectedNodeIsIPv6 ? .accent : .warning
+            ) {
                 HStack(spacing: VisualStyle.spacing8) {
                     Button("选择节点", systemImage: "list.bullet", action: onSelectNodes)
                         .controlSize(.small)
-                    Button(
-                        model.state.exit.isDetecting ? "检测中…" : "检测出口",
-                        systemImage: "arrow.clockwise",
-                        action: model.detectExitIP
-                    )
-                    .controlSize(.small)
-                    .disabled(model.state.exit.isDetecting)
+                        .frame(minWidth: 88)
+
+                    Button(exitDetectTitle, systemImage: "arrow.clockwise", action: model.detectExitIP)
+                        .controlSize(.small)
+                        .frame(minWidth: 88)
+                        .disabled(model.state.exit.isDetecting)
                 }
             }
             Divider()
 
             VStack(alignment: .leading, spacing: VisualStyle.spacing12) {
-                ipInfoSection(title: "IPv6 入口", systemImage: "6.circle") {
-                    VStack(alignment: .leading, spacing: VisualStyle.spacing8) {
-                        HStack(alignment: .firstTextBaseline, spacing: VisualStyle.spacing8) {
-                            Text(
-                                model.state.preferences.selectedIP.isEmpty
-                                    ? "尚未选择"
-                                    : model.state.preferences.selectedIP
-                            )
-                            .font(.body.monospaced().weight(.semibold))
-                            .lineLimit(2)
-                            .truncationMode(.middle)
-                            .textSelection(.enabled)
-                            Spacer(minLength: 0)
-                            if selectedNodeIsIPv6 {
-                                copyButton(model.state.preferences.selectedIP)
+                ipBlock(
+                    title: "IPv6 入口",
+                    systemImage: "6.circle",
+                    primary: entryPrimaryText,
+                    secondary: entrySecondaryText,
+                    familyBadge: entryAddressFamilyLabel.map { ($0, AppTone.accent, "network") },
+                    copyText: selectedNodeIsIPv6 ? model.state.preferences.selectedIP : nil,
+                    trailing: {
+                        Button(configurationTestTitle, systemImage: "scope") {
+                            if configurationTestIsRunning {
+                                model.stopCurrentConfigurationTest()
+                            } else {
+                                model.startCurrentConfigurationTest()
                             }
                         }
-
-                        if let result = currentNodeResult {
-                            Text(result.performanceSummary)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text("优选 IPv6 地址后，ViaSix 会在运行时注入代理入口。")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-
-                        HStack {
-                            Button(configurationTestTitle, systemImage: "scope") {
-                                if configurationTestIsRunning {
-                                    model.stopCurrentConfigurationTest()
-                                } else {
-                                    model.startCurrentConfigurationTest()
-                                }
-                            }
-                            .controlSize(.small)
-                            .disabled(
-                                !configurationTestIsRunning
-                                    && model.currentConfigurationTestUnavailableReason != nil
-                            )
-                            if let family = entryAddressFamilyLabel {
-                                StatusBadge(family, tone: .accent, systemImage: "network")
-                            }
-                        }
+                        .controlSize(.small)
+                        .frame(minWidth: 108)
+                        .disabled(
+                            !configurationTestIsRunning
+                                && model.currentConfigurationTestUnavailableReason != nil
+                        )
                     }
-                }
+                )
 
                 Divider()
 
-                ipInfoSection(title: "公网出口", systemImage: "location.fill") {
-                    VStack(alignment: .leading, spacing: VisualStyle.spacing8) {
-                        HStack(alignment: .firstTextBaseline, spacing: VisualStyle.spacing8) {
-                            Text(model.state.exit.info?.ip ?? "尚未检测")
-                                .font(.body.monospaced().weight(.semibold))
-                                .lineLimit(2)
-                                .truncationMode(.middle)
-                                .textSelection(.enabled)
-                            Spacer(minLength: 0)
-                            if let ip = model.state.exit.info?.ip, !ip.isEmpty {
-                                copyButton(ip)
-                            }
+                ipBlock(
+                    title: "公网出口",
+                    systemImage: "location.fill",
+                    primary: exitPrimaryText,
+                    secondary: exitSecondaryText,
+                    familyBadge: exitFamilyBadge,
+                    copyText: model.state.exit.info?.ip,
+                    trailing: {
+                        Picker("地址族", selection: exitModeBinding) {
+                            Text("自动").tag(ExitIPDetectionMode.automatic)
+                            Text("IPv4").tag(ExitIPDetectionMode.ipv4)
+                            Text("IPv6").tag(ExitIPDetectionMode.ipv6)
                         }
-
-                        if let info = model.state.exit.info {
-                            if !info.location.isEmpty {
-                                infoRow("位置", info.location)
-                            }
-                            if !info.details.isEmpty {
-                                infoRow("详情", info.details)
-                            }
-                            if let family = info.addressFamily {
-                                StatusBadge(
-                                    family.displayName,
-                                    tone: .neutral,
-                                    systemImage: family == .ipv6 ? "6.circle" : "4.circle"
-                                )
-                            }
-                        } else if let error = model.state.exit.errorMessage, !error.isEmpty {
-                            Text(error)
-                                .font(.caption)
-                                .foregroundStyle(AppTone.negative.color)
-                                .fixedSize(horizontal: false, vertical: true)
-                        } else {
-                            Text("检测网站出口 IP。它可能是 IPv4，不代表入口地址族。")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-
-                        HStack {
-                            Picker("地址族", selection: exitModeBinding) {
-                                Text("自动").tag(ExitIPDetectionMode.automatic)
-                                Text("IPv4").tag(ExitIPDetectionMode.ipv4)
-                                Text("IPv6").tag(ExitIPDetectionMode.ipv6)
-                            }
-                            .labelsHidden()
-                            .frame(width: 100)
-
-                            if let route = model.exitIPRouteDescription {
-                                Text(route)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                        }
+                        .labelsHidden()
+                        .frame(width: 88)
+                        .controlSize(.small)
                     }
-                }
+                )
+
+                // Reserved meta line so location/details/route never grow the card.
+                Text(exitMetaLine)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, minHeight: 16, alignment: .leading)
+                    .opacity(exitMetaLine.isEmpty ? 0 : 1)
+
+                Spacer(minLength: 0)
             }
             .padding(VisualStyle.spacing16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity)
     }
 
     // MARK: - App info
@@ -300,53 +272,61 @@ struct OverviewView: View {
                     Label("GitHub", systemImage: "arrow.up.right.square")
                 }
                 .controlSize(.small)
+                .frame(minWidth: 72)
             }
             Divider()
 
             VStack(alignment: .leading, spacing: 0) {
-                infoDetailRow("应用版本", AppMetadata.displayVersion, systemImage: "app.badge")
-                Divider().padding(.leading, 52)
-                infoDetailRow("系统", macOSVersionSummary, systemImage: "desktopcomputer")
-                Divider().padding(.leading, 52)
-                infoDetailRow("运行方式", runtimeModeSummary, systemImage: "gearshape.2")
-                Divider().padding(.leading, 52)
-                infoDetailRow(
-                    "本地代理",
+                compactInfoRow("版本", AppMetadata.displayVersion, systemImage: "app.badge")
+                Divider().padding(.leading, 40)
+                compactInfoRow("系统", macOSVersionSummary, systemImage: "desktopcomputer")
+                Divider().padding(.leading, 40)
+                compactInfoRow("运行", runtimeModeSummary, systemImage: "gearshape.2")
+                Divider().padding(.leading, 40)
+                compactInfoRow(
+                    "代理",
                     model.state.proxyEndpoint.displayAddress,
                     systemImage: "point.3.filled.connected.trianglepath.dotted"
                 )
-                Divider().padding(.leading, 52)
-                infoDetailRow(
-                    "Controller",
+                Divider().padding(.leading, 40)
+                compactInfoRow(
+                    "控制",
                     "127.0.0.1:\(model.state.localProxyConfiguration.controllerPort)",
                     systemImage: "antenna.radiowaves.left.and.right"
                 )
-                Divider().padding(.leading, 52)
-                infoDetailRow("代理模式", routingMode.displayName, systemImage: routingMode.appSystemImage)
+                Divider().padding(.leading, 40)
+                compactInfoRow("模式", routingMode.displayName, systemImage: routingMode.appSystemImage)
+
+                Spacer(minLength: VisualStyle.spacing12)
 
                 HStack(spacing: VisualStyle.spacing8) {
                     Link(destination: AppMetadata.repositoryURL) {
-                        Label("打开仓库", systemImage: "link")
+                        Label("仓库", systemImage: "link")
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .frame(maxWidth: .infinity)
 
                     Link(destination: AppMetadata.issuesURL) {
-                        Label("反馈问题", systemImage: "exclamationmark.bubble")
+                        Label("反馈", systemImage: "exclamationmark.bubble")
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .frame(maxWidth: .infinity)
 
-                    Button("使用帮助", systemImage: "questionmark.circle") {
+                    Button {
                         AppDocumentOpener.open(.userGuide)
+                    } label: {
+                        Label("帮助", systemImage: "questionmark.circle")
                     }
                     .controlSize(.small)
+                    .frame(maxWidth: .infinity)
                 }
-                .padding(.top, VisualStyle.spacing12)
+                .frame(height: 28)
             }
             .padding(VisualStyle.spacing16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Shared chrome
@@ -364,57 +344,111 @@ struct OverviewView: View {
             detail: detail,
             systemImage: active ? "checkmark.circle.fill" : (ready ? "checkmark.circle" : "circle")
         ) {
-            if let actionTitle, let action {
-                Button(actionTitle, action: action)
-                    .controlSize(.small)
-            } else {
-                StatusBadge(
-                    active ? "已启用" : (ready ? "已就绪" : "未就绪"),
-                    tone: active ? .positive : (ready ? .accent : .warning)
-                )
+            Group {
+                if let actionTitle, let action {
+                    Button(actionTitle, action: action)
+                        .controlSize(.small)
+                } else {
+                    StatusBadge(
+                        active ? "已启用" : (ready ? "已就绪" : "未就绪"),
+                        tone: active ? .positive : (ready ? .accent : .warning)
+                    )
+                }
             }
+            .frame(minWidth: 72, alignment: .trailing)
         }
     }
 
-    private func ipInfoSection<Content: View>(
+    private func ipBlock<Trailing: View>(
         title: String,
         systemImage: String,
-        @ViewBuilder content: () -> Content
+        primary: String,
+        secondary: String,
+        familyBadge: (String, AppTone, String)?,
+        copyText: String?,
+        @ViewBuilder trailing: () -> Trailing
     ) -> some View {
         VStack(alignment: .leading, spacing: VisualStyle.spacing8) {
             Label(title, systemImage: systemImage)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-            content()
-        }
-    }
+                .frame(height: 16)
 
-    private func infoRow(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .top, spacing: VisualStyle.spacing8) {
-            Text(label)
+            HStack(alignment: .center, spacing: VisualStyle.spacing8) {
+                Text(primary)
+                    .font(.callout.monospaced().weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .help(primary)
+
+                copyButton(copyText)
+                    .opacity(copyText == nil ? 0.28 : 1)
+                    .disabled(copyText == nil)
+            }
+            .frame(height: 22)
+
+            Text(secondary)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, minHeight: 16, alignment: .leading)
+                .help(secondary)
+
+            HStack(spacing: VisualStyle.spacing8) {
+                trailing()
+                Spacer(minLength: 0)
+                if let familyBadge {
+                    StatusBadge(
+                        familyBadge.0,
+                        tone: familyBadge.1,
+                        systemImage: familyBadge.2
+                    )
+                } else {
+                    // Reserve badge width so the row does not shift.
+                    Color.clear.frame(width: 56, height: 22)
+                }
+            }
+            .frame(height: 28)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func compactInfoRow(_ title: String, _ value: String, systemImage: String) -> some View {
+        HStack(alignment: .center, spacing: VisualStyle.spacing12) {
+            Image(systemName: systemImage)
+                .font(.body.weight(.medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
+
+            Text(title)
+                .font(.callout.weight(.medium))
+                .foregroundStyle(.secondary)
                 .frame(width: 36, alignment: .leading)
+
             Text(value)
-                .font(.caption)
-                .foregroundStyle(.primary)
+                .font(.callout.monospacedDigit())
+                .lineLimit(1)
+                .truncationMode(.middle)
                 .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .help(value)
         }
+        .frame(height: 36)
+        .contentShape(Rectangle())
     }
 
-    private func infoDetailRow(_ title: String, _ value: String, systemImage: String) -> some View {
-        SettingRow(title, detail: value, systemImage: systemImage) {
-            EmptyView()
-        }
-    }
-
-    private func copyButton(_ text: String) -> some View {
+    private func copyButton(_ text: String?) -> some View {
         Button {
+            guard let text, !text.isEmpty else { return }
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
         } label: {
             Image(systemName: "doc.on.doc")
+                .font(.caption.weight(.semibold))
+                .frame(width: 22, height: 22)
         }
         .buttonStyle(.borderless)
         .help("复制")
@@ -425,6 +459,7 @@ struct OverviewView: View {
             model.state.isProxyRunning ? model.stopProxy() : model.startProxy()
         }
         .buttonStyle(.borderedProminent)
+        .controlSize(.regular)
         .disabled(proxyActionDisabled)
         .help(model.proxyConfigurationIssue ?? proxyActionTitle)
     }
@@ -479,6 +514,60 @@ struct OverviewView: View {
 
     private var entryAddressFamilyLabel: String? {
         selectedNodeIsIPv6 ? "IPv6" : nil
+    }
+
+    private var entryPrimaryText: String {
+        let selected = model.state.preferences.selectedIP
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return selected.isEmpty ? "尚未选择" : selected
+    }
+
+    private var entrySecondaryText: String {
+        if let result = currentNodeResult {
+            return result.performanceSummary
+        }
+        return selectedNodeIsIPv6 ? "已选择入口，可测试当前节点" : "请先选择有效 IPv6 入口"
+    }
+
+    private var exitPrimaryText: String {
+        model.state.exit.info?.ip ?? (model.state.exit.isDetecting ? "检测中…" : "尚未检测")
+    }
+
+    private var exitSecondaryText: String {
+        if let error = model.state.exit.errorMessage, !error.isEmpty, model.state.exit.info == nil {
+            return error
+        }
+        if let location = model.state.exit.info?.location, !location.isEmpty {
+            return location
+        }
+        if model.state.exit.isDetecting {
+            return "正在查询公网出口"
+        }
+        return "出口可能是 IPv4，不代表入口地址族"
+    }
+
+    private var exitFamilyBadge: (String, AppTone, String)? {
+        guard let family = model.state.exit.info?.addressFamily else { return nil }
+        return (
+            family.displayName,
+            .neutral,
+            family == .ipv6 ? "6.circle" : "4.circle"
+        )
+    }
+
+    private var exitMetaLine: String {
+        var parts: [String] = []
+        if let details = model.state.exit.info?.details, !details.isEmpty {
+            parts.append(details)
+        }
+        if let route = model.exitIPRouteDescription, !route.isEmpty {
+            parts.append(route)
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private var exitDetectTitle: String {
+        model.state.exit.isDetecting ? "检测中…" : "检测出口"
     }
 
     private var selectedNodeDetail: String {
@@ -617,7 +706,7 @@ struct OverviewView: View {
     }
 
     private var configurationTestTitle: String {
-        configurationTestIsRunning ? "停止测试" : "测试当前节点"
+        configurationTestIsRunning ? "停止测试" : "测试节点"
     }
 
     private var exitModeBinding: Binding<ExitIPDetectionMode> {

@@ -361,7 +361,9 @@ struct SurfaceCard<Content: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             content
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // Fill any extra height offered by equal-height rows; in a ScrollView
+        // the unbounded proposal still collapses to the ideal content size.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .cardStyle()
     }
 }
