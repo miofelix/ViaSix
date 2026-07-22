@@ -17,7 +17,9 @@
 - [x] 系统代理（Windows 注册表 + 快照恢复；非 Windows stub）
 - [x] 出口 IP 检测
 - [x] 测速（CFST 拉取 + 运行 + 结果表）
-- [ ] TUN / Windows Service（二期）
+- [x] 虚拟网卡 API 骨架（fail-closed；Wintun/Service 未实现）
+- [x] Mihomo controller 健康探测
+- [ ] TUN / Windows Service 真实集成（需提权与签名决策）
 - [x] NSIS CI 流水线（`windows-build.yml`，Windows runner）
 - [ ] Authenticode 签名与正式 tag 发布
 

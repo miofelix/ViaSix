@@ -6,6 +6,19 @@ type CoreStatus = {
   running: boolean;
   pid: number | null;
   message: string;
+  controllerPort: number | null;
+};
+type ControllerHealth = {
+  ok: boolean;
+  endpoint: string;
+  message: string;
+  version: string | null;
+};
+type VirtualNetworkStatus = {
+  available: boolean;
+  enabled: boolean;
+  backend: string;
+  message: string;
 };
 type SystemProxyStatus = {
   enabled: boolean;
@@ -96,16 +109,23 @@ app.innerHTML = `
         <input id="sys-proxy" type="checkbox" />
         <span>启用系统代理（127.0.0.1:11451，仅 Windows 生效）</span>
       </label>
+      <label class="check">
+        <input id="virt-net" type="checkbox" disabled />
+        <span id="virt-net-label">虚拟网卡 / Wintun（规划中，当前不可用）</span>
+      </label>
       <div class="actions">
         <button id="btn-project" type="button">生成运行配置</button>
         <button id="btn-start" type="button" class="primary">启动 Mihomo</button>
         <button id="btn-stop" type="button">停止</button>
         <button id="btn-proxy-apply" type="button">应用系统代理</button>
         <button id="btn-proxy-clear" type="button">清除系统代理</button>
+        <button id="btn-health" type="button">探测 Controller</button>
         <button id="btn-exit-ip" type="button">检测出口 IP</button>
       </div>
       <p id="status" class="status muted">就绪</p>
       <p id="proxy-status" class="status muted"></p>
+      <p id="health-status" class="status muted"></p>
+      <p id="virt-status" class="status muted"></p>
       <p id="exit-ip" class="status muted"></p>
     </section>
 
@@ -156,6 +176,9 @@ const sysProxyEl = document.querySelector<HTMLInputElement>("#sys-proxy")!;
 const runtimeEl = document.querySelector<HTMLPreElement>("#runtime-yaml")!;
 const statusEl = document.querySelector<HTMLParagraphElement>("#status")!;
 const proxyStatusEl = document.querySelector<HTMLParagraphElement>("#proxy-status")!;
+const healthStatusEl = document.querySelector<HTMLParagraphElement>("#health-status")!;
+const virtStatusEl = document.querySelector<HTMLParagraphElement>("#virt-status")!;
+const virtNetLabelEl = document.querySelector<HTMLSpanElement>("#virt-net-label")!;
 const exitIpEl = document.querySelector<HTMLParagraphElement>("#exit-ip")!;
 const speedIpEl = document.querySelector<HTMLInputElement>("#speed-ip")!;
 const speedDdEl = document.querySelector<HTMLInputElement>("#speed-dd")!;
@@ -247,6 +270,18 @@ async function refreshProxyStatus() {
   }
 }
 
+async function refreshVirtualNetwork() {
+  try {
+    const status = await invoke<VirtualNetworkStatus>("virtual_network_status");
+    virtStatusEl.textContent = status.message;
+    virtNetLabelEl.textContent = status.available
+      ? "虚拟网卡 / Wintun"
+      : "虚拟网卡 / Wintun（规划中，当前不可用）";
+  } catch (error) {
+    virtStatusEl.textContent = `虚拟网卡状态不可用：${error}`;
+  }
+}
+
 document.querySelector("#btn-project")!.addEventListener("click", async () => {
   try {
     const mode = modeEl.value as RoutingMode;
@@ -319,6 +354,19 @@ document.querySelector("#btn-proxy-clear")!.addEventListener("click", async () =
   }
 });
 
+document.querySelector("#btn-health")!.addEventListener("click", async () => {
+  healthStatusEl.textContent = "探测中…";
+  healthStatusEl.classList.remove("error");
+  try {
+    const health = await invoke<ControllerHealth>("probe_controller");
+    healthStatusEl.textContent = health.message;
+    healthStatusEl.classList.toggle("error", !health.ok);
+  } catch (error) {
+    healthStatusEl.textContent = `探测失败：${error}`;
+    healthStatusEl.classList.add("error");
+  }
+});
+
 document.querySelector("#btn-exit-ip")!.addEventListener("click", async () => {
   exitIpEl.textContent = "检测中…";
   exitIpEl.classList.remove("error");
@@ -387,5 +435,6 @@ void (async () => {
   await restorePrefs();
   await refreshCoreStatus();
   await refreshProxyStatus();
+  await refreshVirtualNetwork();
   scheduleSavePrefs();
 })();

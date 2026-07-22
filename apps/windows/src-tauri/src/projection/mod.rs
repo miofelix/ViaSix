@@ -81,6 +81,8 @@ pub struct ProjectOptions {
     pub selected_address: Option<String>,
     pub listen_address: String,
     pub mixed_port: u16,
+    pub controller_port: u16,
+    pub controller_secret: Option<String>,
     pub log_level: String,
     pub ipv6_enabled: bool,
     pub udp_enabled: bool,
@@ -95,6 +97,8 @@ impl Default for ProjectOptions {
             selected_address: None,
             listen_address: "127.0.0.1".into(),
             mixed_port: 11_451,
+            controller_port: 9_090,
+            controller_secret: None,
             log_level: "info".into(),
             ipv6_enabled: true,
             udp_enabled: true,
@@ -191,7 +195,7 @@ fn base_runtime(options: &ProjectOptions) -> Mapping {
     profile.insert(Value::from("store-selected"), Value::Bool(false));
     profile.insert(Value::from("store-fake-ip"), Value::Bool(false));
 
-    mapping([
+    let mut runtime = mapping([
         ("mixed-port", Value::from(options.mixed_port as i64)),
         ("allow-lan", Value::Bool(false)),
         ("bind-address", Value::from(options.listen_address.as_str())),
@@ -201,7 +205,26 @@ fn base_runtime(options: &ProjectOptions) -> Mapping {
         ("unified-delay", Value::Bool(true)),
         ("tcp-concurrent", Value::Bool(true)),
         ("profile", Value::Mapping(profile)),
-    ])
+    ]);
+
+    if let Some(secret) = options
+        .controller_secret
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        if (1..=65_535).contains(&options.controller_port)
+            && options.controller_port != options.mixed_port
+        {
+            runtime.insert(
+                Value::from("external-controller"),
+                Value::from(format!("127.0.0.1:{}", options.controller_port)),
+            );
+            runtime.insert(Value::from("secret"), Value::from(secret));
+        }
+    }
+
+    runtime
 }
 
 fn parse_mapping(yaml: &str) -> Result<Mapping, ProjectError> {

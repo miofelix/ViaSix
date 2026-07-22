@@ -1,10 +1,14 @@
+mod controller;
 mod exit_ip;
 mod prefs;
 mod projection;
 mod runtime;
 mod speed_test;
 mod system_proxy;
+mod virtual_network;
 
+use controller::ControllerHealth;
+use parking_lot::Mutex;
 use prefs::{PrefsStore, SessionPrefs};
 use projection::{ProjectOptions, RoutingMode};
 use runtime::{CoreStatus, CoreRuntime, SharedCore};
@@ -13,11 +17,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use system_proxy::{ProxyEndpoint, SystemProxyManager, SystemProxyStatus};
 use tauri::{AppHandle, Manager, State};
+use virtual_network::{
+    VirtualNetworkCapability, VirtualNetworkManager, VirtualNetworkStatus,
+};
 
 struct AppServices {
     core: SharedCore,
     system_proxy: SystemProxyManager,
     prefs: PrefsStore,
+    virtual_network: Mutex<VirtualNetworkManager>,
     default_mixed_port: u16,
     data_dir: PathBuf,
 }
@@ -67,31 +75,20 @@ fn start_core(
     } else {
         Some(profile_yaml.as_str())
     };
-    let status = services.core.start(profile, &options, &bin)?;
+    let mut status = services.core.start(profile, &options, &bin)?;
 
     if enable_system_proxy.unwrap_or(false) {
         let endpoint = ProxyEndpoint {
             host: options.listen_address.clone(),
             port: options.mixed_port,
         };
-        // Best-effort: core is up; surface proxy failures separately in message.
         match services.system_proxy.enable(&endpoint) {
             Ok(proxy_status) => {
-                return Ok(CoreStatus {
-                    running: status.running,
-                    pid: status.pid,
-                    message: format!("{}; {}", status.message, proxy_status.message),
-                });
+                status.message = format!("{}; {}", status.message, proxy_status.message);
             }
             Err(err) => {
-                return Ok(CoreStatus {
-                    running: status.running,
-                    pid: status.pid,
-                    message: format!(
-                        "{}; system proxy not applied: {err}",
-                        status.message
-                    ),
-                });
+                status.message =
+                    format!("{}; system proxy not applied: {err}", status.message);
             }
         }
     }
@@ -102,7 +99,6 @@ fn start_core(
 #[tauri::command]
 fn stop_core(services: State<'_, SharedServices>) -> Result<CoreStatus, String> {
     let status = services.core.stop()?;
-    // Always attempt restore when ViaSix managed a snapshot.
     let proxy_note = match services.system_proxy.disable() {
         Ok(s) => s.message,
         Err(err) => format!("system proxy restore failed: {err}"),
@@ -111,6 +107,7 @@ fn stop_core(services: State<'_, SharedServices>) -> Result<CoreStatus, String> 
         running: status.running,
         pid: status.pid,
         message: format!("{}; {proxy_note}", status.message),
+        controller_port: status.controller_port,
     })
 }
 
@@ -174,12 +171,47 @@ fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+#[tauri::command]
+async fn probe_controller(services: State<'_, SharedServices>) -> Result<ControllerHealth, String> {
+    let Some((port, secret)) = services.core.controller_credentials() else {
+        return Ok(ControllerHealth {
+            ok: false,
+            endpoint: String::new(),
+            message: "Mihomo is not running".into(),
+            version: None,
+        });
+    };
+    Ok(controller::probe("127.0.0.1", port, &secret).await)
+}
+
+#[tauri::command]
+fn virtual_network_capability() -> VirtualNetworkCapability {
+    VirtualNetworkManager::capability()
+}
+
+#[tauri::command]
+fn virtual_network_status(services: State<'_, SharedServices>) -> VirtualNetworkStatus {
+    services.virtual_network.lock().status()
+}
+
+#[tauri::command]
+fn set_virtual_network(
+    services: State<'_, SharedServices>,
+    enabled: bool,
+) -> Result<VirtualNetworkStatus, String> {
+    let mut mgr = services.virtual_network.lock();
+    if enabled {
+        mgr.enable()
+    } else {
+        mgr.disable()
+    }
+}
+
 fn resolve_mihomo_binary(app: &AppHandle) -> Result<PathBuf, String> {
     resolve_bundled_binary(app, "viasix-mihomo")
 }
 
 fn resolve_bundled_binary(app: &AppHandle, stem: &str) -> Result<PathBuf, String> {
-    // Packaged app: resources/sidecar/* (see tauri.conf.json bundle.resources)
     let resource_candidates = [
         format!("sidecar/{stem}"),
         format!("sidecar/{stem}.exe"),
@@ -197,7 +229,6 @@ fn resolve_bundled_binary(app: &AppHandle, stem: &str) -> Result<PathBuf, String
         }
     }
 
-    // Dev / CI: src-tauri/sidecar next to the crate.
     let mut dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     dev.push("sidecar");
     let plain_name = if cfg!(windows) {
@@ -243,6 +274,7 @@ pub fn run() {
                 core: Arc::new(CoreRuntime::new(work)),
                 system_proxy: SystemProxyManager::new(data.clone()),
                 prefs: PrefsStore::new(data.clone()),
+                virtual_network: Mutex::new(VirtualNetworkManager::default()),
                 default_mixed_port: ProjectOptions::default().mixed_port,
                 data_dir: data,
             });
@@ -260,7 +292,11 @@ pub fn run() {
             run_speed_test,
             load_session_prefs,
             save_session_prefs,
-            app_version
+            app_version,
+            probe_controller,
+            virtual_network_capability,
+            virtual_network_status,
+            set_virtual_network
         ])
         .run(tauri::generate_context!())
         .expect("error while running ViaSix Windows");
