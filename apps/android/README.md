@@ -51,16 +51,22 @@ make android-skeleton
 | --- | --- |
 | contracts 投影 | ✓（`:core` 测试） |
 | 分区导航 UI（对齐 macOS 信息架构） | ✓ |
-| VpnService 权限与前台会话 | ✓ |
+| VpnService 权限与前台会话 / 重启重连 | ✓ |
 | mihomo 用户态启动（assets → filesDir） | ✓ |
 | 全量隧道 IPv4 TCP→SOCKS + DNS protect | ✓（`Tun2SocksEngine`） |
 | HTTP 代理 VPN 模式（可选，无默认路由） | ✓ |
 | 系统代理 | 不适用 |
-| 完整 UDP / 成熟 TCP 状态机 / IPv6 转发 | 简化实现，后续可换 hev/native |
-| 会话偏好持久化 | ✓ SharedPreferences |
-| Controller 健康 + 累计流量展示 | ✓ |
+| 流量：速率差分 + 曲线 + 内存 + 连接数 | ✓ |
+| 出口 IP 检测（模式/端点/地理） | ✓ |
+| 代理延迟测试（controller） | ✓ |
+| 运行中切换路由模式（PATCH） | ✓ |
+| 节点候选库 + 应用并重连 | ✓ |
+| 配置摘要 / 文件导入 / 投影预览 | ✓ |
+| 日志过滤（来源·级别·搜索）+ VPN 事件 | ✓ |
+| 完整 UDP / 成熟 TCP 状态机 / IPv6 转发 | 用户态简化，后续可换 hev/native |
+| 会话偏好持久化 | ✓ SharedPreferences（含候选/出口设置） |
 | mihomo 资产拉取脚本 | ✓ `scripts/fetch-mihomo.mjs` |
-| CloudflareSpeedTest 测速 | 未实现（macOS 优先） |
+| CloudflareSpeedTest 测速 | 未实现（候选列表 API 已预留） |
 
 ## 契约
 

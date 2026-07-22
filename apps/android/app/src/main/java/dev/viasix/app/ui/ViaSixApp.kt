@@ -1,15 +1,22 @@
 package dev.viasix.app.ui
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
+import dev.viasix.app.net.ExitIPDetectionMode
 import dev.viasix.app.state.SessionUiState
 import dev.viasix.app.ui.screens.LogsScreen
 import dev.viasix.app.ui.screens.NodesScreen
@@ -26,18 +33,47 @@ fun ViaSixApp(
     selectedSection: AppSection,
     onSectionChange: (AppSection) -> Unit,
     onProfileChange: (String) -> Unit,
+    onImportProfile: () -> Unit,
     onSelectedAddressChange: (String) -> Unit,
+    onApplyNode: (address: String, reconnect: Boolean) -> Unit,
+    onRemoveCandidate: (String) -> Unit,
     onRoutingModeChange: (RoutingMode) -> Unit,
     onFullTunnelChange: (Boolean) -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onProjectPreview: () -> Unit,
+    onDetectExitIp: () -> Unit,
+    onExitIpModeChange: (ExitIPDetectionMode) -> Unit,
+    onExitIpEndpointChange: (String) -> Unit,
+    onDelayTest: () -> Unit,
+    onCopy: (label: String, value: String) -> Unit,
     onClearLogs: () -> Unit,
+    onDismissNotice: () -> Unit,
+    onClearSessionData: () -> Unit,
 ) {
     ViaSixTheme {
         val colors = LocalViaSixColors.current
+        val snackbarHostState = remember { SnackbarHostState() }
+
+        LaunchedEffect(state.notice?.id) {
+            val notice = state.notice ?: return@LaunchedEffect
+            val result =
+                snackbarHostState.showSnackbar(
+                    message = notice.message,
+                    actionLabel = if (notice.actionOpenSettings) "设置" else null,
+                    withDismissAction = true,
+                )
+            if (result == androidx.compose.material3.SnackbarResult.ActionPerformed &&
+                notice.actionOpenSettings
+            ) {
+                onSectionChange(AppSection.SETTINGS)
+            }
+            onDismissNotice()
+        }
+
         Scaffold(
             containerColor = colors.pageBackground,
+            snackbarHost = { SnackbarHost(snackbarHostState) },
             bottomBar = {
                 NavigationBar(
                     containerColor = colors.surface,
@@ -72,8 +108,11 @@ fun ViaSixApp(
                 }
             },
         ) { padding ->
-            androidx.compose.foundation.layout.Box(
-                modifier = Modifier.padding(padding),
+            Box(
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .padding(padding),
             ) {
                 when (selectedSection) {
                     AppSection.OVERVIEW ->
@@ -84,17 +123,25 @@ fun ViaSixApp(
                             onStart = onStart,
                             onStop = onStop,
                             onNavigate = onSectionChange,
+                            onDetectExitIp = onDetectExitIp,
+                            onExitIpModeChange = onExitIpModeChange,
+                            onDelayTest = onDelayTest,
+                            onCopy = onCopy,
                         )
                     AppSection.NODES ->
                         NodesScreen(
                             state = state,
                             onSelectedAddressChange = onSelectedAddressChange,
+                            onApplyNode = onApplyNode,
+                            onRemoveCandidate = onRemoveCandidate,
+                            onCopy = onCopy,
                         )
                     AppSection.PROFILES ->
                         ProfilesScreen(
                             state = state,
                             onProfileChange = onProfileChange,
                             onProjectPreview = onProjectPreview,
+                            onImportProfile = onImportProfile,
                         )
                     AppSection.LOGS ->
                         LogsScreen(
@@ -105,6 +152,10 @@ fun ViaSixApp(
                         SettingsScreen(
                             state = state,
                             onFullTunnelChange = onFullTunnelChange,
+                            onExitIpModeChange = onExitIpModeChange,
+                            onExitIpEndpointChange = onExitIpEndpointChange,
+                            onDetectExitIp = onDetectExitIp,
+                            onClearSessionData = onClearSessionData,
                         )
                 }
             }

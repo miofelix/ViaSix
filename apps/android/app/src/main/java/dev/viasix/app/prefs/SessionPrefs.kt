@@ -1,16 +1,21 @@
 package dev.viasix.app.prefs
 
 import android.content.Context
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Lightweight SharedPreferences-backed session state for the Android shell.
+ * SharedPreferences-backed session state for the Android shell.
+ * Extends macOS-aligned fields: node candidates, exit-IP detection prefs.
  */
 data class SessionPrefs(
     val profileYaml: String = "",
     val selectedAddress: String = "2001:db8::1",
     val routingMode: String = "rule",
     val fullTunnel: Boolean = true,
+    val candidateAddresses: List<String> = emptyList(),
+    val exitIPEndpoint: String = "https://api.myip.la/cn?json",
+    val exitIPDetectionMode: String = "automatic",
 ) {
     fun toJson(): JSONObject =
         JSONObject()
@@ -18,17 +23,38 @@ data class SessionPrefs(
             .put("selectedAddress", selectedAddress)
             .put("routingMode", routingMode)
             .put("fullTunnel", fullTunnel)
+            .put(
+                "candidateAddresses",
+                JSONArray().also { arr ->
+                    candidateAddresses.forEach { arr.put(it) }
+                },
+            )
+            .put("exitIPEndpoint", exitIPEndpoint)
+            .put("exitIPDetectionMode", exitIPDetectionMode)
 
     companion object {
         fun fromJson(raw: String?): SessionPrefs {
             if (raw.isNullOrBlank()) return SessionPrefs()
             return try {
                 val o = JSONObject(raw)
+                val candidates = mutableListOf<String>()
+                val arr = o.optJSONArray("candidateAddresses")
+                if (arr != null) {
+                    for (i in 0 until arr.length()) {
+                        val value = arr.optString(i).trim()
+                        if (value.isNotEmpty()) candidates += value
+                    }
+                }
                 SessionPrefs(
                     profileYaml = o.optString("profileYaml", ""),
                     selectedAddress = o.optString("selectedAddress", "2001:db8::1"),
                     routingMode = o.optString("routingMode", "rule"),
                     fullTunnel = o.optBoolean("fullTunnel", true),
+                    candidateAddresses = candidates,
+                    exitIPEndpoint =
+                        o.optString("exitIPEndpoint", "https://api.myip.la/cn?json")
+                            .ifBlank { "https://api.myip.la/cn?json" },
+                    exitIPDetectionMode = o.optString("exitIPDetectionMode", "automatic"),
                 )
             } catch (_: Exception) {
                 SessionPrefs()
@@ -45,6 +71,10 @@ class SessionPrefsStore(context: Context) {
 
     fun save(value: SessionPrefs) {
         prefs.edit().putString(KEY, value.toJson().toString()).apply()
+    }
+
+    fun clear() {
+        prefs.edit().remove(KEY).apply()
     }
 
     companion object {

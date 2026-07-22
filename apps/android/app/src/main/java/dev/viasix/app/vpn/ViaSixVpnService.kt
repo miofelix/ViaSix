@@ -18,8 +18,14 @@ import dev.viasix.core.projection.MihomoProjection
 import dev.viasix.core.projection.ProjectError
 import dev.viasix.core.projection.ProjectOptions
 import dev.viasix.core.projection.RoutingMode
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 /**
@@ -28,15 +34,20 @@ import kotlin.concurrent.thread
  * 2) Establish VPN with default routes
  * 3) Exclude this app UID from the VPN (prevents routing loops for mihomo)
  * 4) Userspace IPv4 TCP→SOCKS + DNS forwarder (Tun2SocksEngine)
+ *
+ * Supports restart with new profile/node without leaving a half-live stack.
+ * Emits a circular event log into SharedPreferences for the UI log pane.
  */
 class ViaSixVpnService : VpnService() {
     private var tunnel: ParcelFileDescriptor? = null
     private var mihomo: MihomoProcess? = null
     private var tunEngine: Tun2SocksEngine? = null
+    private val starting = AtomicBoolean(false)
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            shutdownAll("stopped by user")
+            appendEvent("用户停止会话", "info")
+            shutdownAll("stopped by user", stopService = true)
             return START_NOT_STICKY
         }
 
@@ -45,16 +56,29 @@ class ViaSixVpnService : VpnService() {
         val modeWire = intent?.getStringExtra(EXTRA_MODE) ?: "rule"
         val mode = RoutingMode.parse(modeWire) ?: RoutingMode.RULE
         val fullTunnel = intent?.getBooleanExtra(EXTRA_FULL_TUNNEL, true) ?: true
+        val reason = intent?.getStringExtra(EXTRA_REASON).orEmpty().ifBlank { "start" }
 
         startForeground(NOTIFICATION_ID, buildNotification("Starting ViaSix…"))
+        appendEvent("启动请求（$reason） mode=${mode.wire} fullTunnel=$fullTunnel", "info")
+
+        if (!starting.compareAndSet(false, true)) {
+            appendEvent("已有启动任务进行中，忽略重复请求", "warning")
+            return START_STICKY
+        }
 
         thread(name = "viasix-vpn-start", isDaemon = true) {
             try {
+                // Tear down any previous stack before applying new parameters
+                // (node apply / reconnect path).
+                stopStackOnly("restart for $reason")
                 startStack(profile, selectedIp, mode, fullTunnel)
             } catch (error: Exception) {
                 Log.e(TAG, "start failed", error)
+                appendEvent("启动失败：${error.message}", "error")
                 updateNotification("Start failed: ${error.message}")
-                shutdownAll("start failed")
+                shutdownAll("start failed", stopService = true)
+            } finally {
+                starting.set(false)
             }
         }
         return START_STICKY
@@ -87,26 +111,30 @@ class ViaSixVpnService : VpnService() {
                 throw IllegalArgumentException("projection: ${error.contractCode}", error)
             }
 
+        appendEvent("投影完成，启动 mihomo…", "info")
         val binary = MihomoInstaller.installIfNeeded(this)
         val workDir = File(filesDir, "mihomo-runtime")
         val process = MihomoProcess(binary, workDir)
         process.start(yaml)
         mihomo = process
 
-        // Give controller a moment, then verify and persist runtime status for the UI.
         ControllerClient.sleepQuietly(400)
         val health = ControllerClient.probe("127.0.0.1", CONTROLLER_PORT, secret)
+        val startedAt = System.currentTimeMillis()
         writeRuntimeStatus(
             running = process.isRunning,
             healthMessage = health.message,
             secret = secret,
+            version = health.version,
+            startedAt = startedAt,
         )
         if (!health.ok) {
             Log.w(TAG, "controller not healthy yet: ${health.message}")
+            appendEvent("控制器尚未就绪：${health.message}", "warning")
+        } else {
+            appendEvent("控制器就绪 ${health.version ?: ""}".trim(), "success")
         }
 
-        // Exclude our UID so mihomo outbound sockets use the underlying network
-        // instead of looping into this VPN interface.
         val builder =
             Builder()
                 .setSession("ViaSix")
@@ -117,17 +145,16 @@ class ViaSixVpnService : VpnService() {
 
         if (fullTunnel) {
             builder.addRoute("0.0.0.0", 0)
-            // IPv6 default route needs an IPv6 address on the interface.
             try {
                 builder.addAddress("fd00:10:10::2", 128)
                 builder.addRoute("::", 0)
             } catch (error: Exception) {
                 Log.w(TAG, "IPv6 route not applied: ${error.message}")
+                appendEvent("IPv6 默认路由未应用：${error.message}", "warning")
             }
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Also publish proxy metadata for proxy-aware apps.
             builder.setHttpProxy(
                 android.net.ProxyInfo.buildDirectProxy(
                     "127.0.0.1",
@@ -137,7 +164,6 @@ class ViaSixVpnService : VpnService() {
             )
         }
 
-        tunnel?.close()
         val established =
             builder.establish()
                 ?: throw IllegalStateException("VpnService.Builder.establish() returned null")
@@ -155,30 +181,33 @@ class ViaSixVpnService : VpnService() {
             tunEngine = engine
             updateNotification(
                 if (health.ok) {
-                    "Full tunnel · mixed :$MIXED_PORT · ${health.version ?: "ok"}"
+                    "全量隧道 · mixed :$MIXED_PORT · ${health.version ?: "ok"}"
                 } else {
-                    "Full tunnel · mixed :$MIXED_PORT · controller warming"
+                    "全量隧道 · mixed :$MIXED_PORT · 控制器预热中"
                 },
             )
+            appendEvent("全量隧道已建立（TCP→SOCKS + DNS）", "success")
         } else {
             updateNotification(
                 if (health.ok) {
-                    "Proxy VPN · mixed :$MIXED_PORT · ${health.version ?: "ok"}"
+                    "代理 VPN · mixed :$MIXED_PORT · ${health.version ?: "ok"}"
                 } else {
-                    "Proxy VPN · mixed :$MIXED_PORT · controller warming"
+                    "代理 VPN · mixed :$MIXED_PORT · 控制器预热中"
                 },
             )
+            appendEvent("HTTP 代理 VPN 会话已建立（无默认路由）", "success")
         }
         Log.i(TAG, "stack ready fullTunnel=$fullTunnel health=${health.message}")
     }
 
     override fun onDestroy() {
-        shutdownAll("destroyed")
+        shutdownAll("destroyed", stopService = false)
         super.onDestroy()
     }
 
-    private fun shutdownAll(reason: String) {
-        Log.i(TAG, "shutdown: $reason")
+    /** Stop engines/process but keep the service if a restart is about to begin. */
+    private fun stopStackOnly(reason: String) {
+        Log.i(TAG, "stop stack: $reason")
         try {
             tunEngine?.stop()
         } catch (error: Exception) {
@@ -196,12 +225,32 @@ class ViaSixVpnService : VpnService() {
         } catch (_: Exception) {
         }
         tunnel = null
-        writeRuntimeStatus(running = false, healthMessage = "stopped", secret = "")
-        stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
     }
 
-    private fun writeRuntimeStatus(running: Boolean, healthMessage: String, secret: String) {
+    private fun shutdownAll(reason: String, stopService: Boolean) {
+        Log.i(TAG, "shutdown: $reason")
+        stopStackOnly(reason)
+        writeRuntimeStatus(
+            running = false,
+            healthMessage = "stopped",
+            secret = "",
+            version = null,
+            startedAt = null,
+        )
+        appendEvent("会话结束：$reason", "info")
+        if (stopService) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+        }
+    }
+
+    private fun writeRuntimeStatus(
+        running: Boolean,
+        healthMessage: String,
+        secret: String,
+        version: String?,
+        startedAt: Long?,
+    ) {
         getSharedPreferences(RUNTIME_PREFS, MODE_PRIVATE)
             .edit()
             .putBoolean(KEY_RUNNING, running)
@@ -209,7 +258,38 @@ class ViaSixVpnService : VpnService() {
             .putString(KEY_SECRET, secret)
             .putInt(KEY_CONTROLLER_PORT, CONTROLLER_PORT)
             .putInt(KEY_MIXED_PORT, MIXED_PORT)
+            .putString(KEY_VERSION, version.orEmpty())
+            .putLong(KEY_STARTED_AT, startedAt ?: 0L)
             .apply()
+    }
+
+    private fun appendEvent(message: String, level: String) {
+        try {
+            val prefs = getSharedPreferences(RUNTIME_PREFS, MODE_PRIVATE)
+            val existing = prefs.getString(KEY_EVENTS, "[]") ?: "[]"
+            val array =
+                try {
+                    JSONArray(existing)
+                } catch (_: Exception) {
+                    JSONArray()
+                }
+            val entry =
+                JSONObject()
+                    .put("ts", TIME_FORMAT.format(Date()))
+                    .put("level", level)
+                    .put("message", message)
+                    .put("id", System.currentTimeMillis())
+            // newest first
+            val next = JSONArray()
+            next.put(entry)
+            val limit = 100
+            for (i in 0 until minOf(array.length(), limit - 1)) {
+                next.put(array.get(i))
+            }
+            prefs.edit().putString(KEY_EVENTS, next.toString()).apply()
+        } catch (error: Exception) {
+            Log.w(TAG, "appendEvent failed: ${error.message}")
+        }
     }
 
     private fun updateNotification(content: String) {
@@ -257,6 +337,7 @@ class ViaSixVpnService : VpnService() {
         const val EXTRA_SELECTED_IP = "selected_ip"
         const val EXTRA_MODE = "mode"
         const val EXTRA_FULL_TUNNEL = "full_tunnel"
+        const val EXTRA_REASON = "reason"
         const val MIXED_PORT = 11451
         const val CONTROLLER_PORT = 9090
         const val RUNTIME_PREFS = "viasix_runtime"
@@ -265,7 +346,11 @@ class ViaSixVpnService : VpnService() {
         const val KEY_SECRET = "secret"
         const val KEY_CONTROLLER_PORT = "controllerPort"
         const val KEY_MIXED_PORT = "mixedPort"
+        const val KEY_VERSION = "version"
+        const val KEY_STARTED_AT = "startedAt"
+        const val KEY_EVENTS = "events"
 
+        private val TIME_FORMAT = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
         private const val CHANNEL_ID = "viasix_vpn"
         private const val NOTIFICATION_ID = 42
         private const val TAG = "ViaSixVpnService"

@@ -1,59 +1,108 @@
 package dev.viasix.app.state
 
-import dev.viasix.app.mihomo.TrafficSample
+import dev.viasix.app.mihomo.ProxyDelayResult
+import dev.viasix.app.mihomo.TrafficSnapshot
+import dev.viasix.app.net.ExitIPDetectionMode
+import dev.viasix.app.net.ExitIPInfo
 import dev.viasix.app.prefs.SessionPrefs
+import dev.viasix.core.net.Ipv6Address
+import dev.viasix.core.profile.ProfileSummary
+import dev.viasix.core.profile.ProfileSummaryParser
 import dev.viasix.core.projection.RoutingMode
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+enum class LogLevel {
+    Info,
+    Success,
+    Warning,
+    Error,
+}
+
+enum class LogSource(val label: String) {
+    Session("会话"),
+    Proxy("代理"),
+    Node("节点"),
+    Network("网络"),
+    System("系统"),
+}
 
 data class LogEntry(
     val id: Long,
     val timestamp: String,
     val message: String,
     val level: LogLevel = LogLevel.Info,
+    val source: LogSource = LogSource.Session,
 )
-
-enum class LogLevel {
-    Info,
-    Success,
-    Error,
-}
 
 data class RuntimeSnapshot(
     val running: Boolean = false,
     val health: String = "—",
-    val traffic: TrafficSample = TrafficSample(live = false, message = "—"),
+    val traffic: TrafficSnapshot = TrafficSnapshot.Idle,
     val controllerPort: Int = 9090,
     val mixedPort: Int = 11451,
     val mihomoVersion: String? = null,
+    val secretPresent: Boolean = false,
+    val startedAtMillis: Long? = null,
+)
+
+data class ExitIPState(
+    val isDetecting: Boolean = false,
+    val info: ExitIPInfo? = null,
+    val errorMessage: String? = null,
+    val mode: ExitIPDetectionMode = ExitIPDetectionMode.AUTOMATIC,
+    val endpoint: String = "https://api.myip.la/cn?json",
+)
+
+data class DelayTestState(
+    val isRunning: Boolean = false,
+    val last: ProxyDelayResult? = null,
 )
 
 /**
- * In-memory UI state for the Android shell. Session fields persist via
- * [SessionPrefs]; runtime is polled from the VPN service.
+ * Full UI state for the Android shell. Session fields persist via [SessionPrefs];
+ * runtime is polled from the VPN service + controller.
  */
 data class SessionUiState(
     val profileYaml: String = "",
     val selectedAddress: String = "2001:db8::1",
+    val candidateAddresses: List<String> = emptyList(),
     val routingMode: RoutingMode = RoutingMode.RULE,
     val fullTunnel: Boolean = true,
     val runtime: RuntimeSnapshot = RuntimeSnapshot(),
+    val exitIP: ExitIPState = ExitIPState(),
+    val delayTest: DelayTestState = DelayTestState(),
     val statusMessage: String = "就绪",
     val statusLevel: LogLevel = LogLevel.Info,
     val logs: List<LogEntry> = emptyList(),
     val configPreview: String = "",
+    val notice: AppNotice? = null,
 ) {
+    val profileSummary: ProfileSummary
+        get() = ProfileSummaryParser.parse(profileYaml)
+
+    val selectedIsIpv6: Boolean
+        get() = Ipv6Address.isValid(selectedAddress)
+
+    val configurationReady: Boolean
+        get() =
+            routingMode == RoutingMode.DIRECT ||
+                (profileYaml.isNotBlank() && selectedIsIpv6 && profileSummary.primary != null)
+
     fun toPrefs(): SessionPrefs =
         SessionPrefs(
             profileYaml = profileYaml,
             selectedAddress = selectedAddress,
             routingMode = routingMode.wire,
             fullTunnel = fullTunnel,
+            candidateAddresses = candidateAddresses,
+            exitIPEndpoint = exitIP.endpoint,
+            exitIPDetectionMode = exitIP.mode.wire,
         )
 
     companion object {
-        private val defaultProfile =
+        val defaultProfile =
             """
             proxies:
               - name: My VLESS
@@ -66,15 +115,35 @@ data class SessionUiState(
               primary-server: selected-ip
             """.trimIndent()
 
-        fun fromPrefs(prefs: SessionPrefs): SessionUiState =
-            SessionUiState(
+        fun fromPrefs(prefs: SessionPrefs): SessionUiState {
+            val selected = prefs.selectedAddress.ifBlank { "2001:db8::1" }
+            val candidates =
+                (listOf(selected) + prefs.candidateAddresses)
+                    .mapNotNull { Ipv6Address.normalize(it) }
+                    .distinct()
+                    .take(50)
+            return SessionUiState(
                 profileYaml = prefs.profileYaml.ifBlank { defaultProfile },
-                selectedAddress = prefs.selectedAddress.ifBlank { "2001:db8::1" },
+                selectedAddress = selected,
+                candidateAddresses = candidates,
                 routingMode = RoutingMode.parse(prefs.routingMode) ?: RoutingMode.RULE,
                 fullTunnel = prefs.fullTunnel,
+                exitIP =
+                    ExitIPState(
+                        mode = ExitIPDetectionMode.parse(prefs.exitIPDetectionMode),
+                        endpoint = prefs.exitIPEndpoint,
+                    ),
             )
+        }
     }
 }
+
+data class AppNotice(
+    val id: Long,
+    val message: String,
+    val style: LogLevel,
+    val actionOpenSettings: Boolean = false,
+)
 
 object LogClock {
     private val format = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
@@ -88,7 +157,9 @@ object LogClock {
 fun SessionUiState.appendLog(
     message: String,
     level: LogLevel = LogLevel.Info,
-    maxEntries: Int = 200,
+    source: LogSource = LogSource.Session,
+    maxEntries: Int = 500,
+    asNotice: Boolean = false,
 ): SessionUiState {
     val entry =
         LogEntry(
@@ -96,10 +167,30 @@ fun SessionUiState.appendLog(
             timestamp = LogClock.now(),
             message = message,
             level = level,
+            source = source,
         )
     return copy(
         statusMessage = message,
         statusLevel = level,
         logs = (listOf(entry) + logs).take(maxEntries),
+        notice =
+            if (asNotice) {
+                AppNotice(
+                    id = entry.id,
+                    message = message,
+                    style = level,
+                    actionOpenSettings = level == LogLevel.Error,
+                )
+            } else {
+                notice
+            },
     )
+}
+
+fun SessionUiState.rememberCandidate(address: String): SessionUiState {
+    val normalized = Ipv6Address.normalize(address) ?: return this
+    val next =
+        (listOf(normalized) + candidateAddresses.filter { it != normalized })
+            .take(50)
+    return copy(candidateAddresses = next, selectedAddress = normalized)
 }

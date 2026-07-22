@@ -22,13 +22,22 @@
 | --- | --- |
 | 侧栏导航 | 底部 `NavigationBar` |
 | `OverviewView` 链路卡片 | `OverviewScreen` 链路步骤 + 连接/断开 |
-| `ProxyRoutingModePicker` | 分段式代理模式选择 |
+| `ProxyRoutingModePicker` | 分段式代理模式；运行中 `PATCH /configs` |
 | 系统代理 + TUN 开关 | 全量隧道开关（平台语义不同） |
-| `TrafficStatsView` | 累计上下行（`/connections`） |
-| `NodesView` 测速表 | 手动 IPv6 输入（测速后续） |
-| `ProfilesView` | YAML 编辑 + 投影预览 |
-| `LogsView` | 会话日志环缓冲 |
+| `TrafficStatsView` | 速率（累计差分）+ 曲线 + 内存 + 连接数 |
+| 出口 IP 检测 | `ExitIPDetector`（端点/模式/地理 enrichment 对齐） |
+| 配置延迟测试 | `ControllerClient.proxyDelay` |
+| `NodesView` | IPv6 校验、候选库、应用/应用并重连 |
+| `ProfilesView` | 摘要解析、文件导入、YAML 编辑、投影预览 |
+| `LogsView` | 来源/级别过滤、搜索、排序 + VPN 事件合并 |
 | `VisualStyle` / `SurfaceCard` | `ui/theme/VisualStyle` + 组件 |
+
+## 加固要点
+
+- `TrafficSampler`：与 Windows 相同，由 `/connections` 累计差分得瞬时速率
+- `ViaSixVpnService`：重启栈（节点应用并重连）、环形事件日志
+- `ProfileSummaryParser` / `Ipv6Address` / `ByteRateFormatter`：`:core` 可测纯逻辑
+- 会话偏好扩展：候选节点、出口检测端点与模式
 
 ## 验证
 
