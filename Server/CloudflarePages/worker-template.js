@@ -328,10 +328,17 @@ function vlessLink(host, userID) {
 
 function mihomoConfiguration(host, userID) {
   return [
+    "x-viasix:",
+    "  version: 1",
+    "  primary-server: selected-ip",
+    "  routing-mode: rule",
+    "  udp-enabled: false",
+    "  log-level: info",
+    "  sniffing-enabled: true",
+    "  bypass-private-networks: true",
     "proxies:",
     "  - name: ViaSix Cloudflare Pages",
     "    type: vless",
-    `    server: ${host}`,
     "    port: 443",
     `    uuid: ${userID}`,
     "    encryption: none",
@@ -340,7 +347,6 @@ function mihomoConfiguration(host, userID) {
     "    client-fingerprint: chrome",
     "    skip-cert-verify: false",
     "    network: ws",
-    "    udp: false",
     "    ws-opts:",
     '      path: "/?ed=2560"',
     "      headers:",

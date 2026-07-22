@@ -111,8 +111,19 @@ fi
     || fail "Pages Clash endpoint WebSocket path does not match"
 /usr/bin/grep -Fq 'tls: true' "$work_directory/clash.yaml" \
     || fail "Pages Clash endpoint is not configured for TLS"
+/usr/bin/grep -Fq 'primary-server: selected-ip' "$work_directory/clash.yaml" \
+    || fail "Pages endpoint does not request ViaSix selected-IP injection"
+/usr/bin/grep -Fq 'routing-mode: rule' "$work_directory/clash.yaml" \
+    || fail "Pages endpoint does not import ViaSix rule routing"
+/usr/bin/grep -Fq 'udp-enabled: false' "$work_directory/clash.yaml" \
+    || fail "Pages endpoint does not disable UDP through x-viasix"
+/usr/bin/grep -Fq 'log-level: info' "$work_directory/clash.yaml" \
+    || fail "Pages endpoint does not import the expected log level"
+if /usr/bin/grep -Eq '^[[:space:]]+server:[[:space:]]' "$work_directory/clash.yaml"; then
+    fail "Pages endpoint must not publish a proxy server address"
+fi
 
 print "HTTPS configuration page verified: $config_url"
 print "Pages Clash endpoint verified: $clash_url"
-print "Deployment metadata is compatible with ViaSix VLESS + WebSocket + TLS."
+print "Deployment metadata is compatible with ViaSix selected-IP YAML import."
 print -u2 "Note: run a ViaSix connection test to verify the complete VLESS data path."

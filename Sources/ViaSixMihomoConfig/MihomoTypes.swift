@@ -179,6 +179,7 @@ public enum MihomoConfigurationError: LocalizedError, Equatable, Sendable {
     case unsupportedValue(String)
     case missingProxySource
     case missingInlineProxy
+    case missingSelectedNodeAddress
     case invalidProxy(String)
     case unsupportedProtocol(String)
     case invalidServerPort
@@ -220,6 +221,8 @@ public enum MihomoConfigurationError: LocalizedError, Equatable, Sendable {
             "配置至少需要 proxies 或 proxy-providers"
         case .missingInlineProxy:
             "配置没有可由 ViaSix 更新地址的内联代理节点"
+        case .missingSelectedNodeAddress:
+            "配置不包含节点地址，请先在 ViaSix 中测速并选择一个当前节点"
         case .invalidProxy(let reason):
             "代理节点配置无效：\(reason)"
         case .unsupportedProtocol(let name):

@@ -5,7 +5,7 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
     public static let placeholderCredential = "00000000-0000-0000-0000-000000000000"
     public static let placeholderServerName = "example.com"
 
-    private static let retainedServerKeys = [
+    private static let runtimeServerKeys = [
         "proxies",
         "proxy-providers",
         "proxy-groups",
@@ -50,9 +50,20 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
     /// first inline proxy's `server` value. Provider-only profiles remain
     /// launchable, but their remote contents are intentionally not rewritten.
     public var hasReplaceablePrimaryServer: Bool {
-        rawMapping().mappings("proxies")?.contains(where: {
-            $0.string("server")?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-        }) == true
+        Self.primaryServerIndex(in: rawMapping()) != nil
+    }
+
+    /// Whether this ViaSix-specific profile intentionally omits its node
+    /// address and requires the app's current speed-test selection at runtime.
+    public var requiresSelectedPrimaryServer: Bool {
+        viaSixOptions?.primaryServer == .selectedIP
+    }
+
+    /// Declarative, low-risk ViaSix preferences imported alongside the proxy
+    /// profile. Local listeners, controller credentials, system proxy and TUN
+    /// settings are deliberately outside this schema.
+    public var viaSixOptions: MihomoViaSixProfileOptions? {
+        try? Self.viaSixOptions(in: rawMapping())
     }
 
     /// Distinguishes provider-backed profiles without exposing their raw YAML
@@ -84,9 +95,7 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
         }
         var root = rawMapping()
         guard var proxies = root.mappings("proxies"),
-            let index = proxies.firstIndex(where: {
-                $0.string("server")?.isEmpty == false
-            })
+            let index = Self.primaryServerIndex(in: root)
         else {
             throw MihomoConfigurationError.missingInlineProxy
         }
@@ -117,6 +126,12 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
         try validate(options: options, projection: projection)
 
         var serverRoot = server?.rawMapping() ?? [:]
+        if options.routingMode != .direct,
+            server?.requiresSelectedPrimaryServer == true,
+            address?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
+        {
+            throw MihomoConfigurationError.missingSelectedNodeAddress
+        }
         if let address {
             guard let server else {
                 if options.routingMode != .direct {
@@ -161,13 +176,14 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
     private static func serverMapping(from input: [String: Any]) throws -> [String: Any] {
         if input["name"] != nil,
             input["type"] != nil,
-            retainedServerKeys.allSatisfy({ input[$0] == nil })
+            runtimeServerKeys.allSatisfy({ input[$0] == nil }),
+            input["x-viasix"] == nil
         {
             return ["proxies": [input]]
         }
 
         var server: [String: Any] = [:]
-        for key in retainedServerKeys {
+        for key in runtimeServerKeys {
             if let value = input[key] {
                 server[key] = value
             }
@@ -184,6 +200,9 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
                 directory: "rules"
             )
         }
+        if let options = try viaSixOptions(in: input) {
+            server["x-viasix"] = options.canonicalMapping
+        }
         guard !server.isEmpty else {
             throw MihomoConfigurationError.missingProxySource
         }
@@ -191,6 +210,7 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
     }
 
     private static func validateServerMapping(_ root: [String: Any]) throws {
+        let options = try viaSixOptions(in: root)
         if let rawRules = root["rules"], !(rawRules is [String]) {
             throw MihomoConfigurationError.unsupportedValue("rules 必须是字符串列表")
         }
@@ -202,7 +222,14 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
         }
 
         var names = Set<String>()
-        for proxy in proxies {
+        let primaryServerIndex = primaryServerIndex(in: root)
+        if options?.primaryServer == .selectedIP, primaryServerIndex == nil {
+            throw MihomoConfigurationError.invalidProxy(
+                "x-viasix.primary-server 需要一个可注入地址的内联节点"
+            )
+        }
+
+        for (index, proxy) in proxies.enumerated() {
             guard let name = proxy.string("name")?.trimmingCharacters(in: .whitespacesAndNewlines),
                 !name.isEmpty,
                 let type = proxy.string("type")?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -216,6 +243,20 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
 
             let hasServer = proxy["server"] != nil
             let hasPort = proxy["port"] != nil
+            if options?.primaryServer == .selectedIP,
+                index == primaryServerIndex,
+                !hasServer
+            {
+                guard let port = proxy.int("port"), (1...65_535).contains(port) else {
+                    throw MihomoConfigurationError.invalidProxy(
+                        "由 ViaSix 注入地址的节点必须包含有效 port"
+                    )
+                }
+                if proxyContainsPlaceholder(proxy) {
+                    throw MihomoConfigurationError.placeholderConfiguration
+                }
+                continue
+            }
             if hasServer || hasPort {
                 guard
                     let server = proxy.string("server")?.trimmingCharacters(
@@ -265,7 +306,7 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
         // Besides reducing attack surface, this guarantees that selecting
         // direct cannot trigger subscription refreshes or outbound handshakes.
         if options.routingMode != .direct {
-            for key in retainedServerKeys where server[key] != nil {
+            for key in runtimeServerKeys where server[key] != nil {
                 runtime[key] = server[key]
             }
         }
@@ -477,6 +518,34 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
         return false
     }
 
+    private static func primaryServerIndex(in root: [String: Any]) -> Int? {
+        guard let proxies = root.mappings("proxies") else { return nil }
+        if let index = proxies.firstIndex(where: {
+            $0.string("server")?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                == false
+        }) {
+            return index
+        }
+        guard (try? viaSixOptions(in: root))?.primaryServer == .selectedIP else {
+            return nil
+        }
+        let serverlessTypes: Set<String> = ["direct", "reject", "dns"]
+        return proxies.firstIndex { proxy in
+            guard let type = proxy.string("type")?.lowercased() else { return false }
+            return !serverlessTypes.contains(type)
+        }
+    }
+
+    private static func viaSixOptions(
+        in root: [String: Any]
+    ) throws -> MihomoViaSixProfileOptions? {
+        guard let raw = root["x-viasix"] else { return nil }
+        guard let mapping = raw as? [String: Any] else {
+            throw MihomoConfigurationError.unsupportedValue("x-viasix 必须是映射")
+        }
+        return try MihomoViaSixProfileOptions(mapping: mapping)
+    }
+
     private static func sanitizedProviders(
         _ providers: [String: Any],
         directory: String
@@ -515,6 +584,112 @@ public struct MihomoServerConfiguration: Equatable, Sendable {
         }
         let prefix = stem.isEmpty ? "provider" : String(stem.prefix(64))
         return "\(prefix)-\(String(hash, radix: 16))"
+    }
+}
+
+public enum MihomoPrimaryServerSource: String, Equatable, Sendable {
+    case selectedIP = "selected-ip"
+}
+
+public struct MihomoViaSixProfileOptions: Equatable, Sendable {
+    public let version: Int
+    public let primaryServer: MihomoPrimaryServerSource?
+    public let routingMode: MihomoRoutingMode?
+    public let udpEnabled: Bool?
+    public let logLevel: MihomoLogLevel?
+    public let sniffingEnabled: Bool?
+    public let bypassPrivateNetworks: Bool?
+
+    fileprivate init(mapping: [String: Any]) throws {
+        let supportedKeys: Set<String> = [
+            "version",
+            "primary-server",
+            "routing-mode",
+            "udp-enabled",
+            "log-level",
+            "sniffing-enabled",
+            "bypass-private-networks",
+        ]
+        if let unsupported = mapping.keys.sorted().first(where: { !supportedKeys.contains($0) }) {
+            throw MihomoConfigurationError.unsupportedValue(
+                "x-viasix.\(unsupported) 不允许覆盖本机安全设置"
+            )
+        }
+        guard mapping.int("version") == 1 else {
+            throw MihomoConfigurationError.unsupportedValue("x-viasix.version 必须为 1")
+        }
+        version = 1
+
+        if let value = mapping["primary-server"] {
+            guard let raw = value as? String,
+                let source = MihomoPrimaryServerSource(rawValue: raw.lowercased())
+            else {
+                throw MihomoConfigurationError.unsupportedValue(
+                    "x-viasix.primary-server 仅支持 selected-ip"
+                )
+            }
+            primaryServer = source
+        } else {
+            primaryServer = nil
+        }
+
+        if let value = mapping["routing-mode"] {
+            guard let raw = value as? String,
+                let mode = MihomoRoutingMode(rawValue: raw.lowercased()),
+                mode != .direct
+            else {
+                throw MihomoConfigurationError.unsupportedValue(
+                    "x-viasix.routing-mode 仅支持 rule 或 global"
+                )
+            }
+            routingMode = mode
+        } else {
+            routingMode = nil
+        }
+
+        if let value = mapping["log-level"] {
+            guard let raw = value as? String,
+                let level = MihomoLogLevel(rawValue: raw.lowercased())
+            else {
+                throw MihomoConfigurationError.unsupportedValue(
+                    "x-viasix.log-level 无效"
+                )
+            }
+            logLevel = level
+        } else {
+            logLevel = nil
+        }
+
+        udpEnabled = try Self.optionalBoolean("udp-enabled", in: mapping)
+        sniffingEnabled = try Self.optionalBoolean("sniffing-enabled", in: mapping)
+        bypassPrivateNetworks = try Self.optionalBoolean(
+            "bypass-private-networks",
+            in: mapping
+        )
+    }
+
+    fileprivate var canonicalMapping: [String: Any] {
+        var mapping: [String: Any] = ["version": version]
+        if let primaryServer { mapping["primary-server"] = primaryServer.rawValue }
+        if let routingMode { mapping["routing-mode"] = routingMode.rawValue }
+        if let udpEnabled { mapping["udp-enabled"] = udpEnabled }
+        if let logLevel { mapping["log-level"] = logLevel.rawValue }
+        if let sniffingEnabled { mapping["sniffing-enabled"] = sniffingEnabled }
+        if let bypassPrivateNetworks {
+            mapping["bypass-private-networks"] = bypassPrivateNetworks
+        }
+        return mapping
+    }
+
+    private static func optionalBoolean(
+        _ key: String,
+        in mapping: [String: Any]
+    ) throws -> Bool? {
+        guard let value = mapping[key] else { return nil }
+        guard let boolean = value as? Bool else {
+            throw MihomoConfigurationError.unsupportedValue("x-viasix.\(key) 必须是布尔值")
+        }
+        return boolean
     }
 }
 

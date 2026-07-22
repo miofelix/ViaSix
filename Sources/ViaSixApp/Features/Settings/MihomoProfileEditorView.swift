@@ -592,6 +592,9 @@ struct MihomoProfileDraftAnalysis: Equatable, Sendable {
             if let server = MihomoServerConfiguration.proxyServerAddress(in: canonical) {
                 return Self(status: .inlineProxy(server))
             }
+            if configuration.requiresSelectedPrimaryServer {
+                return Self(status: .inlineProxy("当前优选节点（运行时注入）"))
+            }
             return Self(status: .providerOnly)
         } catch let error as MihomoConfigurationError {
             switch error {

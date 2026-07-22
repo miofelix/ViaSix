@@ -399,7 +399,10 @@ public actor AppBootstrapper {
         expectedProfileData: Data?
     ) throws -> ProxyEndpoint {
         let profile = try MihomoServerConfiguration(data: data)
-        let local = try loadLocalProxyConfiguration()
+        let local = try localConfiguration(
+            importing: profile.viaSixOptions,
+            over: loadLocalProxyConfiguration()
+        )
         let generated = try runtimeConfiguration(
             profile: profile,
             local: local,
@@ -412,6 +415,30 @@ public actor AppBootstrapper {
             expectedProfileData: expectedProfileData
         )
         return local.endpoint
+    }
+
+    private func localConfiguration(
+        importing options: MihomoViaSixProfileOptions?,
+        over current: LocalProxyConfiguration
+    ) throws -> LocalProxyConfiguration {
+        guard let options else { return current }
+        var imported = current
+        if let routingMode = options.routingMode {
+            imported.routingMode = ProxyRoutingMode(rawValue: routingMode.rawValue) ?? .rule
+        }
+        if let udpEnabled = options.udpEnabled {
+            imported.udpEnabled = udpEnabled
+        }
+        if let logLevel = options.logLevel {
+            imported.logLevel = ProxyLogLevel(rawValue: logLevel.rawValue) ?? .warning
+        }
+        if let sniffingEnabled = options.sniffingEnabled {
+            imported.sniffingEnabled = sniffingEnabled
+        }
+        if let bypassPrivateNetworks = options.bypassPrivateNetworks {
+            imported.bypassPrivateNetworks = bypassPrivateNetworks
+        }
+        return try imported.validated()
     }
 
     @discardableResult

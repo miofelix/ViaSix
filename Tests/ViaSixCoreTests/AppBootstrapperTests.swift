@@ -249,6 +249,127 @@ final class AppBootstrapperTests: XCTestCase {
         XCTAssertFalse(generated.contains("9999"))
     }
 
+    func testViaSixYAMLImportsSafePreferencesAndUsesSelectedIPWithoutStoredServer() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let bootstrapper = AppBootstrapper(paths: paths)
+        try await bootstrapper.prepareDefaults()
+        try await bootstrapper.replaceProfile(with: validProfile())
+
+        let existing = LocalProxyConfiguration(
+            listenAddress: "127.0.0.7",
+            port: 20_451,
+            controllerPort: 20_452,
+            udpEnabled: true,
+            sniffingEnabled: false,
+            bypassPrivateNetworks: false,
+            logLevel: .debug,
+            routingMode: .global,
+            networkAccessMode: .virtualInterface,
+            systemProxyEnabled: true,
+            tunStack: .system,
+            tunMTU: 1_420,
+            tunStrictRoute: true
+        )
+        _ = try await bootstrapper.replaceLocalProxyConfiguration(with: existing)
+
+        let imported = Data(
+            """
+            x-viasix:
+              version: 1
+              primary-server: selected-ip
+              routing-mode: rule
+              udp-enabled: false
+              log-level: info
+              sniffing-enabled: true
+              bypass-private-networks: true
+            proxies:
+              - name: edge
+                type: vless
+                port: 443
+                uuid: 77777777-7777-4777-8777-777777777777
+                network: ws
+                tls: true
+                servername: origin.example
+                ws-opts:
+                  path: /viasix
+                  headers:
+                    Host: origin.example
+            """.utf8
+        )
+
+        _ = try await bootstrapper.replaceProfile(
+            with: imported,
+            selectedIP: "2606:4700::7"
+        )
+
+        let local = try await bootstrapper.loadLocalProxyConfiguration()
+        XCTAssertEqual(local.listenAddress, existing.listenAddress)
+        XCTAssertEqual(local.port, existing.port)
+        XCTAssertEqual(local.controllerPort, existing.controllerPort)
+        XCTAssertEqual(local.networkAccessMode, existing.networkAccessMode)
+        XCTAssertEqual(local.systemProxyEnabled, existing.systemProxyEnabled)
+        XCTAssertEqual(local.tunStack, existing.tunStack)
+        XCTAssertEqual(local.tunMTU, existing.tunMTU)
+        XCTAssertEqual(local.tunStrictRoute, existing.tunStrictRoute)
+        XCTAssertEqual(local.routingMode, .rule)
+        XCTAssertFalse(local.udpEnabled)
+        XCTAssertEqual(local.logLevel, .info)
+        XCTAssertTrue(local.sniffingEnabled)
+        XCTAssertTrue(local.bypassPrivateNetworks)
+
+        let stored = String(decoding: try Data(contentsOf: paths.profileConfig), as: UTF8.self)
+        XCTAssertTrue(stored.contains("primary-server: selected-ip"))
+        XCTAssertFalse(stored.contains("server: 2606:4700::7"))
+
+        let generated = String(decoding: try Data(contentsOf: paths.generatedConfig), as: UTF8.self)
+        XCTAssertTrue(generated.contains("server: 2606:4700::7"))
+        XCTAssertTrue(generated.contains("mode: rule"))
+        XCTAssertTrue(generated.contains("log-level: info"))
+        XCTAssertTrue(generated.contains("udp: false"))
+        XCTAssertFalse(generated.contains("x-viasix:"))
+    }
+
+    func testViaSixSelectedIPTemplateRequiresCurrentSelectionWithoutChangingFiles() async throws {
+        let paths = makePaths()
+        defer { try? FileManager.default.removeItem(at: paths.root) }
+        let bootstrapper = AppBootstrapper(paths: paths)
+        try await bootstrapper.prepareDefaults()
+        let originalLocal = try Data(contentsOf: paths.localProxyConfig)
+
+        do {
+            _ = try await bootstrapper.replaceProfile(
+                with: Data(
+                    """
+                    x-viasix:
+                      version: 1
+                      primary-server: selected-ip
+                      routing-mode: rule
+                      udp-enabled: false
+                      log-level: info
+                    proxies:
+                      - name: edge
+                        type: vless
+                        port: 443
+                        uuid: 77777777-7777-4777-8777-777777777777
+                        tls: true
+                        servername: origin.example
+                    """.utf8
+                )
+            )
+            XCTFail("Expected the selected node requirement to reject the import")
+        } catch {
+            XCTAssertEqual(
+                error.localizedDescription,
+                "配置不包含节点地址，请先在 ViaSix 中测速并选择一个当前节点"
+            )
+        }
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.profileConfig.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.generatedConfig.path))
+        XCTAssertEqual(try Data(contentsOf: paths.localProxyConfig), originalLocal)
+    }
+
     func testProviderOnlyProfilesLaunchInRuleAndGlobalModesAndIgnoreSelectedIP() async throws {
         let paths = makePaths()
         defer { try? FileManager.default.removeItem(at: paths.root) }

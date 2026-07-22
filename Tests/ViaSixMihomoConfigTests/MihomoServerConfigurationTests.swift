@@ -69,6 +69,88 @@ final class MihomoServerConfigurationTests: XCTestCase {
         XCTAssertFalse(configuration.isProviderOnly)
     }
 
+    func testViaSixSelectedIPTemplateOmitsServerAndInjectsRuntimeAddress() throws {
+        let configuration = try MihomoServerConfiguration(
+            data: data(
+                """
+                x-viasix:
+                  version: 1
+                  primary-server: selected-ip
+                  routing-mode: rule
+                  udp-enabled: false
+                  log-level: info
+                  sniffing-enabled: true
+                  bypass-private-networks: true
+                proxies:
+                  - name: edge
+                    type: vless
+                    port: 443
+                    uuid: 11111111-1111-4111-8111-111111111111
+                    tls: true
+                    servername: edge.example.com
+                """
+            )
+        )
+
+        XCTAssertTrue(configuration.hasReplaceablePrimaryServer)
+        XCTAssertTrue(configuration.requiresSelectedPrimaryServer)
+        XCTAssertEqual(configuration.viaSixOptions?.routingMode, .rule)
+        XCTAssertEqual(configuration.viaSixOptions?.udpEnabled, false)
+        XCTAssertEqual(configuration.viaSixOptions?.logLevel, .info)
+
+        let stored = try MihomoYAML.mapping(from: configuration.data)
+        XCTAssertNil(stored.mappings("proxies")?.first?.string("server"))
+        XCTAssertEqual(stored.mapping("x-viasix")?.string("primary-server"), "selected-ip")
+
+        XCTAssertThrowsError(
+            try configuration.runtimeConfiguration(options: MihomoRuntimeOptions())
+        ) { error in
+            XCTAssertEqual(error as? MihomoConfigurationError, .missingSelectedNodeAddress)
+        }
+
+        let directRuntime = try MihomoYAML.mapping(
+            from: configuration.runtimeConfiguration(
+                options: MihomoRuntimeOptions(routingMode: .direct)
+            )
+        )
+        XCTAssertNil(directRuntime["proxies"])
+
+        let runtime = try MihomoYAML.mapping(
+            from: configuration.runtimeConfiguration(
+                options: MihomoRuntimeOptions(udpEnabled: false),
+                replacingPrimaryServerWith: "2606:4700::1"
+            )
+        )
+        XCTAssertEqual(runtime.mappings("proxies")?.first?.string("server"), "2606:4700::1")
+        XCTAssertEqual(runtime.mappings("proxies")?.first?.bool("udp"), false)
+        XCTAssertNil(runtime["x-viasix"])
+    }
+
+    func testViaSixExtensionRejectsLocalSecurityBoundaryKeys() throws {
+        XCTAssertThrowsError(
+            try MihomoServerConfiguration(
+                data: data(
+                    """
+                    x-viasix:
+                      version: 1
+                      system-proxy-enabled: true
+                    proxies:
+                      - name: edge
+                        type: vless
+                        server: edge.example.com
+                        port: 443
+                        uuid: 11111111-1111-4111-8111-111111111111
+                    """
+                )
+            )
+        ) { error in
+            guard case .unsupportedValue(let detail) = error as? MihomoConfigurationError else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+            XCTAssertTrue(detail.contains("system-proxy-enabled"))
+        }
+    }
+
     func testTrojanImplicitTLSAndSNIRoundTripWithoutSyntheticTLSKey() throws {
         let configuration = try MihomoServerConfiguration(
             data: data(

@@ -22,7 +22,6 @@ Options:
   --host <domain>        TLS SNI and WebSocket Host.
   --uuid <UUID>          The same UUID embedded in the Pages worker.
   --uuid-file <path>     Read the UUID from the first line of a local file.
-  --server <address>     Initial server domain/IP. Defaults to --host.
   --port <port>          Cloudflare TLS port. Defaults to 443.
   --output-dir <path>    Private client output directory.
                          Defaults to ../dist/client.
@@ -38,7 +37,6 @@ validate_uuid() {
 host=${VIASIX_PAGES_HOST:-}
 uuid=${VIASIX_PAGES_UUID:-}
 uuid_file=""
-server=""
 port=443
 output_dir="$resource_root/dist/client"
 
@@ -57,11 +55,6 @@ while (( $# > 0 )); do
         --uuid-file)
             (( $# >= 2 )) || fail "--uuid-file requires a path"
             uuid_file=$2
-            shift 2
-            ;;
-        --server)
-            (( $# >= 2 )) || fail "--server requires a value"
-            server=$2
             shift 2
             ;;
         --port)
@@ -98,12 +91,6 @@ print -r -- "$host" \
 [[ "$host" == *.* && "$host" != .* && "$host" != *. ]] \
     || fail "host must be a fully qualified domain"
 
-if [[ -z "$server" ]]; then
-    server=$host
-fi
-print -r -- "$server" \
-    | /usr/bin/grep -Eq '^[A-Za-z0-9._:-]+$' \
-    || fail "server must be a domain or an unbracketed IPv4/IPv6 address"
 print -r -- "$port" | /usr/bin/grep -Eq '^[0-9]+$' \
     || fail "port must be numeric"
 (( port >= 1 && port <= 65535 )) || fail "port must be between 1 and 65535"
@@ -137,14 +124,20 @@ cleanup() {
 trap cleanup EXIT
 
 cat > "$yaml_temporary" <<EOF
+x-viasix:
+  version: 1
+  primary-server: selected-ip
+  routing-mode: rule
+  udp-enabled: false
+  log-level: info
+  sniffing-enabled: true
+  bypass-private-networks: true
 proxies:
   - name: ViaSix Cloudflare Pages
     type: vless
-    server: "$server"
     port: $port
     uuid: "$uuid"
     encryption: none
-    udp: false
     tls: true
     servername: "$host"
     client-fingerprint: chrome
@@ -156,11 +149,7 @@ proxies:
         Host: "$host"
 EOF
 
-server_authority=$server
-if [[ "$server" == *:* ]]; then
-    server_authority="[$server]"
-fi
-print -r -- "vless://${uuid}@${server_authority}:${port}?encryption=none&security=tls&sni=${host}&fp=chrome&type=ws&host=${host}&path=%2F%3Fed%3D2560#ViaSix%20Cloudflare%20Pages" \
+print -r -- "vless://${uuid}@${host}:${port}?encryption=none&security=tls&sni=${host}&fp=chrome&type=ws&host=${host}&path=%2F%3Fed%3D2560#ViaSix%20Cloudflare%20Pages" \
     > "$link_temporary"
 
 /bin/chmod 600 "$yaml_temporary" "$link_temporary"
@@ -171,4 +160,4 @@ link_temporary=""
 
 print "Prepared ViaSix Mihomo YAML: $yaml_path"
 print "Prepared ViaSix share link: $link_path"
-print -u2 "Reminder: disable UDP in ViaSix local proxy settings for this Pages endpoint."
+print -u2 "The YAML intentionally omits server; select a current node in ViaSix before importing it."

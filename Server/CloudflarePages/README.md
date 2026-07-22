@@ -1,6 +1,6 @@
 # 为 ViaSix 部署 Cloudflare Pages VLESS 服务
 
-本目录提供一套可直接生成、部署和验证的 Cloudflare Pages 服务端资源，面向需要把自建节点导入 ViaSix 或其他 Mihomo/VLESS 客户端的用户。
+本目录提供一套可直接生成、部署和验证的 Cloudflare Pages 服务端资源。ViaSix 用户可导入专用 YAML；其他 VLESS 客户端可使用生成的分享链接并自行确认兼容性。
 
 部署协议固定为：
 
@@ -21,7 +21,7 @@ VLESS + WebSocket + TLS + TCP/443
 - VLESS TCP over WebSocket；
 - TLS 443 和自定义域名；
 - UUID 鉴权；
-- ViaSix/Mihomo YAML 和 VLESS 分享链接；
+- ViaSix 专用 YAML 和 VLESS 分享链接；
 - Cloudflare IPv4/IPv6 优选地址；
 - Wrangler 命令行和 Dashboard ZIP 上传。
 
@@ -42,7 +42,7 @@ Cloudflare TCP Sockets 不允许连接 Cloudflare 自身 IP 段或形成 TCP loo
 - `scripts/deploy-pages.sh`：通过 Wrangler 创建并部署 Pages 项目。
 - `scripts/generate-client-config.sh`：生成 Mihomo YAML 和分享链接。
 - `scripts/verify-deployment.sh`：检查域名、证书和配置端点。
-- `mihomo-vless.example.yaml`：手动配置示例。
+- `mihomo-vless.example.yaml`：ViaSix YAML 示例。
 
 ## 1. 环境要求
 
@@ -146,7 +146,7 @@ viasix.example.com
 
 - HTTPS 和证书；
 - `https://<域名>/<UUID>` 配置页；
-- `https://<域名>/<UUID>/pcl` Mihomo 配置；
+- `https://<域名>/<UUID>/pcl` ViaSix YAML；
 - UUID、TLS、SNI 和 WebSocket 路径一致性。
 
 该脚本不模拟完整 VLESS 数据传输。部署后仍需使用 ViaSix、Mihomo 或 Xray 访问一个非 Cloudflare 托管的 HTTPS 站点进行数据面测试。
@@ -167,22 +167,34 @@ dist/client/
 └── viasix-vless-link.txt
 ```
 
-推荐在 ViaSix 中导入 `dist/client/viasix-mihomo.yaml`。分享链接文件只包含一行 `vless://` 链接，也可以在“配置 → 分享链接”中粘贴导入。
+推荐在 ViaSix 中导入 `dist/client/viasix-mihomo.yaml`。该 YAML 故意不包含节点 `server` 地址；ViaSix 会在导入时使用当前选中的优选 IP。导入前请先完成测速并选择一个当前节点。
 
-## 9. ViaSix 必要设置
+分享链接文件只包含一行 `vless://` 链接，供其他兼容客户端使用；它以 Pages 域名作为初始服务器地址。
 
-在 ViaSix“设置 → 本机代理”中：
+## 9. YAML 自动应用的 ViaSix 设置
 
-- 路由模式选择“规则”或“全局”；
-- 关闭 UDP；
-- 首次排错时使用 `info` 日志级别；
-- 确认出口 IP 检测和普通 HTTPS 访问成功后，再启用系统代理或 TUN。
+无需再到“设置 → 本机代理”手动调整路由、UDP 或日志级别。生成的 YAML 包含以下 ViaSix 扩展：
 
-必须关闭 UDP。ViaSix 的全局 UDP 选项会覆盖节点 YAML 中的 `udp: false`，而本 Worker 仅实现 TCP。
+```yaml
+x-viasix:
+  version: 1
+  primary-server: selected-ip
+  routing-mode: rule
+  udp-enabled: false
+  log-level: info
+  sniffing-enabled: true
+  bypass-private-networks: true
+```
+
+导入时 ViaSix 会原子地应用这些低风险偏好，并把当前优选 IP 注入运行配置。节点模板本身仍不保存地址。
+
+为避免配置文件静默扩大本机权限，YAML 不会覆盖监听地址、监听端口、Controller、系统代理、TUN 或 DNS。系统代理和 TUN 仍由使用者在验证普通 HTTPS 访问及出口 IP 后主动启用。
 
 ## 10. 使用 Cloudflare 优选 IP
 
-可以只替换客户端节点的 `server`，但以下字段必须继续使用 Pages 域名：
+在 ViaSix“节点”页面完成测速并选择 IPv4 或 IPv6 优选地址，然后导入 YAML。ViaSix 会把所选地址写入临时运行配置的 `server`，不会把它写回 YAML。
+
+以下字段始终使用 Pages 域名，不随优选 IP 改变：
 
 ```text
 port: 443
@@ -191,26 +203,6 @@ servername: viasix.example.com
 WebSocket Host: viasix.example.com
 WebSocket path: /?ed=2560
 ```
-
-生成 IPv4 优选配置：
-
-```bash
-./scripts/generate-client-config.sh \
-  --host "viasix.example.com" \
-  --uuid-file .uuid \
-  --server "104.16.0.1"
-```
-
-生成 IPv6 优选配置：
-
-```bash
-./scripts/generate-client-config.sh \
-  --host "viasix.example.com" \
-  --uuid-file .uuid \
-  --server "2606:4700::1"
-```
-
-IPv6 地址不需要手动添加方括号。
 
 ## 11. 更新已有部署
 
@@ -230,7 +222,11 @@ IPv6 地址不需要手动添加方括号。
 
 ### 域名和 WebSocket 正常，但 HTTPS 目标无法访问
 
-先确认 ViaSix 已关闭 UDP，并使用未托管在 Cloudflare 上的 HTTPS 站点测试。如果只有 Cloudflare 托管目标失败，通常是 Cloudflare TCP loop 限制；本实现不会使用 ProxyIP 绕过该限制。
+重新导入本目录生成的 YAML，并确认 ViaSix 的本机 UDP 状态已由配置显示为关闭。随后使用未托管在 Cloudflare 上的 HTTPS 站点测试。如果只有 Cloudflare 托管目标失败，通常是 Cloudflare TCP loop 限制；本实现不会使用 ProxyIP 绕过该限制。
+
+### 导入时提示需要先选择当前节点
+
+这是预期行为。YAML 不提供 `server` 地址，ViaSix 必须从当前测速选择中注入一个 IPv4 或 IPv6 地址。先在“节点”页面测速并应用一个节点，再重新导入 YAML。
 
 ### 出口 IP 检测报 TLS 错误
 

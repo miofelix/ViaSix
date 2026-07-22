@@ -52,6 +52,31 @@ final class MihomoProfileEditorTests: XCTestCase {
         XCTAssertNil(analysis.issue)
     }
 
+    func testDraftAnalysisRecognizesViaSixSelectedIPTemplateAsInlineProxy() {
+        let analysis = MihomoProfileDraftAnalysis.inspect(
+            """
+            x-viasix:
+              version: 1
+              primary-server: selected-ip
+              routing-mode: rule
+              udp-enabled: false
+              log-level: info
+            proxies:
+              - name: edge
+                type: vless
+                port: 443
+                uuid: 11111111-1111-4111-8111-111111111111
+                tls: true
+                servername: origin.example.com
+            """
+        )
+
+        XCTAssertEqual(analysis.status, .inlineProxy("当前优选节点（运行时注入）"))
+        XCTAssertTrue(analysis.isValid)
+        XCTAssertTrue(analysis.canFormat)
+        XCTAssertNil(analysis.issue)
+    }
+
     func testDraftAnalysisRecognizesProviderOnlyConfiguration() {
         let analysis = MihomoProfileDraftAnalysis.inspect(
             """
