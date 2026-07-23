@@ -28,6 +28,8 @@ class TcpCloseSurfaceTest {
         assertTrue(engine.contains("tcp downstream read failed"))
         assertTrue(engine.contains("if (!remoteEof)"))
         assertTrue(engine.contains("rejectTcpSession(key, session)"))
+        assertTrue(engine.contains("TCP half-close timed out"))
+        assertTrue(engine.contains("session.sendWindow.acknowledgedSequence() ?: session.serverSeq"))
         assertFalse(engine.contains("session.upstream.awaitEmpty"))
         assertFalse(engine.contains("UPSTREAM_DRAIN_TIMEOUT_MS"))
     }

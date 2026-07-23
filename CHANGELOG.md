@@ -65,6 +65,7 @@
 
 ### 修复
 
+- 修复 Android TCP 下行重传耗尽或服务端半关闭超时后只静默删除会话，客户端仍会等待到自身超时的问题；异常收敛现主动发送 `RST|ACK`，并使用客户端最新确认的服务端序号而非固定 `SEQ=0`，避免现代 TCP 栈因复位序号不在接收窗口而忽略通知。
 - 修复 Android TUN reader 仍直接向非阻塞 SOCKS5 UDP `DatagramChannel` 写入，发送缓冲短暂不可写时会关闭整个 relay 并触发 ASSOCIATE 重连风暴的问题；UDP 发送现也进入同一 Selector reactor，每 relay 采用按数据报数和字节数双重有界队列，`OP_WRITE` 就绪后公平排空，队列饱和只丢当前数据报而不破坏关联。
 - 修复 Android TCP 发送窗口等待和上行 writer 队列轮询使用 `System.currentTimeMillis()`，设备校时或墙上时钟跳变可能导致等待被意外延长或提前超时的问题；传输层有界等待现统一改用 `System.nanoTime()` 计算纳秒级剩余时间，与重传、半关闭和 UDP relay 生命周期一致。
 - 修复 Android 把 SOCKS 远端正常 EOF 与下行读异常视为同一路径，并在发送服务端 FIN 前错误等待客户端上行队列最多 35 秒的问题；TCP 两个半关闭方向现彼此独立，正常 EOF 只等待本方向未确认数据后回送 FIN，读异常或内部下行失败则向客户端发送 RST 并立即释放会话。

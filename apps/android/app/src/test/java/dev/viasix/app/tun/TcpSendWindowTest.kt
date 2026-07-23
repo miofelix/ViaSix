@@ -2,6 +2,7 @@ package dev.viasix.app.tun
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -63,5 +64,18 @@ class TcpSendWindowTest {
         assertTrue(window.update(acknowledgement = 1_050L, advertisedWindow = 2_000, nextSequence = 1_100L))
         assertFalse(window.update(acknowledgement = 1_025L, advertisedWindow = 2_000, nextSequence = 1_100L))
         assertEquals(1_950, window.awaitAllowance(maxBytes = 2_000, timeoutMs = 0L))
+    }
+
+    @Test
+    fun exposesLatestAcceptedAcknowledgementForConnectionReset() {
+        val window = TcpSendWindow()
+
+        assertNull(window.acknowledgedSequence())
+        assertTrue(window.update(acknowledgement = 100L, advertisedWindow = 1_000, nextSequence = 100L))
+        assertTrue(window.recordSent(sequence = 100L, sequenceLength = 300))
+        assertTrue(window.update(acknowledgement = 250L, advertisedWindow = 1_000, nextSequence = 400L))
+        assertEquals(250L, window.acknowledgedSequence())
+        window.cancel()
+        assertNull(window.acknowledgedSequence())
     }
 }

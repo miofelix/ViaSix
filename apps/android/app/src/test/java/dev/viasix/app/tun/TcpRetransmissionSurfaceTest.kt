@@ -22,6 +22,8 @@ class TcpRetransmissionSurfaceTest {
         assertTrue(engine.contains("session.retransmissions.awaitEmpty"))
         assertTrue(engine.contains("Executors.newSingleThreadScheduledExecutor"))
         assertTrue(engine.contains("timeoutMs = 0L"))
+        assertTrue(engine.contains("TCP retransmission limit reached"))
+        assertTrue(engine.contains("session.sendWindow.acknowledgedSequence() ?: session.serverSeq"))
     }
 
     private fun resolve(vararg paths: String): File =

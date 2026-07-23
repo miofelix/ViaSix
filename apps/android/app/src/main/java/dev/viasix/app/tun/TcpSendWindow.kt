@@ -74,6 +74,11 @@ class TcpSendWindow {
             0
         }
 
+    fun acknowledgedSequence(): Long? =
+        synchronized(monitor) {
+            if (!initialized || cancelled) null else acknowledgedSequence
+        }
+
     fun cancel() {
         synchronized(monitor) {
             cancelled = true

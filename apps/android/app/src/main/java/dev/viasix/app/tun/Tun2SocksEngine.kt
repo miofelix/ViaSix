@@ -558,11 +558,22 @@ class Tun2SocksEngine(
 
     private fun rejectTcpSession(key: String, session: TcpSession) {
         if (sessions[key] !== session) return
+        val established = session.socket != null
         enqueuePacket(
             buildTcpPacket(
                 session = session,
-                seq = 0,
-                ack = TcpSequence.advance(session.clientIsn, syn = true),
+                seq =
+                    if (established) {
+                        session.sendWindow.acknowledgedSequence() ?: session.serverSeq
+                    } else {
+                        0
+                    },
+                ack =
+                    if (established) {
+                        session.clientNextSeq
+                    } else {
+                        TcpSequence.advance(session.clientIsn, syn = true)
+                    },
                 flags = Packet.RST or Packet.ACK,
                 payload = ByteArray(0),
             ),
@@ -1052,7 +1063,7 @@ class Tun2SocksEngine(
                 }
                 TcpRetransmissionQueue.PollResult.Exhausted -> {
                     Log.w(TAG, "TCP retransmission limit reached for $key")
-                    removeSession(key, session)
+                    rejectTcpSession(key, session)
                 }
                 null -> Unit
             }
@@ -1061,7 +1072,7 @@ class Tun2SocksEngine(
                     session.closeState.isExpired(nowMs, SERVER_HALF_CLOSE_TIMEOUT_MS)
             ) {
                 Log.w(TAG, "TCP half-close timed out for $key")
-                removeSession(key, session)
+                rejectTcpSession(key, session)
             }
         }
     }
