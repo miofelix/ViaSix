@@ -11,7 +11,7 @@
         android:icon="@android:drawable/sym_def_app_icon"
         android:label="ViaSix"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.DeviceDefault.DayNight">
+        android:theme="@style/Theme.ViaSix">
 
         <activity
             android:name=".MainActivity"

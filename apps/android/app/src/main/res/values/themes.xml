@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- API 26-safe host theme; Compose supplies the application color system. -->
+    <style name="ViaSixBaseTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <!-- API 26 cannot request dark navigation icons, so keep its bar dark. -->
+        <item name="android:navigationBarColor">@android:color/black</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+
+    <style name="Theme.ViaSix" parent="@style/ViaSixBaseTheme" />
+</resources>

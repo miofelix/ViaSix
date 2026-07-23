@@ -1,5 +1,6 @@
 package dev.viasix.app.tile
 
+import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.Intent
 import android.os.Build
@@ -26,7 +27,9 @@ class ViaSixTileService : TileService() {
             startService(VpnSessionCommands.buildStopIntent(this))
             // Optimistic inactive until prefs catch up
             qsTile?.state = Tile.STATE_INACTIVE
-            qsTile?.subtitle = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "正在断开…" else null
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                qsTile?.subtitle = "正在断开…"
+            }
             qsTile?.updateTile()
             return
         }
@@ -35,8 +38,9 @@ class ViaSixTileService : TileService() {
             is VpnSessionCommands.StartAction.StartService -> {
                 startForegroundService(action.intent)
                 qsTile?.state = Tile.STATE_ACTIVE
-                qsTile?.subtitle =
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "正在连接…" else null
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    qsTile?.subtitle = "正在连接…"
+                }
                 qsTile?.updateTile()
             }
             is VpnSessionCommands.StartAction.NeedsVpnConsent -> {
@@ -58,6 +62,8 @@ class ViaSixTileService : TileService() {
         }
     }
 
+    @Suppress("DEPRECATION")
+    @SuppressLint("StartActivityAndCollapseDeprecated")
     private fun collapseAndLaunch(intent: Intent) {
         val pending =
             PendingIntent.getActivity(
@@ -70,7 +76,6 @@ class ViaSixTileService : TileService() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 startActivityAndCollapse(pending)
             } else {
-                @Suppress("DEPRECATION")
                 startActivityAndCollapse(intent)
             }
         } catch (error: Exception) {

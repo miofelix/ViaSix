@@ -26,8 +26,12 @@ class TileSurfaceTest {
         val manifestText = manifest.readText()
         assertTrue(serviceText.contains("class ViaSixTileService"))
         assertTrue(serviceText.contains("VpnSessionCommands"))
+        assertTrue(serviceText.contains("PendingIntent.getActivity"))
+        assertTrue(serviceText.contains("startActivityAndCollapse(pending)"))
+        assertTrue(serviceText.contains("Build.VERSION_CODES.UPSIDE_DOWN_CAKE"))
         assertTrue(manifestText.contains("ViaSixTileService"))
         assertTrue(manifestText.contains("QS_TILE"))
+        assertTrue(manifestText.contains("@style/Theme.ViaSix"))
     }
 
     private fun resolve(vararg paths: String): File =

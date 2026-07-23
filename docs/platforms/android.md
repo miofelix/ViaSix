@@ -45,6 +45,7 @@ Android 功能对齐以 **macOS** 为准。Windows 端仍在完善中，**不得
 
 - `TrafficSampler`：与 Windows 相同，由 `/connections` 累计差分得瞬时速率
 - `ViaSixVpnService`：重启栈（节点应用并重连）、环形事件日志、通知栏实时上下行（Clash 风格）
+- `ViaSixTileService`：API 34+ 通过 `PendingIntent` 展开应用，API 26–28 不访问 API 29 的磁贴字幕
 - `ProfileSummaryParser` / `Ipv6Address` / `ByteRateFormatter` / `SpeedTestResultParser`：`:core` 可测纯逻辑
 - 会话偏好扩展：候选节点、出口检测端点与模式、测速 IP 源
 - CFST：`CfstInstaller` + `CfstRunner` + `IPSourceMode` / `SpeedTestParameters`（macOS 参数语义）+ `NodeResultSorting` + 当前节点测速
