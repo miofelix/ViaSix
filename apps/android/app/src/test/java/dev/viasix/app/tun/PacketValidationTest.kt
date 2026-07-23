@@ -36,6 +36,28 @@ class PacketValidationTest {
     }
 
     @Test
+    fun rejectsIpv4FragmentsThatRequireReassembly() {
+        val base =
+            Packet.buildIp4Udp(
+                source = InetAddress.getByName("10.10.0.2"),
+                destination = InetAddress.getByName("1.1.1.1"),
+                sourcePort = 53000,
+                destPort = 53,
+                payload = byteArrayOf(1, 2, 3, 4),
+            )
+        val moreFragments = base.copyOf()
+        val nonInitial = base.copyOf()
+        val reserved = base.copyOf()
+        ByteBuffer.wrap(moreFragments).order(ByteOrder.BIG_ENDIAN).putShort(6, 0x2000.toShort())
+        ByteBuffer.wrap(nonInitial).order(ByteOrder.BIG_ENDIAN).putShort(6, 1)
+        ByteBuffer.wrap(reserved).order(ByteOrder.BIG_ENDIAN).putShort(6, 0x8000.toShort())
+
+        assertNull(Packet.parseIp4(ByteBuffer.wrap(moreFragments)))
+        assertNull(Packet.parseIp4(ByteBuffer.wrap(nonInitial)))
+        assertNull(Packet.parseIp4(ByteBuffer.wrap(reserved)))
+    }
+
+    @Test
     fun walksBoundedIpv6ExtensionHeadersToUdp() {
         val packet = ipv6UdpWithExtensions(extensionHeaders = intArrayOf(0, 43, 60))
         val buffer = ByteBuffer.wrap(packet)

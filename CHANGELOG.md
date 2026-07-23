@@ -65,6 +65,7 @@
 
 ### 修复
 
+- 修复 Android IPv4 分片在没有重组器时可能被误交给 TCP/UDP 解析的问题；现拒绝 `MF`、非零 fragment offset 与保留标志，避免首片残缺 payload 或非首片字节污染用户态流连接。
 - 修复 Android 远端 FIN 发出后立即销毁 TCP 会话、导致 FIN 丢失无法重传及双方半关闭未完成的问题；FIN 现占用序列空间并纳入未确认段缓存，等待客户端 ACK，双方 FIN 完成后关闭，迟迟不完成的半关闭在 60 秒后回收，客户端 FIN 后的非法 payload 不再写入 SOCKS。
 - 修复 Android IPv6 转发只识别固定 40 字节头、把常见扩展头后的 TCP/UDP 流量直接丢弃的问题；现有界遍历 Hop-by-Hop、Routing、Destination Options、AH 与原子 Fragment，按真实上层偏移解析，并拒绝截断、超过 8 层或需要 IP 重组的分片链。
 - 修复 Android 显式直连 DNS/UDP 在查询突发或上游超时时可无界占用 cached worker 线程与 socket 文件描述符的问题；直连查询现设 32 个 in-flight 硬上限，超限在创建资源前丢弃，且正常、异常与任务拒绝路径均可靠归还幂等 permit。

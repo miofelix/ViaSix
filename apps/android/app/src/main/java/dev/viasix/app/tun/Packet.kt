@@ -78,6 +78,11 @@ internal object Packet {
         if (ihl < IP4_HEADER_SIZE || buffer.remaining() < ihl) return null
         val totalLength = buffer.getShort(start + 2).toInt() and 0xffff
         if (totalLength < ihl || totalLength > buffer.limit() - start) return null
+        val fragmentBits = buffer.getShort(start + 6).toInt() and 0xffff
+        val reservedFlag = fragmentBits and 0x8000 != 0
+        val moreFragments = fragmentBits and 0x2000 != 0
+        val fragmentOffset = fragmentBits and 0x1fff
+        if (reservedFlag || moreFragments || fragmentOffset != 0) return null
         val protocol = buffer.get(start + 9).toInt() and 0xff
         val src = ByteArray(4)
         val dst = ByteArray(4)
