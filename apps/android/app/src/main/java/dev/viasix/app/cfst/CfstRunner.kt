@@ -12,8 +12,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 /**
  * One-at-a-time cancellable CFST process runner.
- * Mirrors Windows [SpeedTestSession] / macOS [CfstRunner] lifecycle:
- * spawn → poll → parse result.csv → reap.
+ * Mirrors macOS [CfstRunner] lifecycle: spawn → poll → parse result.csv → reap.
  */
 class CfstRunner {
     private val processRef = AtomicReference<Process?>(null)

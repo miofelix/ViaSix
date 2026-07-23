@@ -1,8 +1,8 @@
 package dev.viasix.core.speedtest
 
 /**
- * CFST CLI parameters aligned with macOS [SpeedTestParameters] and Windows
- * [SpeedTestRequest] defaults used for IPv6 优选.
+ * CFST CLI parameters aligned with macOS [SpeedTestParameters] (authoritative).
+ * Windows may lag; do not treat Windows defaults as the Android target.
  */
 data class SpeedTestParameters(
     val ipFile: String = "",
@@ -119,9 +119,30 @@ data class SpeedTestParameters(
         fun defaultsForFile(ipFile: String): SpeedTestParameters =
             SpeedTestParameters(ipFile = ipFile)
     }
+
+    /**
+     * macOS [AppModel.currentConfigurationTestParameters]: single-node check keeps
+     * transport/performance settings but drops result filters so a reachable node
+     * is not discarded as "no results". Forces [ipRange] to the selected address.
+     */
+    fun forCurrentNodeConfigurationTest(selectedIp: String): SpeedTestParameters {
+        val ip = selectedIp.trim()
+        require(ip.isNotEmpty()) { "selected IP required" }
+        return copy(
+            ipFile = "",
+            ipRange = ip,
+            allIP = false,
+            latencyUpperBound = 999_999,
+            latencyLowerBound = 0,
+            lossRateUpperBound = 1.0,
+            speedLowerBound = 0.0,
+            colo = "",
+            debug = true,
+        )
+    }
 }
 
-/** Built-in IPv6 CIDR presets (subset of macOS ipv6.txt / Windows presets). */
+/** Convenience CIDR chips derived from macOS bundled `ipv6.txt` core prefixes. */
 data class Ipv6IpPreset(
     val id: String,
     val title: String,

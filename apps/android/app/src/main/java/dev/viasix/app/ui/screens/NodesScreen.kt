@@ -165,7 +165,7 @@ fun NodesScreen(
                                     fontFamily = FontFamily.Monospace,
                                 ),
                             supportingText = {
-                                Text("对应 CFST -ip；与 macOS / Windows 测速源一致")
+                                Text("对应 CFST -ip；与 macOS IP 段测速源一致")
                             },
                         )
                     } else {
@@ -471,8 +471,8 @@ fun NodesScreen(
                     verticalArrangement = Arrangement.spacedBy(VisualStyle.spacing8),
                 ) {
                     Text(
-                        "测速使用 CloudflareSpeedTest（CFST）v2.3.5 与 macOS / Windows 对齐：" +
-                            "结果写入候选列表，选用或「应用并重连」走同一 projection / VpnService 路径。",
+                        "测速使用 CloudflareSpeedTest（CFST）v2.3.5，行为对齐 macOS：" +
+                            "结果可应用为选中节点；选用或「应用并重连」走同一 projection / VpnService 路径。",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

@@ -455,7 +455,24 @@ class MainActivity : ComponentActivity() {
                     }
                     return
                 }
-                val disableDownload = state.speedTest.disableDownload
+                val baseParams =
+                    SpeedTestParameters(
+                        ipRange = state.speedTest.ipRange,
+                        disableDownload = state.speedTest.disableDownload,
+                    )
+                val parameters =
+                    try {
+                        baseParams.forCurrentNodeConfigurationTest(normalized)
+                    } catch (error: Exception) {
+                        update {
+                            it.appendLog(
+                                "当前节点测速参数无效：${error.message}",
+                                LogLevel.Error,
+                                LogSource.Node,
+                            )
+                        }
+                        return
+                    }
                 update {
                     it.copy(
                         speedTest =
@@ -475,14 +492,6 @@ class MainActivity : ComponentActivity() {
                         withContext(Dispatchers.IO) {
                             try {
                                 val install = CfstInstaller.installIfNeeded(this@MainActivity)
-                                val parameters =
-                                    SpeedTestParameters(
-                                        ipRange = normalized,
-                                        disableDownload = disableDownload,
-                                        // Single-node config test: fewer threads is enough.
-                                        threads = 50,
-                                        downloadCount = 1,
-                                    )
                                 val work = CfstInstaller.workDir(this@MainActivity)
                                 cfstRunner.run(install.binary, work, parameters) to true
                             } catch (error: Exception) {

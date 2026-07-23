@@ -21,7 +21,7 @@ class SpeedTestParametersTest {
         assertEquals(443, params.port)
         assertTrue(params.httping)
 
-        // Flag pairs used by macOS CfstRunner / Windows SpeedTestSession.
+        // Flag pairs used by macOS CfstRunner / SpeedTestParameters.commandLineArguments.
         assertEquals("/data/result.csv", args[args.indexOf("-o") + 1])
         assertEquals("443", args[args.indexOf("-tp") + 1])
         assertEquals("200", args[args.indexOf("-n") + 1])
@@ -105,12 +105,42 @@ class SpeedTestParametersTest {
     }
 
     @Test
-    fun presetsNonEmptyAndMatchMacWindowsShape() {
+    fun presetsMatchMacosBundledIpv6Core() {
         assertTrue(Ipv6IpPresets.all.isNotEmpty())
         val main = Ipv6IpPresets.all.first { it.id == "cf-main" }
         assertEquals("2606:4700::/32", main.ipRange)
         val bundle = Ipv6IpPresets.all.first { it.id == "cf-bundle" }
         assertTrue(bundle.ipRange.contains("2606:4700::/32"))
         assertTrue(bundle.ipRange.contains("2400:cb00::/32"))
+    }
+
+    @Test
+    fun configurationTestMatchesMacosFilterRelaxation() {
+        val base =
+            SpeedTestParameters(
+                ipFile = "/tmp/ipv6.txt",
+                ipRange = "2606:4700::/32",
+                threads = 200,
+                latencyUpperBound = 100,
+                lossRateUpperBound = 0.1,
+                speedLowerBound = 5.0,
+                colo = "SJC",
+                disableDownload = true,
+            )
+        val cfg = base.forCurrentNodeConfigurationTest("2001:db8::1")
+        assertEquals("", cfg.ipFile)
+        assertEquals("2001:db8::1", cfg.ipRange)
+        assertEquals(200, cfg.threads)
+        assertTrue(cfg.disableDownload)
+        assertEquals(999_999, cfg.latencyUpperBound)
+        assertEquals(0, cfg.latencyLowerBound)
+        assertEquals(1.0, cfg.lossRateUpperBound)
+        assertEquals(0.0, cfg.speedLowerBound)
+        assertEquals("", cfg.colo)
+        assertTrue(cfg.debug)
+        assertFalse(cfg.allIP)
+        val args = cfg.commandLineArguments("r.csv")
+        assertEquals("2001:db8::1", args[args.indexOf("-ip") + 1])
+        assertTrue(args.contains("-debug"))
     }
 }

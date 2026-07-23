@@ -1,8 +1,8 @@
 package dev.viasix.core.speedtest
 
 /**
- * One CFST result row. Field names and order match macOS [SpeedTestResult] /
- * Windows speed_test CSV columns: IP, Sent, Received, Loss, Latency, Speed, Region.
+ * One CFST result row. Field names and order match macOS [SpeedTestResult]
+ * (CFST CSV: IP, Sent, Received, Loss, Latency, Speed, Region).
  */
 data class SpeedTestResult(
     val ip: String,

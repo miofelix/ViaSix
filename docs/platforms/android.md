@@ -19,7 +19,10 @@ ViaSix **全平台**产品中的 Android 端（移动网络接入语义与桌面
 | 网络接入 | VpnService 全量路由 + 用户态 TCP/DNS 转发；可选仅 HTTP 代理 |
 | 系统代理 | 不支持 |
 
-## 与 macOS 的对应关系
+## 与 macOS 的对应关系（权威对齐目标）
+
+Android 功能对齐以 **macOS** 为准。Windows 端仍在完善中，**不得**作为 Android 行为的参照源。
+
 
 | macOS | Android |
 | --- | --- |

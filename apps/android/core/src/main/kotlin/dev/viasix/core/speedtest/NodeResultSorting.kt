@@ -5,8 +5,7 @@ import java.net.Inet6Address
 import java.net.InetAddress
 
 /**
- * Sort keys for CFST result rows — aligned with macOS [NodeResultSortField]
- * and Windows [NodeSortKey].
+ * Sort keys for CFST result rows — aligned with macOS [NodeResultSortField].
  */
 enum class NodeSortKey {
     LATENCY,

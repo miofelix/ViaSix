@@ -7,7 +7,7 @@ package dev.viasix.core.speedtest
  * `IP,Sent,Received,Loss,Latency,Speed,Region`
  *
  * Tolerates UTF-8 BOM, blank lines, and trailing columns. Rows with fewer than
- * 6 columns or an empty IP are skipped (same contract as macOS / Windows).
+ * 6 columns or an empty IP are skipped (same contract as macOS SpeedTestResultParser).
  */
 object SpeedTestResultParser {
     fun parse(csv: String): List<SpeedTestResult> {
