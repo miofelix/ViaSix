@@ -11,7 +11,7 @@ ViaSix **全平台**产品中的 Android 端（移动网络接入语义与桌面
 | 项 | 选择 |
 | --- | --- |
 | UI | Kotlin + Jetpack Compose（Material3 + `ui/theme` 设计令牌） |
-| 导航 | 底部栏五分区，对应 macOS `AppSection`（首页 / IPv6 优选 / 连接配置 / 日志 / 设置） |
+| 导航 | 自适应五分区：手机底部栏、横屏/折叠屏导航轨、平板上下文侧栏，对应 macOS `AppSection` |
 | 投影 | `:core` JVM 库，contracts 对齐 |
 | 虚拟网卡 | `ViaSixVpnService`（`VpnService`） |
 | 代理内核 | 预编译 mihomo（assets `mihomo-arm64`，`fetch-mihomo.mjs`） |
@@ -26,7 +26,7 @@ Android 功能对齐以 **macOS** 为准。Windows 端仍在完善中，**不得
 
 | macOS | Android |
 | --- | --- |
-| 侧栏导航 | 底部 `NavigationBar` |
+| 侧栏导航 | 自适应 `NavigationBar` / `NavigationRail` / 上下文侧栏 |
 | `OverviewView` 链路卡片 | `OverviewScreen` 链路步骤 + 连接/断开 |
 | `ProxyRoutingModePicker` | 分段式代理模式；运行中 `PATCH /configs` |
 | 系统代理 + TUN 开关 | 全量隧道开关（平台语义不同） |
@@ -58,6 +58,7 @@ Android 功能对齐以 **macOS** 为准。Windows 端仍在完善中，**不得
 | 快捷设置磁贴 | `ViaSixTileService` 一键启停；与应用共用 `SessionStartGate` |
 | 配置粘贴导入 | Profiles「粘贴剪贴板」识别 mihomo/Clash YAML（不自动拉订阅 URL） |
 | 通知实时流量 | 前台 VPN 通知展示 ↑/↓ 紧凑速率与连接数 |
+| 自适应应用壳 | `<600dp` 底部栏、`600–839dp` 导航轨、`≥840dp` 带连接状态和当前 IPv6 的侧栏 |
 
 ## 验证
 

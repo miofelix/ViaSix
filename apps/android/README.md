@@ -38,7 +38,7 @@ make android-assemble
 
 ## UI 结构（对齐 macOS）
 
-底部导航对应桌面端侧栏 `AppSection`：
+自适应导航对应桌面端侧栏 `AppSection`：手机使用底部栏，横屏/折叠屏使用导航轨，平板和桌面窗口使用带连接上下文的侧栏。
 
 | 分区 | 说明 |
 | --- | --- |
@@ -75,6 +75,7 @@ make android-assemble
 | 快捷设置磁贴启停 | ✓（Clash/NekoBox 风格；共用 SessionStartGate） |
 | 首页连接主控 + 通知实时速率 | ✓ |
 | 配置剪贴板 YAML 导入 | ✓（不自动拉取订阅 URL） |
+| 自适应导航壳 | ✓（底部栏 / 导航轨 / 上下文侧栏，按窗口宽度切换） |
 | native hev/tun2socks | 可选增强（当前用户态转发已覆盖典型 TCP/UDP 应用流量） |
 
 ## 契约

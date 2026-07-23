@@ -10,7 +10,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 
 /**
  * Primary navigation sections, aligned with macOS [AppSection].
- * Mobile uses a bottom bar instead of a sidebar.
+ * The adaptive Android shell presents these in a bottom bar, navigation rail,
+ * or contextual sidebar according to the available window width.
  */
 enum class AppSection(
     val title: String,
