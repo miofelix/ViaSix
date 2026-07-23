@@ -1,0 +1,27 @@
+package dev.viasix.app.tun
+
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.io.File
+
+class TcpUpstreamSurfaceTest {
+    @Test
+    fun clientPayloadsUseBoundedQueueAndDrainBeforeRemoteFin() {
+        val engine =
+            resolve(
+                "src/main/java/dev/viasix/app/tun/Tun2SocksEngine.kt",
+                "app/src/main/java/dev/viasix/app/tun/Tun2SocksEngine.kt",
+            ).readText()
+
+        assertTrue(engine.contains("session.upstream.offer(payload)"))
+        assertTrue(engine.contains("executor.execute { writeTcpUpstream(key, session, socket) }"))
+        assertTrue(engine.contains("session.upstream.complete(payload.size)"))
+        assertTrue(engine.contains("session.upstream.awaitEmpty(UPSTREAM_DRAIN_TIMEOUT_MS)"))
+        assertTrue(engine.contains("socket.shutdownOutput()"))
+        assertTrue(engine.contains("session.outputShutdown.compareAndSet(false, true)"))
+    }
+
+    private fun resolve(vararg paths: String): File =
+        paths.map { File(it) }.firstOrNull { it.isFile }
+            ?: error("file not found from cwd=${File(".").absolutePath}: ${paths.toList()}")
+}

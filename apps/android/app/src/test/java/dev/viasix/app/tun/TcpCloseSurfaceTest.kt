@@ -14,7 +14,7 @@ class TcpCloseSurfaceTest {
             ).readText()
 
         assertTrue(engine.contains("TcpSequence.consumedPayloadPrefix"))
-        assertTrue(engine.contains("session.socket?.shutdownOutput()"))
+        assertTrue(engine.contains("socket.shutdownOutput()"))
         assertTrue(engine.contains("flags = Packet.FIN or Packet.ACK"))
         assertTrue(engine.contains("sessions[key] === session"))
         assertTrue(engine.contains("session.closeState.markClientFin()"))
