@@ -1206,6 +1206,7 @@ class Tun2SocksEngine(
 
     private fun closeUdpRelay(clientRelay: UdpClientRelay) {
         udpRelays.remove(clientRelay.endpoint.key(), clientRelay)
+        clientRelay.currentRelay()?.let(udpRelayReactor::unregister)
         clientRelay.close()
     }
 

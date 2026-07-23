@@ -162,6 +162,39 @@ class UdpRelayReactorTest {
         }
     }
 
+    @Test
+    fun explicitUnregisterRemovesRelayWithoutLifecycleCallback() {
+        FakeSocks5UdpServer(expectedAssociations = 1).use { proxy ->
+            val relay = proxy.openRelay()
+            val reactor = UdpRelayReactor(controlProbeIntervalMs = 25L)
+            val closeCount = AtomicInteger(0)
+            try {
+                reactor.start()
+                assertTrue(
+                    reactor.register(
+                        relay = relay,
+                        onDatagram = {},
+                        onClosed = { closeCount.incrementAndGet() },
+                    ),
+                )
+                assertEquals(1, reactor.registrationCount)
+
+                assertTrue(reactor.unregister(relay))
+
+                assertEquals(0, reactor.registrationCount)
+                assertFalse(relay.isOpen)
+                assertEquals(0, closeCount.get())
+                assertEquals(
+                    UdpRelayReactor.SendResult.UNAVAILABLE,
+                    reactor.send(relay, InetAddress.getByName("192.0.2.1"), 443, byteArrayOf(1)),
+                )
+            } finally {
+                reactor.close()
+                relay.close()
+            }
+        }
+    }
+
     private class FakeSocks5UdpServer(
         expectedAssociations: Int,
     ) : AutoCloseable {

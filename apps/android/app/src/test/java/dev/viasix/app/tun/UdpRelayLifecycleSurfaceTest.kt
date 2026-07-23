@@ -33,6 +33,7 @@ class UdpRelayLifecycleSurfaceTest {
         assertTrue(engine.contains("private val udpRelayReactor = UdpRelayReactor()"))
         assertTrue(engine.contains("udpRelayReactor.register("))
         assertTrue(engine.contains("udpRelayReactor.send("))
+        assertTrue(engine.contains("clientRelay.currentRelay()?.let(udpRelayReactor::unregister)"))
         assertFalse(engine.contains("startUdpReceiver"))
         assertFalse(engine.contains("relay.receive(200)"))
         assertFalse(engine.contains("relay.send("))

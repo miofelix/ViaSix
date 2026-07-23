@@ -65,6 +65,7 @@
 
 ### 修复
 
+- 修复 Android 主动淘汰、替换或关闭 SOCKS5 UDP relay 时只关闭 socket/channel，却没有从共享 `UdpRelayReactor` 的 registrations map 显式注销的问题；关闭 channel 后其 SelectionKey 可能直接从 selector 消失，旧 registration 因而一直残留到 VPN 整体停止并随 relay 代际持续累积。reactor 现提供竞态安全的 unregister：抑制主动关闭回调、取消已有 key、同步移除 map/清空发送队列并关闭 relay，尚在 pending 注册或与故障回收并发时也保持幂等。
 - 修复 Android TCP 重传队列在报文真正进入 TUN 出站队列前就消耗 attempt，短暂背压导致 enqueue 失败时，未发送的重传仍会进入指数退避并可能累计耗尽、错误复位健康会话的问题；每次到期或快速重传现携带内部保留 ID，入队失败会仅在同一最老段与 attempt 尚未被 ACK/并发更新时原子回滚计数，并把截止时间恢复为立即可重试，成功入队后才保留本次 attempt。
 - 修复 Android TCP 把所有“累计 ACK 未推进”的空段都计为重复 ACK，连续的合法客户端窗口更新也可能累计到三次并误触发快速重传的问题；重传队列现以 ACK 号与展开后的 advertised window 共同维护上一输入基线，窗口变化会清零重复计数，空闲期没有保留段时也会刷新基线，只有两者都不变的第三个真正重复 ACK 才重传最老未确认段。
 - 修复 Android TCP 对客户端接收窗口的更新只校验累计 ACK、不比较携带窗口的段序号，网络重排后的旧重复 ACK 可用过期值覆盖较新的窗口，甚至把已重新打开的下行发送窗口写回 0 而长期停读远端的问题；`TcpSendWindow` 现维护 RFC 9293 的 `SND.WL1/SND.WL2`，旧段仍可推进合法累计 ACK，但只有更新的 `SEG.SEQ`，或相同序号下不更旧的 `SEG.ACK`，才能替换 advertised window，比较同样支持 32 位回绕。

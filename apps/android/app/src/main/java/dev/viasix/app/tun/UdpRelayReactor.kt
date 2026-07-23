@@ -87,6 +87,9 @@ internal class UdpRelayReactor(
     private val lifecycleLock = Any()
     private var reactorThread: Thread? = null
 
+    internal val registrationCount: Int
+        get() = registrations.size
+
     fun start() {
         synchronized(lifecycleLock) {
             if (closed.get()) return
@@ -135,6 +138,24 @@ internal class UdpRelayReactor(
         }
         scheduleWrite(registration)
         return SendResult.QUEUED
+    }
+
+    fun unregister(relay: Socks5UdpRelay): Boolean {
+        val registration = registrations[relay]
+        if (registration != null) {
+            registration.closedNotified.set(true)
+            try {
+                registration.key?.cancel()
+            } catch (_: Exception) {
+            }
+            retire(registration)
+        }
+        relay.close()
+        try {
+            selector.wakeup()
+        } catch (_: Exception) {
+        }
+        return registration != null
     }
 
     private fun runLoop() {
