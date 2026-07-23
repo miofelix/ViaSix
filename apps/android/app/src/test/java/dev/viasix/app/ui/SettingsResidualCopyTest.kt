@@ -23,8 +23,8 @@ class SettingsResidualCopyTest {
             text.contains("TCP/UDP"),
         )
         assertTrue(
-            "Settings should expose component install action",
-            text.contains("检查并安装组件"),
+            "Settings should expose component inspection and repair actions",
+            text.contains("重新检查组件") && text.contains("修复"),
         )
         assertTrue(
             "Version should come from BuildConfig, not a hard-coded string",

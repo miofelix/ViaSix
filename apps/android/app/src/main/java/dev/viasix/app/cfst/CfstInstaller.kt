@@ -4,6 +4,8 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import dev.viasix.app.runtime.RuntimeBinaryInstall
+import dev.viasix.app.runtime.RuntimeComponentCondition
+import dev.viasix.app.runtime.RuntimeComponentInfo
 import java.io.File
 import java.io.IOException
 
@@ -24,18 +26,15 @@ object CfstInstaller {
     data class InstallResult(
         val binary: File,
         val ipv6List: File,
-        val abiSupported: Boolean,
     )
 
-    data class Status(
-        val binary: File?,
-        val ipv6List: File?,
-        val ready: Boolean,
-        val abiSupported: Boolean,
-        val message: String,
-    )
-
-    fun installIfNeeded(context: Context): InstallResult {
+    fun installIfNeeded(
+        context: Context,
+        force: Boolean = false,
+    ): InstallResult {
+        if (!isArm64()) {
+            throw IOException("设备 ABI 非 arm64，当前 APK 仅包含 arm64 CFST")
+        }
         val destDir = File(context.filesDir, "cfst")
         if (!destDir.exists() && !destDir.mkdirs()) {
             throw IOException("Cannot create cfst dir: ${destDir.absolutePath}")
@@ -43,60 +42,85 @@ object CfstInstaller {
 
         val binary = File(destDir, BINARY_NAME)
         val ipv6List = File(destDir, IPV6_LIST_NAME)
-        val abiSupported = isArm64()
-
         RuntimeBinaryInstall.installAssetBinary(
             context = context,
             assetPath = ASSET_BINARY_ARM64,
             dest = binary,
             missingHint =
                 "CFST asset missing ($ASSET_BINARY_ARM64). Rebuild after: node apps/android/scripts/fetch-cfst.mjs",
+            force = force,
         )
         RuntimeBinaryInstall.installAssetFile(
             context = context,
             assetPath = ASSET_IPV6_LIST,
             dest = ipv6List,
             missingHint = "CFST ipv6 list asset missing ($ASSET_IPV6_LIST)",
+            force = force,
         )
 
         return InstallResult(
             binary = binary,
             ipv6List = ipv6List,
-            abiSupported = abiSupported,
         )
     }
 
-    fun ensureInstalled(context: Context): Status {
-        val abi = isArm64()
-        return try {
-            val result = installIfNeeded(context)
-            val ready =
-                RuntimeBinaryInstall.isPresent(result.binary) &&
-                    RuntimeBinaryInstall.isPresent(result.ipv6List)
-            Status(
-                binary = result.binary,
-                ipv6List = result.ipv6List,
-                ready = ready,
-                abiSupported = abi,
-                message =
-                    when {
-                        !abi -> "设备 ABI 非 arm64，当前仅打包 arm64 CFST"
-                        ready ->
-                            "已就绪（${result.binary.length() / 1024} KB，列表 ${result.ipv6List.length()} B）"
-                        else -> "安装后文件不完整"
-                    },
-            )
-        } catch (error: Exception) {
-            Log.w(TAG, "ensureInstalled: ${error.message}")
-            Status(
-                binary = null,
-                ipv6List = null,
-                ready = false,
-                abiSupported = abi,
-                message = error.message ?: "CFST 安装失败",
+    fun inspectInstalled(context: Context): RuntimeComponentInfo {
+        val destDir = File(context.filesDir, "cfst")
+        val binary = File(destDir, BINARY_NAME)
+        val ipv6List = File(destDir, IPV6_LIST_NAME)
+        if (!isArm64()) {
+            return RuntimeComponentInfo(
+                condition = RuntimeComponentCondition.UNSUPPORTED,
+                detail = "设备 ABI 非 arm64；此 APK 未打包对应架构的 CFST",
+                path = binary.absolutePath,
             )
         }
+        val inspection = RuntimeBinaryInstall.inspectElfBinary(binary)
+        val listReady = RuntimeBinaryInstall.isPresent(ipv6List)
+        val condition =
+            when {
+                inspection.condition == RuntimeBinaryInstall.BinaryCondition.MISSING ||
+                    inspection.condition == RuntimeBinaryInstall.BinaryCondition.EMPTY ||
+                    !ipv6List.exists() -> RuntimeComponentCondition.MISSING
+                !inspection.ready || !listReady -> RuntimeComponentCondition.INVALID
+                else -> RuntimeComponentCondition.READY
+            }
+        val detail =
+            if (inspection.ready && listReady) {
+                "AArch64 ELF · ${inspection.sizeBytes / 1024} KB · 列表 ${ipv6List.length()} B"
+            } else {
+                buildList {
+                    if (!inspection.ready) add(binaryDetail(inspection))
+                    if (!listReady && ipv6List.exists()) {
+                        add("IPv6 列表为空；需要重新安装")
+                    } else if (!listReady) {
+                        add("缺少 IPv6 列表；需要安装")
+                    }
+                }.joinToString("；")
+            }
+        return RuntimeComponentInfo(
+            condition = condition,
+            detail = detail,
+            path = binary.absolutePath,
+            sizeBytes = inspection.sizeBytes.takeIf { it > 0L },
+        )
     }
+
+    fun repair(context: Context): RuntimeComponentInfo =
+        if (!isArm64()) {
+            inspectInstalled(context)
+        } else {
+            try {
+                installIfNeeded(context, force = true)
+                inspectInstalled(context)
+            } catch (error: Exception) {
+                Log.w(TAG, "repair: ${error.message}")
+                RuntimeComponentInfo(
+                    condition = RuntimeComponentCondition.ERROR,
+                    detail = error.message ?: "CFST 修复失败",
+                )
+            }
+        }
 
     fun isArm64(): Boolean {
         val abis = Build.SUPPORTED_ABIS
@@ -108,4 +132,18 @@ object CfstInstaller {
         if (!dir.exists()) dir.mkdirs()
         return dir
     }
+
+    private fun binaryDetail(inspection: RuntimeBinaryInstall.BinaryInspection): String =
+        when (inspection.condition) {
+            RuntimeBinaryInstall.BinaryCondition.MISSING -> "CFST 未安装"
+            RuntimeBinaryInstall.BinaryCondition.EMPTY -> "CFST 文件为空；需要重新安装"
+            RuntimeBinaryInstall.BinaryCondition.INVALID_FORMAT ->
+                "CFST 不是完整的 64-bit little-endian ELF"
+            RuntimeBinaryInstall.BinaryCondition.INCOMPATIBLE_ARCHITECTURE ->
+                "CFST 架构不兼容（machine=${inspection.machine ?: "?"}，需要 AArch64）"
+            RuntimeBinaryInstall.BinaryCondition.NOT_EXECUTABLE ->
+                "CFST 缺少执行权限；需要修复"
+            RuntimeBinaryInstall.BinaryCondition.READY ->
+                "AArch64 ELF · ${inspection.sizeBytes / 1024} KB"
+        }
 }

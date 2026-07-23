@@ -29,6 +29,9 @@ import dev.viasix.app.mihomo.TrafficSnapshot
 import dev.viasix.app.net.ExitIPDetectionMode
 import dev.viasix.app.net.ExitIPDetector
 import dev.viasix.app.prefs.SessionPrefsStore
+import dev.viasix.app.runtime.RuntimeComponentCondition
+import dev.viasix.app.runtime.RuntimeComponentId
+import dev.viasix.app.runtime.RuntimeComponentInfo
 import dev.viasix.app.session.ConnectionPhase
 import dev.viasix.app.session.NotificationPermissionFlow
 import dev.viasix.app.session.NotificationPermissionState
@@ -657,10 +660,30 @@ class MainActivity : ComponentActivity() {
             }
 
             fun applySpeedOutcome(result: CfstRunOutcome, installOk: Boolean, nodeTest: Boolean) {
+                val componentInfo =
+                    RuntimeComponentInfo(
+                        condition =
+                            if (installOk) {
+                                RuntimeComponentCondition.READY
+                            } else {
+                                RuntimeComponentCondition.ERROR
+                            },
+                        detail =
+                            if (installOk) {
+                                "AArch64 ELF 已安装并通过启动检查"
+                            } else {
+                                (result as? CfstRunOutcome.Failed)?.message ?: "CFST 安装失败"
+                            },
+                    )
                 when (result) {
                     is CfstRunOutcome.Success -> {
                         update {
                             it.copy(
+                                runtimeComponents =
+                                    it.runtimeComponents.withInfo(
+                                        RuntimeComponentId.CFST,
+                                        componentInfo,
+                                    ),
                                 speedTest =
                                     it.speedTest.copy(
                                         isRunning = false,
@@ -688,6 +711,11 @@ class MainActivity : ComponentActivity() {
                     is CfstRunOutcome.Cancelled -> {
                         update {
                             it.copy(
+                                runtimeComponents =
+                                    it.runtimeComponents.withInfo(
+                                        RuntimeComponentId.CFST,
+                                        componentInfo,
+                                    ),
                                 speedTest =
                                     it.speedTest.copy(
                                         isRunning = false,
@@ -701,6 +729,11 @@ class MainActivity : ComponentActivity() {
                     is CfstRunOutcome.Failed -> {
                         update {
                             it.copy(
+                                runtimeComponents =
+                                    it.runtimeComponents.withInfo(
+                                        RuntimeComponentId.CFST,
+                                        componentInfo,
+                                    ),
                                 speedTest =
                                     it.speedTest.copy(
                                         isRunning = false,
@@ -837,37 +870,120 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            fun refreshCfstStatus() {
-                // Installs/probes both sidecars (mihomo + CFST) for Settings「检查并安装组件」.
+            fun inspectRuntimeComponents(announce: Boolean = true) {
+                if (state.runtimeComponents.busy) return
+                logOnly {
+                    it.copy(
+                        runtimeComponents = it.runtimeComponents.copy(isInspecting = true),
+                    )
+                }
                 scope.launch {
-                    val (mihomoStatus, cfstStatus) =
+                    val (mihomoInfo, cfstInfo) =
                         withContext(Dispatchers.IO) {
-                            MihomoInstaller.ensureInstalled(this@MainActivity) to
-                                CfstInstaller.ensureInstalled(this@MainActivity)
+                            MihomoInstaller.inspectInstalled(this@MainActivity) to
+                                CfstInstaller.inspectInstalled(this@MainActivity)
                         }
-                    val ready = cfstStatus.ready
-                    update {
-                        it.copy(
-                            speedTest =
-                                it.speedTest.copy(
-                                    binaryReady = ready,
-                                    message = cfstStatus.message,
-                                ),
-                        )
-                            .appendLog(
-                                "mihomo：${mihomoStatus.message}",
-                                if (mihomoStatus.ready) LogLevel.Success else LogLevel.Error,
-                                LogSource.System,
-                                asNotice = !mihomoStatus.ready,
+                    logOnly { current ->
+                        var next =
+                            current.copy(
+                                runtimeComponents =
+                                    current.runtimeComponents.copy(
+                                        mihomo = mihomoInfo,
+                                        cfst = cfstInfo,
+                                        isInspecting = false,
+                                    ),
+                                speedTest =
+                                    current.speedTest.copy(
+                                        binaryReady = cfstInfo.ready,
+                                        message = cfstInfo.detail,
+                                    ),
                             )
-                            .appendLog(
-                                "CFST：${cfstStatus.message}",
-                                if (cfstStatus.ready) LogLevel.Success else LogLevel.Error,
-                                LogSource.System,
-                                asNotice = !cfstStatus.ready,
-                            )
+                        if (announce) {
+                            next =
+                                next.appendLog(
+                                    "组件检查完成：mihomo ${mihomoInfo.condition.label}，" +
+                                        "CFST ${cfstInfo.condition.label}",
+                                    if (mihomoInfo.ready && cfstInfo.ready) {
+                                        LogLevel.Success
+                                    } else {
+                                        LogLevel.Warning
+                                    },
+                                    LogSource.System,
+                                )
+                        }
+                        next
                     }
                 }
+            }
+
+            fun repairRuntimeComponent(component: RuntimeComponentId) {
+                if (state.runtimeComponents.busy) return
+                val blocked =
+                    when (component) {
+                        RuntimeComponentId.MIHOMO ->
+                            state.connectionPhase.isActiveOrTransitioning
+                        RuntimeComponentId.CFST -> state.speedTest.isRunning
+                    }
+                if (blocked) {
+                    update {
+                        it.appendLog(
+                            when (component) {
+                                RuntimeComponentId.MIHOMO -> "VPN 会话运行时不能替换 mihomo，请先断开"
+                                RuntimeComponentId.CFST -> "测速运行时不能替换 CFST，请先停止测速"
+                            },
+                            LogLevel.Warning,
+                            LogSource.System,
+                            asNotice = true,
+                        )
+                    }
+                    return
+                }
+
+                logOnly {
+                    it.copy(
+                        runtimeComponents =
+                            it.runtimeComponents.copy(repairing = component),
+                    )
+                }
+                scope.launch {
+                    val info =
+                        withContext(Dispatchers.IO) {
+                            when (component) {
+                                RuntimeComponentId.MIHOMO ->
+                                    MihomoInstaller.repair(this@MainActivity)
+                                RuntimeComponentId.CFST -> CfstInstaller.repair(this@MainActivity)
+                            }
+                        }
+                    logOnly { current ->
+                        val components =
+                            current.runtimeComponents
+                                .withInfo(component, info)
+                                .copy(repairing = null)
+                        val next =
+                            current.copy(
+                                runtimeComponents = components,
+                                speedTest =
+                                    if (component == RuntimeComponentId.CFST) {
+                                        current.speedTest.copy(
+                                            binaryReady = info.ready,
+                                            message = info.detail,
+                                        )
+                                    } else {
+                                        current.speedTest
+                                    },
+                            )
+                        next.appendLog(
+                            "${component.label}：${info.detail}",
+                            if (info.ready) LogLevel.Success else LogLevel.Error,
+                            LogSource.System,
+                            asNotice = !info.ready,
+                        )
+                    }
+                }
+            }
+
+            LaunchedEffect(Unit) {
+                inspectRuntimeComponents(announce = false)
             }
 
             fun detectExitIp() {
@@ -1093,7 +1209,8 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                 },
-                onRefreshCfstStatus = ::refreshCfstStatus,
+                onInspectRuntimeComponents = { inspectRuntimeComponents(announce = true) },
+                onRepairRuntimeComponent = ::repairRuntimeComponent,
                 onManageNotificationPermission = ::manageNotificationPermission,
                 onRoutingModeChange = ::patchRoutingMode,
                 onFullTunnelChange = { full ->
@@ -1138,6 +1255,7 @@ class MainActivity : ComponentActivity() {
                                     currentNotificationPermissionState(
                                         wasRequested = resetPrefs.notificationPermissionRequested,
                                     ),
+                                runtimeComponents = state.runtimeComponents,
                                 runtime = currentRuntime.toUiSnapshot(),
                                 connectionPhase =
                                     ConnectionPhase.restore(currentRuntime.running),

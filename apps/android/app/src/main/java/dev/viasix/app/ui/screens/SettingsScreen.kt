@@ -34,6 +34,9 @@ import androidx.compose.ui.unit.dp
 import dev.viasix.app.BuildConfig
 import dev.viasix.app.net.ExitIPDetectionMode
 import dev.viasix.app.net.ExitIPDetector
+import dev.viasix.app.runtime.RuntimeComponentCondition
+import dev.viasix.app.runtime.RuntimeComponentId
+import dev.viasix.app.runtime.RuntimeComponentInfo
 import dev.viasix.app.state.SessionUiState
 import dev.viasix.app.ui.AppSection
 import dev.viasix.app.ui.displayName
@@ -54,7 +57,8 @@ fun SettingsScreen(
     onExitIpEndpointChange: (String) -> Unit,
     onDetectExitIp: () -> Unit,
     onClearSessionData: () -> Unit,
-    onRefreshCfstStatus: () -> Unit = {},
+    onInspectRuntimeComponents: () -> Unit = {},
+    onRepairRuntimeComponent: (RuntimeComponentId) -> Unit = {},
     onManageNotificationPermission: () -> Unit = {},
 ) {
     val colors = LocalViaSixColors.current
@@ -235,26 +239,69 @@ fun SettingsScreen(
             }
 
             SurfaceCard {
+                val componentState = state.runtimeComponents
+                val mihomoInfo =
+                    if (state.runtime.running) {
+                        componentState.mihomo.copy(
+                            condition = RuntimeComponentCondition.READY,
+                            detail =
+                                "运行中" +
+                                    (state.runtime.mihomoVersion?.let { " · $it" } ?: ""),
+                        )
+                    } else {
+                        componentState.mihomo
+                    }
+                val cfstInfo =
+                    if (state.speedTest.binaryReady &&
+                        componentState.cfst.condition != RuntimeComponentCondition.INVALID
+                    ) {
+                        componentState.cfst.copy(
+                            condition = RuntimeComponentCondition.READY,
+                            detail = state.speedTest.message.ifBlank { componentState.cfst.detail },
+                        )
+                    } else {
+                        componentState.cfst
+                    }
                 CardHeader(title = "运行组件", icon = Icons.Outlined.Settings, tone = AppTone.Neutral)
                 HorizontalDivider(color = colors.surfaceBorder)
                 CompactInfoRow(
                     "内核 mihomo",
-                    state.runtime.mihomoVersion
-                        ?: if (state.runtime.running) {
-                            "运行中"
-                        } else {
-                            "未连接时点下方检查安装"
-                        },
+                    runtimeComponentStatusLabel(
+                        mihomoInfo,
+                        checking = componentState.isInspecting,
+                        repairing = componentState.repairing == RuntimeComponentId.MIHOMO,
+                    ),
+                )
+                Text(
+                    mihomoInfo.detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier =
+                        Modifier.padding(
+                            start = VisualStyle.spacing16,
+                            end = VisualStyle.spacing16,
+                            bottom = VisualStyle.spacing8,
+                        ),
                 )
                 HorizontalDivider(color = colors.surfaceBorder, modifier = Modifier.padding(start = 40.dp))
                 CompactInfoRow(
                     "CFST 测速",
-                    when {
-                        state.speedTest.isRunning -> "测速运行中"
-                        state.speedTest.binaryReady -> state.speedTest.message.ifBlank { "已就绪" }
-                        else ->
-                            state.speedTest.message.ifBlank { "未安装 — 点下方检查安装" }
-                    },
+                    runtimeComponentStatusLabel(
+                        cfstInfo,
+                        checking = componentState.isInspecting,
+                        repairing = componentState.repairing == RuntimeComponentId.CFST,
+                    ),
+                )
+                Text(
+                    if (state.speedTest.isRunning) "测速运行中" else cfstInfo.detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier =
+                        Modifier.padding(
+                            start = VisualStyle.spacing16,
+                            end = VisualStyle.spacing16,
+                            bottom = VisualStyle.spacing8,
+                        ),
                 )
                 HorizontalDivider(color = colors.surfaceBorder, modifier = Modifier.padding(start = 40.dp))
                 CompactInfoRow("混合端口", "127.0.0.1:${state.runtime.mixedPort}")
@@ -289,17 +336,58 @@ fun SettingsScreen(
                     verticalArrangement = Arrangement.spacedBy(VisualStyle.spacing8),
                 ) {
                     OutlinedButton(
-                        onClick = onRefreshCfstStatus,
-                        enabled = !state.speedTest.isRunning,
+                        onClick = onInspectRuntimeComponents,
+                        enabled = !componentState.busy,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text("检查并安装组件")
+                        Text(if (componentState.isInspecting) "正在检查…" else "重新检查组件")
+                    }
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(VisualStyle.spacing8),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        FilledTonalButton(
+                            onClick = {
+                                onRepairRuntimeComponent(RuntimeComponentId.MIHOMO)
+                            },
+                            enabled =
+                                !componentState.busy &&
+                                    !state.connectionPhase.isActiveOrTransitioning &&
+                                    mihomoInfo.condition != RuntimeComponentCondition.UNSUPPORTED,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(
+                                runtimeComponentRepairLabel(
+                                    RuntimeComponentId.MIHOMO,
+                                    mihomoInfo,
+                                    componentState.repairing,
+                                ),
+                            )
+                        }
+                        FilledTonalButton(
+                            onClick = {
+                                onRepairRuntimeComponent(RuntimeComponentId.CFST)
+                            },
+                            enabled =
+                                !componentState.busy &&
+                                    !state.speedTest.isRunning &&
+                                    cfstInfo.condition != RuntimeComponentCondition.UNSUPPORTED,
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(
+                                runtimeComponentRepairLabel(
+                                    RuntimeComponentId.CFST,
+                                    cfstInfo,
+                                    componentState.repairing,
+                                ),
+                            )
+                        }
                     }
                     Text(
                         text =
-                            "从 APK assets 解压 mihomo / CFST 到应用私有目录（仅 arm64）。" +
-                                "若提示缺失，需用带组件的 APK 重装（构建前 fetch-mihomo / fetch-cfst）。" +
-                                "不会清除会话偏好或 VPN 权限。",
+                            "检查会区分缺失、损坏、错误架构和执行权限；修复会从 APK assets " +
+                                "原子替换对应 AArch64 ELF。mihomo 仅可在断开后修复，" +
+                                "CFST 仅可在测速停止后修复。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -349,4 +437,30 @@ fun SettingsScreen(
             }
         }
     }
+}
+
+private fun runtimeComponentStatusLabel(
+    info: RuntimeComponentInfo,
+    checking: Boolean,
+    repairing: Boolean,
+): String =
+    when {
+        repairing -> "修复中"
+        checking -> "检查中"
+        else -> info.condition.label
+    }
+
+private fun runtimeComponentRepairLabel(
+    component: RuntimeComponentId,
+    info: RuntimeComponentInfo,
+    repairing: RuntimeComponentId?,
+): String {
+    if (repairing == component) return "修复中…"
+    val action =
+        when (info.condition) {
+            RuntimeComponentCondition.READY -> "重装"
+            RuntimeComponentCondition.MISSING -> "安装"
+            else -> "修复"
+        }
+    return "$action ${if (component == RuntimeComponentId.MIHOMO) "mihomo" else "CFST"}"
 }

@@ -42,6 +42,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.viasix.app.net.ExitIPDetectionMode
+import dev.viasix.app.runtime.RuntimeComponentId
 import dev.viasix.app.session.ConnectionPhase
 import dev.viasix.app.state.SessionUiState
 import dev.viasix.app.ui.screens.LogsScreen
@@ -81,7 +82,8 @@ fun ViaSixApp(
     onStopSpeedTest: () -> Unit = {},
     onStartCurrentNodeTest: () -> Unit = {},
     onSpeedSortChange: (NodeSortKey) -> Unit = {},
-    onRefreshCfstStatus: () -> Unit = {},
+    onInspectRuntimeComponents: () -> Unit = {},
+    onRepairRuntimeComponent: (RuntimeComponentId) -> Unit = {},
     onManageNotificationPermission: () -> Unit = {},
     onRoutingModeChange: (RoutingMode) -> Unit,
     onFullTunnelChange: (Boolean) -> Unit,
@@ -223,7 +225,8 @@ fun ViaSixApp(
                                     onExitIpEndpointChange = onExitIpEndpointChange,
                                     onDetectExitIp = onDetectExitIp,
                                     onClearSessionData = onClearSessionData,
-                                    onRefreshCfstStatus = onRefreshCfstStatus,
+                                    onInspectRuntimeComponents = onInspectRuntimeComponents,
+                                    onRepairRuntimeComponent = onRepairRuntimeComponent,
                                     onManageNotificationPermission = onManageNotificationPermission,
                                 )
                         }
