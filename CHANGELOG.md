@@ -65,6 +65,7 @@
 
 ### 修复
 
+- 修复 Android TCP 握手只校验 ACK 值，错误客户端序号、携带 SYN 的 ACK 也能提前放行下行 reader，且远端 socket 尚未建立时伪造 `ACK=0` 可能错误拒绝会话的问题；握手门现同时要求 socket 已发布、`SEQ=clientNextSeq`、`ACK=serverSeq`、ACK 标志存在且无 SYN/RST，并以 pending/completed/cancelled 原子三态保证取消后不可复活，同时仍允许第三次握手携带合法 payload/FIN。
 - 修复 Android 用户态 TCP 在会话不存在或达到会话上限时静默丢弃 SYN、ACK 与数据段，应用只能等待自身超时的问题；CLOSED 状态现按 RFC 9293 生成无状态 RST，带 ACK 的输入使用 `SEQ=SEG.ACK`，其余输入确认包含 SYN/FIN 的完整段长度，同时保持 32 位序号回绕安全且绝不响应 RST。
 - 修复 Android `Tun2SocksEngine.stop()` 只中断线程却不等待退出，且 SOCKS CONNECT、UDP ASSOCIATE、直连 DNS 等尚未发布的阻塞 socket 无法由会话表关闭，停止后可能继续存活到 5–10 秒网络超时的问题；建立中资源现进入并发安全的关闭注册表，停止会先关闭 TUN fd 与全部 in-flight I/O，再有界等待 reader、writer、维护线程和 worker pool 收敛，并禁止已停止实例被误重启。
 - 修复 Android TCP 下行重传耗尽或服务端半关闭超时后只静默删除会话，客户端仍会等待到自身超时的问题；异常收敛现主动发送 `RST|ACK`，并使用客户端最新确认的服务端序号而非固定 `SEQ=0`，避免现代 TCP 栈因复位序号不在接收窗口而忽略通知。

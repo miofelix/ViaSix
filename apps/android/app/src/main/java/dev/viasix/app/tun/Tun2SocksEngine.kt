@@ -340,10 +340,14 @@ class Tun2SocksEngine(
 
         if (!session.handshake.isComplete && tcp.flags and Packet.ACK != 0) {
             if (
-                session.handshake.acknowledge(
-                    acknowledgement = tcp.ack,
-                    expected = session.serverSeq,
-                ) &&
+                session.socket != null &&
+                    session.handshake.acknowledge(
+                        sequence = tcp.seq,
+                        expectedSequence = session.clientNextSeq,
+                        acknowledgement = tcp.ack,
+                        expectedAcknowledgement = session.serverSeq,
+                        flags = tcp.flags,
+                    ) &&
                     !ensureTcpDownstreamReader(key, session)
             ) {
                 Log.w(TAG, "TCP downstream reader limit reached for $key")
