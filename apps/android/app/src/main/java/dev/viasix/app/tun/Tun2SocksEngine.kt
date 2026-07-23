@@ -196,7 +196,13 @@ class Tun2SocksEngine(
         val key = key(clientIp, tcp.sourcePort, remoteIp, tcp.destPort)
 
         if (tcp.flags and Packet.SYN != 0 && tcp.flags and Packet.ACK == 0) {
-            if (sessions.containsKey(key)) return
+            val existing = sessions[key]
+            if (existing != null) {
+                if (!existing.handshake.isComplete && existing.socket != null) {
+                    enqueueSynAck(existing)
+                }
+                return
+            }
             if (activeSessionCount.get() >= maxSessions) {
                 Log.w(TAG, "session limit $maxSessions reached; drop SYN")
                 return
@@ -223,13 +229,14 @@ class Tun2SocksEngine(
             return
         }
 
-        if (!session.handshakeComplete && tcp.flags and Packet.ACK != 0) {
-            if (tcp.ack == session.serverSeq) {
-                session.handshakeComplete = true
-            }
+        if (!session.handshake.isComplete && tcp.flags and Packet.ACK != 0) {
+            session.handshake.acknowledge(
+                acknowledgement = tcp.ack,
+                expected = session.serverSeq,
+            )
         }
 
-        if (tcp.payloadLength > 0 && session.handshakeComplete && session.socket != null) {
+        if (tcp.payloadLength > 0 && session.handshake.isComplete && session.socket != null) {
             val skip =
                 TcpSequence.consumedPayloadPrefix(
                     segmentStart = tcp.seq,
@@ -309,28 +316,22 @@ class Tun2SocksEngine(
                 return
             }
             session.socket = socket
-            session.serverSeq = Random.nextInt().toLong() and 0xffffffffL
+            session.serverIsn = Random.nextInt().toLong() and 0xffffffffL
+            session.serverSeq = TcpSequence.advance(session.serverIsn, syn = true)
             session.clientNextSeq = TcpSequence.advance(session.clientIsn, syn = true)
 
-            val synAckQueued =
-                enqueuePacket(
-                    buildTcpPacket(
-                        session = session,
-                        seq = session.serverSeq,
-                        ack = session.clientNextSeq,
-                        flags = Packet.SYN or Packet.ACK,
-                        payload = ByteArray(0),
-                    ),
-                    lossless = true,
-                )
+            val synAckQueued = enqueueSynAck(session)
             if (!synAckQueued) {
                 removeSession(key, session)
                 return
             }
-            session.serverSeq = TcpSequence.advance(session.serverSeq, syn = true)
-            session.handshakeComplete = true
 
             executor.execute {
+                if (!session.handshake.await(HANDSHAKE_TIMEOUT_MS)) {
+                    Log.w(TAG, "TCP handshake timed out for $key")
+                    removeSession(key, session)
+                    return@execute
+                }
                 val buf = ByteArray(16 * 1024)
                 try {
                     val input = socket.getInputStream()
@@ -386,7 +387,7 @@ class Tun2SocksEngine(
                 buildTcpPacket(
                     session = session,
                     seq = 0,
-                    ack = session.clientIsn + 1,
+                    ack = TcpSequence.advance(session.clientIsn, syn = true),
                     flags = Packet.RST or Packet.ACK,
                     payload = ByteArray(0),
                 ),
@@ -426,6 +427,18 @@ class Tun2SocksEngine(
                 payload = payload,
             )
         }
+
+    private fun enqueueSynAck(session: TcpSession): Boolean =
+        enqueuePacket(
+            buildTcpPacket(
+                session = session,
+                seq = session.serverIsn,
+                ack = session.clientNextSeq,
+                flags = Packet.SYN or Packet.ACK,
+                payload = ByteArray(0),
+            ),
+            lossless = true,
+        )
 
     // endregion
 
@@ -730,13 +743,15 @@ class Tun2SocksEngine(
         val ipv6: Boolean = false,
     ) {
         @Volatile var socket: Socket? = null
+        @Volatile var serverIsn: Long = 0
         @Volatile var serverSeq: Long = 0
         @Volatile var clientNextSeq: Long = 0
-        @Volatile var handshakeComplete: Boolean = false
         @Volatile var clientFinReceived: Boolean = false
         @Volatile var serverFinSent: Boolean = false
+        val handshake = TcpHandshakeGate()
 
         fun close() {
+            handshake.cancel()
             try {
                 socket?.close()
             } catch (_: Exception) {
@@ -780,5 +795,6 @@ class Tun2SocksEngine(
         private const val TAG = "Tun2SocksEngine"
         private const val PENDING_CAP = 8
         private const val LOSSLESS_ENQUEUE_TIMEOUT_MS = 1_000L
+        private const val HANDSHAKE_TIMEOUT_MS = 10_000L
     }
 }

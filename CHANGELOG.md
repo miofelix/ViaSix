@@ -65,6 +65,7 @@
 
 ### 修复
 
+- 修复 Android TCP 会话在发出 SYN-ACK 后未等待客户端 ACK 就提前完成握手，以及重复 SYN 无法恢复的问题；远端下行现等待有效 ACK，握手超时自动清理，并稳定重发同一 SYN-ACK。
 - 修复 Android TUN 出站队列在 UDP 洪峰或慢设备写入时可能淘汰 TCP 数据段的问题；TCP SYN、数据、FIN 与 RST 现使用有界无损队列并向远端读取施加背压，可丢数据报只能替换其他可丢项。
 - 修复 Android 用户态 TCP 转发把乱序段写入 SOCKS、32 位序列号回绕判断错误，以及远端 EOF 未向应用发送 FIN 导致连接悬挂的问题；客户端 FIN 现按半关闭语义处理。
 - 修复 Android 全量隧道使用平台默认非阻塞 TUN fd 时，`FileChannel.read` 可能因 `EAGAIN` 退出转发线程的问题；全量隧道现显式使用阻塞描述符。
