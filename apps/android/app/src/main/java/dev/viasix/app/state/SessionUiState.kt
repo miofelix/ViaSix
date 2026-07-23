@@ -6,6 +6,7 @@ import dev.viasix.app.net.ExitIPDetectionMode
 import dev.viasix.app.net.ExitIPInfo
 import dev.viasix.app.prefs.SessionPrefs
 import dev.viasix.app.session.ConnectionPhase
+import dev.viasix.app.session.NotificationPermissionState
 import dev.viasix.app.session.ProfileDraftGate
 import dev.viasix.core.net.Ipv6Address
 import dev.viasix.core.profile.ProfileSummary
@@ -121,6 +122,7 @@ data class SessionUiState(
     val candidateAddresses: List<String> = emptyList(),
     val routingMode: RoutingMode = RoutingMode.RULE,
     val fullTunnel: Boolean = true,
+    val notificationPermission: NotificationPermissionState = NotificationPermissionState(),
     val runtime: RuntimeSnapshot = RuntimeSnapshot(),
     /** UI connection lifecycle; reconciled with [runtime.running] each poll. */
     val connectionPhase: ConnectionPhase = ConnectionPhase.STOPPED,
@@ -161,6 +163,7 @@ data class SessionUiState(
         SessionPrefs(
             profileYaml = profileYaml,
             profileDraft = profileDraft,
+            notificationPermissionRequested = notificationPermission.wasRequested,
             selectedAddress = selectedAddress,
             routingMode = routingMode.wire,
             fullTunnel = fullTunnel,
@@ -197,6 +200,10 @@ data class SessionUiState(
             return SessionUiState(
                 profileYaml = profile,
                 profileDraft = prefs.profileDraft ?: profile,
+                notificationPermission =
+                    NotificationPermissionState(
+                        wasRequested = prefs.notificationPermissionRequested,
+                    ),
                 selectedAddress = selected,
                 candidateAddresses = candidates,
                 routingMode = RoutingMode.parse(prefs.routingMode) ?: RoutingMode.RULE,
@@ -239,6 +246,7 @@ fun SessionUiState.appendLog(
     source: LogSource = LogSource.Session,
     maxEntries: Int = 500,
     asNotice: Boolean = false,
+    noticeActionOpenSettings: Boolean = level == LogLevel.Error,
 ): SessionUiState {
     val entry =
         LogEntry(
@@ -258,7 +266,7 @@ fun SessionUiState.appendLog(
                     id = entry.id,
                     message = message,
                     style = level,
-                    actionOpenSettings = level == LogLevel.Error,
+                    actionOpenSettings = noticeActionOpenSettings,
                 )
             } else {
                 notice

@@ -3,11 +3,15 @@ package dev.viasix.app.tile
 import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import android.util.Log
 import dev.viasix.app.MainActivity
+import dev.viasix.app.session.NotificationPermissionFlow
+import dev.viasix.app.session.NotificationPermissionState
+import dev.viasix.app.session.POST_NOTIFICATIONS_PERMISSION
 import dev.viasix.app.session.VpnSessionCommands
 
 /**
@@ -34,8 +38,32 @@ class ViaSixTileService : TileService() {
             return
         }
 
-        when (val action = VpnSessionCommands.prepareStart(this, reason = "quick-settings")) {
+        val prefs = VpnSessionCommands.loadPrefs(this)
+        when (
+            val action =
+                VpnSessionCommands.prepareStart(
+                    this,
+                    prefs = prefs,
+                    reason = "quick-settings",
+                )
+        ) {
             is VpnSessionCommands.StartAction.StartService -> {
+                val notificationState =
+                    NotificationPermissionState(
+                        required = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU,
+                        granted =
+                            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                                checkSelfPermission(POST_NOTIFICATIONS_PERMISSION) ==
+                                PackageManager.PERMISSION_GRANTED,
+                        wasRequested = prefs.notificationPermissionRequested,
+                    )
+                if (
+                    NotificationPermissionFlow.beforeStart(notificationState) ==
+                    NotificationPermissionFlow.BeforeStart.REQUEST_PERMISSION
+                ) {
+                    openAppForStart()
+                    return
+                }
                 startForegroundService(action.intent)
                 qsTile?.state = Tile.STATE_ACTIVE
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -45,11 +73,7 @@ class ViaSixTileService : TileService() {
             }
             is VpnSessionCommands.StartAction.NeedsVpnConsent -> {
                 // Collapse panel and open the app to complete VPN consent + start.
-                val launch =
-                    Intent(this, MainActivity::class.java)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        .putExtra(VpnSessionCommands.EXTRA_REQUEST_START, true)
-                collapseAndLaunch(launch)
+                openAppForStart()
             }
             is VpnSessionCommands.StartAction.Blocked -> {
                 val launch =
@@ -60,6 +84,14 @@ class ViaSixTileService : TileService() {
                 collapseAndLaunch(launch)
             }
         }
+    }
+
+    private fun openAppForStart() {
+        val launch =
+            Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra(VpnSessionCommands.EXTRA_REQUEST_START, true)
+        collapseAndLaunch(launch)
     }
 
     @Suppress("DEPRECATION")

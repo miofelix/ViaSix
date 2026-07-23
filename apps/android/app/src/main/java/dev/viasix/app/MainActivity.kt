@@ -4,8 +4,12 @@ import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.VpnService
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -26,6 +30,9 @@ import dev.viasix.app.net.ExitIPDetectionMode
 import dev.viasix.app.net.ExitIPDetector
 import dev.viasix.app.prefs.SessionPrefsStore
 import dev.viasix.app.session.ConnectionPhase
+import dev.viasix.app.session.NotificationPermissionFlow
+import dev.viasix.app.session.NotificationPermissionState
+import dev.viasix.app.session.POST_NOTIFICATIONS_PERMISSION
 import dev.viasix.app.session.ProfileDraftGate
 import dev.viasix.app.session.ProfileImportText
 import dev.viasix.app.session.SessionStartGate
@@ -56,6 +63,7 @@ import org.json.JSONArray
 
 class MainActivity : ComponentActivity() {
     private var pendingStart: Intent? = null
+    private var pendingNotificationStart: Intent? = null
     private lateinit var prefsStore: SessionPrefsStore
     private val trafficSampler = TrafficSampler()
     private val cfstRunner = CfstRunner()
@@ -64,6 +72,8 @@ class MainActivity : ComponentActivity() {
     /** Wall clock when STARTING began; used for start-timeout reconcile. */
     private var startingSinceMillis: Long = 0L
     private var onVpnPermissionResult: ((granted: Boolean) -> Unit)? = null
+    private var onNotificationPermissionResult: ((granted: Boolean, pendingStart: Intent?) -> Unit)? = null
+    private var onRefreshNotificationPermission: (() -> Unit)? = null
 
     private val vpnPermission =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -79,6 +89,13 @@ class MainActivity : ComponentActivity() {
             }
             pendingStart = null
             onVpnPermissionResult?.invoke(granted)
+        }
+
+    private val notificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            val pending = pendingNotificationStart
+            pendingNotificationStart = null
+            onNotificationPermissionResult?.invoke(granted, pending)
         }
 
     private val openDocument =
@@ -100,7 +117,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefsStore = SessionPrefsStore(this)
-        val initial = SessionUiState.fromPrefs(prefsStore.load())
+        val initialPrefs = prefsStore.load()
+        val initial =
+            SessionUiState.fromPrefs(initialPrefs).copy(
+                notificationPermission =
+                    currentNotificationPermissionState(
+                        wasRequested = initialPrefs.notificationPermissionRequested,
+                    ),
+            )
 
         setContent {
             var state by remember { mutableStateOf(initial) }
@@ -133,6 +157,17 @@ class MainActivity : ComponentActivity() {
                                 asNotice = true,
                             )
                     }
+                }
+            }
+
+            onRefreshNotificationPermission = {
+                logOnly {
+                    it.copy(
+                        notificationPermission =
+                            currentNotificationPermissionState(
+                                wasRequested = it.notificationPermission.wasRequested,
+                            ),
+                    )
                 }
             }
 
@@ -284,6 +319,48 @@ class MainActivity : ComponentActivity() {
                     .putExtra(ViaSixVpnService.EXTRA_FULL_TUNNEL, state.fullTunnel)
                     .putExtra(ViaSixVpnService.EXTRA_REASON, reason)
 
+            fun continueStartVpn(intent: Intent) {
+                val prepare = VpnService.prepare(this@MainActivity)
+                if (prepare != null) {
+                    pendingStart = intent
+                    vpnPermission.launch(prepare)
+                    update {
+                        it.copy(connectionPhase = ConnectionPhase.STARTING)
+                            .appendLog("请求 VPN 权限…", LogLevel.Info, LogSource.Network)
+                    }
+                    startingSinceMillis = System.currentTimeMillis()
+                } else {
+                    trafficSampler.reset()
+                    startingSinceMillis = System.currentTimeMillis()
+                    startForegroundService(intent)
+                    update {
+                        it.copy(connectionPhase = ConnectionPhase.STARTING)
+                            .appendLog("正在启动 VPN + mihomo…", LogLevel.Info, LogSource.Session)
+                    }
+                }
+            }
+
+            onNotificationPermissionResult = { granted, pending ->
+                val permissionState =
+                    currentNotificationPermissionState(wasRequested = true)
+                        .copy(granted = granted)
+                update {
+                    it.copy(notificationPermission = permissionState)
+                        .appendLog(
+                            if (granted) {
+                                "已允许会话通知"
+                            } else {
+                                "未允许会话通知；VPN 可继续运行，但实时速率和通知断开按钮可能不可见"
+                            },
+                            if (granted) LogLevel.Success else LogLevel.Warning,
+                            LogSource.System,
+                            asNotice = !granted,
+                            noticeActionOpenSettings = !granted,
+                        )
+                }
+                pending?.let(::continueStartVpn)
+            }
+
             fun startVpn(reason: String = "connect") {
                 // Avoid double-start from tile + home; allow apply-node restart while running.
                 when (state.connectionPhase) {
@@ -327,24 +404,35 @@ class MainActivity : ComponentActivity() {
                 }
 
                 val intent = buildStartIntent(reason)
-                val prepare = VpnService.prepare(this@MainActivity)
-                if (prepare != null) {
-                    pendingStart = intent
-                    vpnPermission.launch(prepare)
-                    update {
-                        it.copy(connectionPhase = ConnectionPhase.STARTING)
-                            .appendLog("请求 VPN 权限…", LogLevel.Info, LogSource.Network)
+                when (NotificationPermissionFlow.beforeStart(state.notificationPermission)) {
+                    NotificationPermissionFlow.BeforeStart.REQUEST_PERMISSION -> {
+                        pendingNotificationStart = intent
+                        notificationPermission.launch(POST_NOTIFICATIONS_PERMISSION)
+                        update {
+                            it.copy(connectionPhase = ConnectionPhase.STARTING)
+                                .appendLog(
+                                    "请求通知权限，以显示实时速率和断开控制…",
+                                    LogLevel.Info,
+                                    LogSource.System,
+                                )
+                        }
+                        return
                     }
-                    startingSinceMillis = System.currentTimeMillis()
-                } else {
-                    trafficSampler.reset()
-                    startingSinceMillis = System.currentTimeMillis()
-                    startForegroundService(intent)
+                    NotificationPermissionFlow.BeforeStart.CONTINUE -> Unit
+                }
+
+                if (state.notificationPermission.required &&
+                    !state.notificationPermission.granted
+                ) {
                     update {
-                        it.copy(connectionPhase = ConnectionPhase.STARTING)
-                            .appendLog("正在启动 VPN + mihomo…", LogLevel.Info, LogSource.Session)
+                        it.appendLog(
+                            "会话通知已关闭；VPN 将继续启动，可在设置中开启",
+                            LogLevel.Warning,
+                            LogSource.System,
+                        )
                     }
                 }
+                continueStartVpn(intent)
             }
 
             fun importClipboardProfile() {
@@ -908,6 +996,18 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            fun manageNotificationPermission() {
+                val permission = state.notificationPermission
+                if (!permission.required || permission.granted) return
+
+                if (permission.canRequestInApp) {
+                    pendingNotificationStart = null
+                    notificationPermission.launch(POST_NOTIFICATIONS_PERMISSION)
+                } else {
+                    openAppNotificationSettings()
+                }
+            }
+
             ViaSixApp(
                 state = state,
                 selectedSection = selectedSection,
@@ -982,6 +1082,7 @@ class MainActivity : ComponentActivity() {
                     }
                 },
                 onRefreshCfstStatus = ::refreshCfstStatus,
+                onManageNotificationPermission = ::manageNotificationPermission,
                 onRoutingModeChange = ::patchRoutingMode,
                 onFullTunnelChange = { full ->
                     if (state.connectionPhase.isActiveOrTransitioning) {
@@ -1015,9 +1116,59 @@ class MainActivity : ComponentActivity() {
                 onDismissNotice = { state = state.copy(notice = null) },
                 onClearSessionData = {
                     prefsStore.clear()
-                    state = SessionUiState.fromPrefs(prefsStore.load())
-                        .appendLog("已重置会话偏好", LogLevel.Warning, LogSource.System)
+                    val resetPrefs = prefsStore.load()
+                    state =
+                        SessionUiState.fromPrefs(resetPrefs)
+                            .copy(
+                                notificationPermission =
+                                    currentNotificationPermissionState(
+                                        wasRequested = resetPrefs.notificationPermissionRequested,
+                                    ),
+                            )
+                            .appendLog("已重置会话偏好", LogLevel.Warning, LogSource.System)
                 },
+            )
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        onRefreshNotificationPermission?.invoke()
+    }
+
+    private fun currentNotificationPermissionState(
+        wasRequested: Boolean,
+    ): NotificationPermissionState {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            return NotificationPermissionState(
+                required = false,
+                granted = true,
+                wasRequested = wasRequested,
+            )
+        }
+        return NotificationPermissionState(
+            required = true,
+            granted =
+                checkSelfPermission(POST_NOTIFICATIONS_PERMISSION) ==
+                    PackageManager.PERMISSION_GRANTED,
+            wasRequested = wasRequested,
+            shouldShowRationale =
+                shouldShowRequestPermissionRationale(POST_NOTIFICATIONS_PERMISSION),
+        )
+    }
+
+    private fun openAppNotificationSettings() {
+        val notificationSettings =
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+        try {
+            startActivity(notificationSettings)
+        } catch (_: Exception) {
+            startActivity(
+                Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:$packageName"),
+                ),
             )
         }
     }

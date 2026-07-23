@@ -82,6 +82,7 @@ fun ViaSixApp(
     onStartCurrentNodeTest: () -> Unit = {},
     onSpeedSortChange: (NodeSortKey) -> Unit = {},
     onRefreshCfstStatus: () -> Unit = {},
+    onManageNotificationPermission: () -> Unit = {},
     onRoutingModeChange: (RoutingMode) -> Unit,
     onFullTunnelChange: (Boolean) -> Unit,
     onStart: () -> Unit,
@@ -223,6 +224,7 @@ fun ViaSixApp(
                                     onDetectExitIp = onDetectExitIp,
                                     onClearSessionData = onClearSessionData,
                                     onRefreshCfstStatus = onRefreshCfstStatus,
+                                    onManageNotificationPermission = onManageNotificationPermission,
                                 )
                         }
                     }

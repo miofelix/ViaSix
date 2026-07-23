@@ -32,4 +32,15 @@ class ProfileDraftPersistenceTest {
         assertEquals(applied, state.toPrefs().profileYaml)
         assertEquals(draft, state.toPrefs().profileDraft)
     }
+
+    @Test
+    fun notificationPromptHistorySurvivesPrefsModel() {
+        val state =
+            SessionUiState.fromPrefs(
+                SessionPrefs(notificationPermissionRequested = true),
+            )
+
+        assertTrue(state.notificationPermission.wasRequested)
+        assertTrue(state.toPrefs().notificationPermissionRequested)
+    }
 }

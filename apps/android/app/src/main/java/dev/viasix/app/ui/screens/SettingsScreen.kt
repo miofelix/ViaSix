@@ -12,6 +12,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.NotificationsActive
+import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.VpnKey
@@ -53,6 +55,7 @@ fun SettingsScreen(
     onDetectExitIp: () -> Unit,
     onClearSessionData: () -> Unit,
     onRefreshCfstStatus: () -> Unit = {},
+    onManageNotificationPermission: () -> Unit = {},
 ) {
     val colors = LocalViaSixColors.current
     val uriHandler = LocalUriHandler.current
@@ -107,6 +110,66 @@ fun SettingsScreen(
                             bottom = VisualStyle.spacing12,
                         ),
                 )
+            }
+
+            SurfaceCard {
+                val notification = state.notificationPermission
+                val notificationTone =
+                    if (notification.granted) AppTone.Positive else AppTone.Warning
+                CardHeader(
+                    title = "会话通知",
+                    icon =
+                        if (notification.granted) {
+                            Icons.Outlined.NotificationsActive
+                        } else {
+                            Icons.Outlined.NotificationsOff
+                        },
+                    tone = notificationTone,
+                )
+                HorizontalDivider(color = colors.surfaceBorder)
+                CompactInfoRow("权限", notification.statusLabel)
+                Text(
+                    text =
+                        if (notification.granted) {
+                            "连接时显示实时上下行、连接数和一键断开控制。"
+                        } else {
+                            "VPN 仍可运行，但实时速率和通知断开按钮可能不会显示。"
+                        },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier =
+                        Modifier.padding(
+                            start = VisualStyle.spacing16,
+                            end = VisualStyle.spacing16,
+                            bottom =
+                                if (notification.required && !notification.granted) {
+                                    VisualStyle.spacing8
+                                } else {
+                                    VisualStyle.spacing16
+                                },
+                        ),
+                )
+                if (notification.required && !notification.granted) {
+                    OutlinedButton(
+                        onClick = onManageNotificationPermission,
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(
+                                    start = VisualStyle.spacing16,
+                                    end = VisualStyle.spacing16,
+                                    bottom = VisualStyle.spacing12,
+                                ),
+                    ) {
+                        Text(
+                            if (notification.canRequestInApp) {
+                                "允许会话通知"
+                            } else {
+                                "打开系统通知设置"
+                            },
+                        )
+                    }
+                }
             }
 
             SurfaceCard {
