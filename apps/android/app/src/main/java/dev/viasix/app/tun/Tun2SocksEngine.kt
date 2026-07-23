@@ -400,6 +400,7 @@ class Tun2SocksEngine(
         if (session.handshake.isComplete && tcp.flags and Packet.ACK != 0) {
             if (
                 session.sendWindow.update(
+                    segmentSequence = tcp.seq,
                     acknowledgement = tcp.ack,
                     advertisedWindow =
                         TcpWindowScale.expand(

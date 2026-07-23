@@ -8,6 +8,8 @@ class TcpSendWindow(
     private var acknowledgedSequence = 0L
     private var sentSequence = 0L
     private var advertisedBytes = 0
+    private var windowUpdateSequence = 0L
+    private var windowUpdateAcknowledgement = 0L
     private var cancelled = false
 
     init {
@@ -15,6 +17,7 @@ class TcpSendWindow(
     }
 
     fun update(
+        segmentSequence: Long,
         acknowledgement: Long,
         advertisedWindow: Int,
         nextSequence: Long,
@@ -27,6 +30,8 @@ class TcpSendWindow(
                 acknowledgedSequence = acknowledgement
                 sentSequence = nextSequence
                 advertisedBytes = advertisedWindow
+                windowUpdateSequence = segmentSequence
+                windowUpdateAcknowledgement = acknowledgement
                 initialized = true
                 monitor.notifyAll()
                 return@synchronized true
@@ -39,7 +44,11 @@ class TcpSendWindow(
                 return@synchronized false
             }
             acknowledgedSequence = acknowledgement
-            advertisedBytes = advertisedWindow
+            if (acceptsWindowUpdate(segmentSequence, acknowledgement)) {
+                advertisedBytes = advertisedWindow
+                windowUpdateSequence = segmentSequence
+                windowUpdateAcknowledgement = acknowledgement
+            }
             monitor.notifyAll()
             true
         }
@@ -99,6 +108,22 @@ class TcpSendWindow(
         if (inFlight >= effectiveWindow) return 0
         return (effectiveWindow - inFlight).toInt()
     }
+
+    private fun acceptsWindowUpdate(
+        segmentSequence: Long,
+        acknowledgement: Long,
+    ): Boolean =
+        TcpSequence.isAfter(segmentSequence, windowUpdateSequence) ||
+            (
+                segmentSequence == windowUpdateSequence &&
+                    (
+                        acknowledgement == windowUpdateAcknowledgement ||
+                            TcpSequence.isAfter(
+                                acknowledgement,
+                                windowUpdateAcknowledgement,
+                            )
+                    )
+            )
 
     private companion object {
         const val NANOS_PER_MILLISECOND = 1_000_000L
