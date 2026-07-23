@@ -5,6 +5,9 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 class OutboundPacketQueueTest {
     @Test
@@ -48,5 +51,45 @@ class OutboundPacketQueueTest {
         assertFalse(queue.offer(byteArrayOf(2), lossless = true, timeoutMs = 0L))
 
         assertArrayEquals(first, queue.poll(timeoutMs = 0L))
+    }
+
+    @Test
+    fun cancelledQueueCannotBeRevivedByWaitingProducer() {
+        val queue = OutboundPacketQueue(capacity = 1)
+        val started = CountDownLatch(1)
+        val result = AtomicReference<Boolean?>(null)
+        assertTrue(queue.offer(byteArrayOf(1), lossless = true))
+        val producer =
+            Thread {
+                started.countDown()
+                result.set(queue.offer(byteArrayOf(2), lossless = true, timeoutMs = 2_000L))
+            }.apply {
+                isDaemon = true
+                start()
+            }
+
+        assertTrue(started.await(1, TimeUnit.SECONDS))
+        assertTrue(awaitState(producer, Thread.State.TIMED_WAITING))
+        queue.cancel()
+        producer.join(1_000L)
+
+        assertFalse(producer.isAlive)
+        assertFalse(result.get() ?: true)
+        assertNull(queue.poll(timeoutMs = 0L))
+        assertFalse(queue.offer(byteArrayOf(3), lossless = true, timeoutMs = 0L))
+        assertFalse(queue.offer(byteArrayOf(4), lossless = false))
+    }
+
+    private fun awaitState(
+        thread: Thread,
+        expected: Thread.State,
+    ): Boolean {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1L)
+        while (System.nanoTime() < deadline) {
+            if (thread.state == expected) return true
+            if (!thread.isAlive) return false
+            Thread.yield()
+        }
+        return thread.state == expected
     }
 }

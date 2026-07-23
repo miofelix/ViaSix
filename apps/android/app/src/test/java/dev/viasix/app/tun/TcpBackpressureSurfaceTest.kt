@@ -15,6 +15,8 @@ class TcpBackpressureSurfaceTest {
             ).readText()
 
         assertTrue(engine.contains("OutboundPacketQueue(capacity = 512)"))
+        assertTrue(engine.contains("outboundPackets.cancel()"))
+        assertFalse(engine.contains("outboundPackets.clear()"))
         assertTrue(engine.contains("LOSSLESS_ENQUEUE_TIMEOUT_MS"))
         assertTrue(engine.contains("val synAckQueued"))
         assertTrue(engine.contains("session.retransmissions.cancel()"))

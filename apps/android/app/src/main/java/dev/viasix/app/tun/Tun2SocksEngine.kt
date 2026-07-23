@@ -199,7 +199,7 @@ class Tun2SocksEngine(
         closeAllUdpRelays()
         udpRelayReactor.close()
         udpClients.clear()
-        outboundPackets.clear()
+        outboundPackets.cancel()
         try {
             inChannel?.close()
         } catch (_: Exception) {
