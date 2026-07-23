@@ -63,9 +63,9 @@ class Tun2SocksEngine(
         Executors.newCachedThreadPool { r ->
             Thread(r, "viasix-tun-worker").apply { isDaemon = true }
         }
-    private val retransmissionExecutor =
+    private val maintenanceExecutor =
         Executors.newSingleThreadScheduledExecutor { r ->
-            Thread(r, "viasix-tcp-retransmit").apply { isDaemon = true }
+            Thread(r, "viasix-tun-maintenance").apply { isDaemon = true }
         }
     private lateinit var inChannel: FileChannel
     private lateinit var outStream: FileOutputStream
@@ -74,7 +74,7 @@ class Tun2SocksEngine(
         if (!running.compareAndSet(false, true)) return
         inChannel = FileInputStream(tun.fileDescriptor).channel
         outStream = FileOutputStream(tun.fileDescriptor)
-        retransmissionExecutor.scheduleWithFixedDelay(
+        maintenanceExecutor.scheduleWithFixedDelay(
             {
                 try {
                     retransmitDueTcpSegments()
@@ -84,6 +84,18 @@ class Tun2SocksEngine(
             },
             RETRANSMISSION_SCAN_MS,
             RETRANSMISSION_SCAN_MS,
+            TimeUnit.MILLISECONDS,
+        )
+        maintenanceExecutor.scheduleWithFixedDelay(
+            {
+                try {
+                    purgeIdleUdpClients()
+                } catch (error: Exception) {
+                    Log.w(TAG, "UDP idle cleanup failed: ${error.message}")
+                }
+            },
+            UDP_IDLE_CLEANUP_INTERVAL_MS,
+            UDP_IDLE_CLEANUP_INTERVAL_MS,
             TimeUnit.MILLISECONDS,
         )
 
@@ -158,7 +170,7 @@ class Tun2SocksEngine(
         closeAllUdpRelays()
         udpClients.clear()
         outboundPackets.clear()
-        retransmissionExecutor.shutdownNow()
+        maintenanceExecutor.shutdownNow()
         executor.shutdownNow()
         try {
             inChannel.close()
@@ -663,7 +675,7 @@ class Tun2SocksEngine(
 
         // Drop idle client associates opportunistically (non-blocking).
         for (expired in udpClients.purgeExpired()) {
-            closeUdpClient(expired)
+            closeExpiredUdpRelay(expired)
         }
 
         val endpoint =
@@ -845,12 +857,27 @@ class Tun2SocksEngine(
 
     private fun closeUdpClient(endpoint: UdpClientEndpointTable.Endpoint) {
         udpClients.remove(endpoint)
+        closeUdpRelay(endpoint)
+    }
+
+    private fun closeExpiredUdpRelay(endpoint: UdpClientEndpointTable.Endpoint) {
+        closeUdpRelay(endpoint)
+    }
+
+    private fun closeUdpRelay(endpoint: UdpClientEndpointTable.Endpoint) {
         val relay = udpRelays.remove(endpoint.key())
         try {
             relay?.relay?.get()?.close()
         } catch (_: Exception) {
         }
         relay?.clearPending()
+    }
+
+    private fun purgeIdleUdpClients() {
+        if (!running.get()) return
+        for (expired in udpClients.purgeExpired()) {
+            closeExpiredUdpRelay(expired)
+        }
     }
 
     private fun closeAllUdpRelays() {
@@ -1029,6 +1056,7 @@ class Tun2SocksEngine(
         private const val SERVER_HALF_CLOSE_TIMEOUT_MS = 60_000L
         private const val UPSTREAM_POLL_MS = 200L
         private const val UPSTREAM_DRAIN_TIMEOUT_MS = 35_000L
+        private const val UDP_IDLE_CLEANUP_INTERVAL_MS = 5_000L
 
         private fun monotonicTimeMs(): Long = System.nanoTime() / 1_000_000L
     }

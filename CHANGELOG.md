@@ -65,6 +65,7 @@
 
 ### 修复
 
+- 修复 Android SOCKS5 UDP ASSOCIATE 仅在下一包 UDP 到来时顺便清理、无后续流量时空闲 socket 会保留到 VPN 停止的问题；共享维护线程现每 5 秒主动回收超过 60 秒未活动的 relay，过期判断使用单调时钟，并避免清理流程二次删除刚重新活跃的端点。
 - 修复 Android TCP 下行丢包只能等待 RTO、连续重复 ACK 无法及时恢复的问题；当前三次有效纯重复 ACK 会触发一次有界快速重传，ACK 推进后重置计数，同一序列不会因 ACK 洪峰重复放大。
 - 修复 Android TUN reader 直接向远端 TCP socket `write/flush`、在慢远端或内核背压时阻塞整个隧道读线程的问题；客户端上行 payload 现进入每会话 64 KiB 有界队列，由独立 writer 顺序排空，队列满时保留旧 ACK 促使客户端重传，FIN 等待排队数据真正写完后再执行 `shutdownOutput`。
 - 修复 Android IPv4 分片在没有重组器时可能被误交给 TCP/UDP 解析的问题；现拒绝 `MF`、非零 fragment offset 与保留标志，避免首片残缺 payload 或非首片字节污染用户态流连接。

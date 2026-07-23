@@ -13,7 +13,7 @@ import java.util.concurrent.ConcurrentHashMap
 internal class UdpClientEndpointTable(
     private val maxEntries: Int = 256,
     private val idleTimeoutMs: Long = 60_000L,
-    private val clock: () -> Long = { System.currentTimeMillis() },
+    private val clock: () -> Long = { System.nanoTime() / 1_000_000L },
 ) {
     data class Endpoint(
         val ip: InetAddress,
@@ -38,7 +38,6 @@ internal class UdpClientEndpointTable(
      * this client is not already registered.
      */
     fun noteActivity(endpoint: Endpoint): Boolean {
-        purgeExpired()
         val key = endpoint.key()
         val existing = byClient[key]
         val now = clock()
@@ -52,7 +51,6 @@ internal class UdpClientEndpointTable(
     }
 
     fun contains(endpoint: Endpoint): Boolean {
-        purgeExpired()
         return byClient.containsKey(endpoint.key())
     }
 
