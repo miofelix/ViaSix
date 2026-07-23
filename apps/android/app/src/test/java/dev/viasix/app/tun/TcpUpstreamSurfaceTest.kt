@@ -14,7 +14,7 @@ class TcpUpstreamSurfaceTest {
             ).readText()
 
         assertTrue(engine.contains("session.upstream.offer(payload)"))
-        assertTrue(engine.contains("executor.execute { writeTcpUpstream(key, session, socket) }"))
+        assertTrue(engine.contains("ioWorkers.execute { writeTcpUpstream(key, session, socket) }"))
         assertTrue(engine.contains("session.upstream.complete(payload.size)"))
         assertTrue(engine.contains("session.upstream.awaitEmpty(UPSTREAM_DRAIN_TIMEOUT_MS)"))
         assertTrue(engine.contains("socket.shutdownOutput()"))

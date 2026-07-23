@@ -15,7 +15,6 @@ import java.net.Socket
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.RejectedExecutionException
@@ -44,6 +43,8 @@ class Tun2SocksEngine(
     private val maxSessions: Int = 256,
     private val maxUdpClients: Int = 256,
     maxDirectDnsQueries: Int = 32,
+    maxConnectionWorkers: Int = 16,
+    maxIoWorkers: Int = 64,
     private val associateFailBackoffMs: Long = 5_000L,
 ) {
     private val running = AtomicBoolean(false)
@@ -59,10 +60,9 @@ class Tun2SocksEngine(
     private var readerThread: Thread? = null
     private var writerThread: Thread? = null
     private val outboundPackets = OutboundPacketQueue(capacity = 512)
-    private val executor: ExecutorService =
-        Executors.newCachedThreadPool { r ->
-            Thread(r, "viasix-tun-worker").apply { isDaemon = true }
-        }
+    private val connectionWorkers =
+        BoundedWorkerPool(maxConnectionWorkers, "viasix-tun-connect")
+    private val ioWorkers = BoundedWorkerPool(maxIoWorkers, "viasix-tun-io")
     private val maintenanceExecutor =
         Executors.newSingleThreadScheduledExecutor { r ->
             Thread(r, "viasix-tun-maintenance").apply { isDaemon = true }
@@ -171,7 +171,8 @@ class Tun2SocksEngine(
         udpClients.clear()
         outboundPackets.clear()
         maintenanceExecutor.shutdownNow()
-        executor.shutdownNow()
+        connectionWorkers.close()
+        ioWorkers.close()
         try {
             inChannel.close()
         } catch (_: Exception) {
@@ -258,7 +259,10 @@ class Tun2SocksEngine(
                 )
             sessions[key] = session
             activeSessionCount.incrementAndGet()
-            executor.execute { openTcpSession(key, session) }
+            if (!connectionWorkers.execute { openTcpSession(key, session) }) {
+                Log.w(TAG, "TCP connection worker limit reached; reject $key")
+                rejectTcpSession(key, session)
+            }
             return
         }
 
@@ -386,7 +390,9 @@ class Tun2SocksEngine(
                 return
             }
             session.socket = socket
-            executor.execute { writeTcpUpstream(key, session, socket) }
+            if (!ioWorkers.execute { writeTcpUpstream(key, session, socket) }) {
+                throw RejectedExecutionException("TCP upstream writer capacity reached")
+            }
             session.serverIsn = Random.nextInt().toLong() and 0xffffffffL
             session.serverSeq = TcpSequence.advance(session.serverIsn, syn = true)
             session.clientNextSeq = TcpSequence.advance(session.clientIsn, syn = true)
@@ -397,11 +403,11 @@ class Tun2SocksEngine(
                 return
             }
 
-            executor.execute {
+            if (!ioWorkers.execute reader@{
                 if (!session.handshake.await(HANDSHAKE_TIMEOUT_MS)) {
                     Log.w(TAG, "TCP handshake timed out for $key")
                     removeSession(key, session)
-                    return@execute
+                    return@reader
                 }
                 val buf = ByteArray(16 * 1024)
                 try {
@@ -477,6 +483,8 @@ class Tun2SocksEngine(
                         removeSession(key, session)
                     }
                 }
+            }) {
+                throw RejectedExecutionException("TCP downstream reader capacity reached")
             }
         } catch (error: Exception) {
             val route = if (useProtectedDirect) "protected direct" else "SOCKS"
@@ -496,6 +504,21 @@ class Tun2SocksEngine(
             )
             removeSession(key, session)
         }
+    }
+
+    private fun rejectTcpSession(key: String, session: TcpSession) {
+        if (sessions[key] !== session) return
+        enqueuePacket(
+            buildTcpPacket(
+                session = session,
+                seq = 0,
+                ack = TcpSequence.advance(session.clientIsn, syn = true),
+                flags = Packet.RST or Packet.ACK,
+                payload = ByteArray(0),
+            ),
+            lossless = true,
+        )
+        removeSession(key, session)
     }
 
     private fun buildTcpPacket(
@@ -658,17 +681,15 @@ class Tun2SocksEngine(
                 Log.w(TAG, "direct DNS query limit reached; drop")
                 return
             }
-            try {
-                executor.execute {
-                    try {
-                        forwardDnsDirect(clientIp, udp.sourcePort, remoteIp, payload, ipv6)
-                    } finally {
-                        permit.close()
-                    }
+            if (!ioWorkers.execute {
+                try {
+                    forwardDnsDirect(clientIp, udp.sourcePort, remoteIp, payload, ipv6)
+                } finally {
+                    permit.close()
                 }
-            } catch (error: RejectedExecutionException) {
+            }) {
                 permit.close()
-                Log.w(TAG, "direct DNS worker rejected: ${error.message}")
+                Log.w(TAG, "direct DNS worker limit reached; drop")
             }
             return
         }
@@ -736,9 +757,7 @@ class Tun2SocksEngine(
                 continue
             }
             if (clientRelay.tryStartOpening()) {
-                try {
-                    executor.execute { openUdpAssociate(clientRelay) }
-                } catch (error: RejectedExecutionException) {
+                if (!connectionWorkers.execute { openUdpAssociate(clientRelay) }) {
                     if (running.get()) {
                         clientRelay.failedUntilMs.set(monotonicTimeMs() + associateFailBackoffMs)
                         clientRelay.clearPending()
@@ -746,7 +765,7 @@ class Tun2SocksEngine(
                         closeUdpRelay(clientRelay)
                     }
                     clientRelay.finishOpening()
-                    Log.w(TAG, "UDP ASSOCIATE worker rejected: ${error.message}")
+                    Log.w(TAG, "UDP ASSOCIATE worker limit reached; backoff")
                 }
             }
             return
@@ -805,7 +824,7 @@ class Tun2SocksEngine(
     }
 
     private fun startUdpReceiver(clientRelay: UdpClientRelay, relay: Socks5UdpRelay) {
-        executor.execute {
+        if (!ioWorkers.execute {
             val endpoint = clientRelay.endpoint
             try {
                 while (running.get() && relay.isOpen) {
@@ -840,6 +859,8 @@ class Tun2SocksEngine(
             } finally {
                 closeUdpRelay(clientRelay)
             }
+        }) {
+            throw RejectedExecutionException("UDP relay receiver capacity reached")
         }
     }
 
