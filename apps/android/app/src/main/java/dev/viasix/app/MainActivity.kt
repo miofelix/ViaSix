@@ -29,6 +29,7 @@ import dev.viasix.app.mihomo.TrafficSampler
 import dev.viasix.app.mihomo.TrafficSnapshot
 import dev.viasix.app.net.ExitIPDetectionMode
 import dev.viasix.app.net.ExitIPDetector
+import dev.viasix.app.net.ExitIPRoutePolicy
 import dev.viasix.app.prefs.SessionPrefsStore
 import dev.viasix.app.runtime.RuntimeComponentCondition
 import dev.viasix.app.runtime.RuntimeComponentId
@@ -357,10 +358,20 @@ class MainActivity : ComponentActivity() {
                             startingSinceMillis = 0L
                         }
 
+                        val currentExitRoute = ExitIPRoutePolicy.routeForRuntime(running)
+                        val exitIP =
+                            if (current.exitIP.info?.route != null &&
+                                current.exitIP.info.route != currentExitRoute
+                            ) {
+                                current.exitIP.copy(info = null, errorMessage = null)
+                            } else {
+                                current.exitIP
+                            }
                         var next =
                             current.copy(
                                 runtime = runtimeStatus.toUiSnapshot(traffic),
                                 connectionPhase = phase,
+                                exitIP = exitIP,
                             )
                         if (
                             current.connectionPhase == ConnectionPhase.STARTING &&
@@ -1063,49 +1074,93 @@ class MainActivity : ComponentActivity() {
             }
 
             fun detectExitIp() {
+                val detectionMode = state.exitIP.mode
+                val detectionEndpoint = state.exitIP.endpoint
+                val proxy =
+                    ExitIPRoutePolicy.proxyForRuntime(
+                        running = state.runtime.running,
+                        mixedPort = state.runtime.mixedPort,
+                    )
+                val route = ExitIPRoutePolicy.routeFor(proxy)
+                val detectionServiceEndpoint =
+                    ExitIPDetector.endpointFor(detectionMode, detectionEndpoint)
+                fun requestIsCurrent(current: SessionUiState): Boolean {
+                    val currentEndpoint =
+                        ExitIPDetector.endpointFor(
+                            current.exitIP.mode,
+                            current.exitIP.endpoint,
+                        )
+                    return current.exitIP.mode == detectionMode &&
+                        currentEndpoint == detectionServiceEndpoint &&
+                        ExitIPRoutePolicy.routeForRuntime(current.runtime.running) == route
+                }
                 update {
                     it.copy(exitIP = it.exitIP.copy(isDetecting = true, errorMessage = null))
-                        .appendLog("正在检测公网出口…", LogLevel.Info, LogSource.Network)
+                        .appendLog(
+                            "正在通过${route.label}检测公网出口…",
+                            LogLevel.Info,
+                            LogSource.Network,
+                        )
                 }
                 scope.launch {
                     val result =
                         withContext(Dispatchers.IO) {
                             ExitIPDetector.detect(
-                                mode = state.exitIP.mode,
-                                automaticEndpoint = state.exitIP.endpoint,
+                                mode = detectionMode,
+                                automaticEndpoint = detectionEndpoint,
+                                proxy = proxy,
                             )
                         }
                     result.fold(
                         onSuccess = { info ->
                             update {
-                                it.copy(
-                                    exitIP =
-                                        it.exitIP.copy(
-                                            isDetecting = false,
-                                            info = info,
-                                            errorMessage = null,
-                                        ),
-                                ).appendLog(
-                                    "出口 ${info.ip}" +
-                                        (if (info.location.isNotBlank()) " · ${info.location}" else ""),
-                                    LogLevel.Success,
-                                    LogSource.Network,
-                                )
+                                if (!requestIsCurrent(it)) {
+                                    it.copy(exitIP = it.exitIP.copy(isDetecting = false))
+                                        .appendLog(
+                                            "出口检测条件已变化，已忽略旧结果",
+                                            LogLevel.Warning,
+                                            LogSource.Network,
+                                        )
+                                } else {
+                                    it.copy(
+                                        exitIP =
+                                            it.exitIP.copy(
+                                                isDetecting = false,
+                                                info = info,
+                                                errorMessage = null,
+                                            ),
+                                    ).appendLog(
+                                        "出口 ${info.ip}" +
+                                            " · ${info.route.label}" +
+                                            (if (info.location.isNotBlank()) " · ${info.location}" else ""),
+                                        LogLevel.Success,
+                                        LogSource.Network,
+                                    )
+                                }
                             }
                         },
                         onFailure = { error ->
                             update {
-                                it.copy(
-                                    exitIP =
-                                        it.exitIP.copy(
-                                            isDetecting = false,
-                                            errorMessage = error.message,
-                                        ),
-                                ).appendLog(
-                                    "出口检测失败：${error.message}",
-                                    LogLevel.Error,
-                                    LogSource.Network,
-                                )
+                                if (!requestIsCurrent(it)) {
+                                    it.copy(exitIP = it.exitIP.copy(isDetecting = false))
+                                        .appendLog(
+                                            "出口检测条件已变化，已忽略旧错误",
+                                            LogLevel.Warning,
+                                            LogSource.Network,
+                                        )
+                                } else {
+                                    it.copy(
+                                        exitIP =
+                                            it.exitIP.copy(
+                                                isDetecting = false,
+                                                errorMessage = error.message,
+                                            ),
+                                    ).appendLog(
+                                        "出口检测失败：${error.message}",
+                                        LogLevel.Error,
+                                        LogSource.Network,
+                                    )
+                                }
                             }
                         },
                     )
@@ -1415,10 +1470,33 @@ class MainActivity : ComponentActivity() {
                 onProjectPreview = ::projectPreview,
                 onDetectExitIp = ::detectExitIp,
                 onExitIpModeChange = { mode ->
-                    update { it.copy(exitIP = it.exitIP.copy(mode = mode)) }
+                    update {
+                        it.copy(
+                            exitIP =
+                                it.exitIP.copy(
+                                    mode = mode,
+                                    info = null,
+                                    errorMessage = null,
+                                ),
+                        )
+                    }
                 },
                 onExitIpEndpointChange = { endpoint ->
-                    update { it.copy(exitIP = it.exitIP.copy(endpoint = endpoint)) }
+                    update {
+                        it.copy(
+                            exitIP =
+                                it.exitIP.copy(
+                                    endpoint = endpoint,
+                                    info =
+                                        if (it.exitIP.mode == ExitIPDetectionMode.AUTOMATIC) {
+                                            null
+                                        } else {
+                                            it.exitIP.info
+                                        },
+                                    errorMessage = null,
+                                ),
+                        )
+                    }
                 },
                 onDelayTest = ::runDelayTest,
                 onCopy = ::copyText,

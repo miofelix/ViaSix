@@ -652,7 +652,10 @@ fun OverviewScreen(
 
                     Text("公网出口", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
-                        text = state.exitIP.info?.ip ?: (state.exitIP.errorMessage ?: "尚未检测"),
+                        text =
+                            state.exitIP.info?.let { info ->
+                                "${info.ip} · ${info.route.label}"
+                            } ?: (state.exitIP.errorMessage ?: "尚未检测"),
                         style =
                             MaterialTheme.typography.bodyLarge.copy(
                                 fontFamily = FontFamily.Monospace,

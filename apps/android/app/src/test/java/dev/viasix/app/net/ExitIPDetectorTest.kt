@@ -1,8 +1,12 @@
 package dev.viasix.app.net
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.net.InetSocketAddress
+import java.net.Proxy
 
 class ExitIPDetectorTest {
     @Test
@@ -34,5 +38,33 @@ class ExitIPDetectorTest {
             "https://custom",
             ExitIPDetector.endpointFor(ExitIPDetectionMode.AUTOMATIC, "https://custom"),
         )
+    }
+
+    @Test
+    fun runningRuntimeUsesLoopbackMixedHttpProxy() {
+        val selected = ExitIPRoutePolicy.proxyForRuntime(running = true, mixedPort = 11451)
+        val javaProxy = requireNotNull(selected).asJavaProxy()
+        val address = javaProxy.address() as InetSocketAddress
+
+        assertEquals(Proxy.Type.HTTP, javaProxy.type())
+        assertEquals("127.0.0.1", address.hostString)
+        assertEquals(11451, address.port)
+        assertEquals(ExitIPRoute.MIXED_PROXY, ExitIPRoutePolicy.routeFor(selected))
+        assertEquals(ExitIPRoute.MIXED_PROXY, ExitIPRoutePolicy.routeForRuntime(running = true))
+        assertEquals(ExitIPRoute.DIRECT, ExitIPRoutePolicy.routeForRuntime(running = false))
+        assertNull(ExitIPRoutePolicy.proxyForRuntime(running = false, mixedPort = 11451))
+    }
+
+    @Test
+    fun explicitAddressFamilyRejectsMismatchedResponse() {
+        val error =
+            assertThrows(IllegalArgumentException::class.java) {
+                ExitIPDetector.validateExpectedFamily(
+                    mode = ExitIPDetectionMode.IPV6,
+                    info = ExitIPInfo(ip = "203.0.113.1", family = "IPv4"),
+                )
+            }
+
+        assertTrue(error.message.orEmpty().contains("IPv6"))
     }
 }

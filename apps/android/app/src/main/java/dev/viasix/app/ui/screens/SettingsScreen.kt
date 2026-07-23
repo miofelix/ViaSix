@@ -680,6 +680,7 @@ fun SettingsScreen(
                             buildString {
                                 append(info.ip)
                                 if (info.family.isNotBlank()) append(" · ${info.family}")
+                                append(" · ${info.route.label}")
                                 if (info.location.isNotBlank()) append("\n${info.location}")
                                 if (info.details.isNotBlank()) append("\n${info.details}")
                             },

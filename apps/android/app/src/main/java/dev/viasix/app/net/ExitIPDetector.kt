@@ -1,6 +1,8 @@
 package dev.viasix.app.net
 
 import java.net.HttpURLConnection
+import java.net.InetSocketAddress
+import java.net.Proxy
 import java.net.URL
 import java.nio.charset.StandardCharsets
 
@@ -21,7 +23,40 @@ data class ExitIPInfo(
     val location: String = "",
     val details: String = "",
     val family: String = "",
+    val route: ExitIPRoute = ExitIPRoute.DIRECT,
 )
+
+enum class ExitIPRoute(val label: String) {
+    DIRECT("直连"),
+    MIXED_PROXY("本地 mixed 代理"),
+}
+
+data class ExitIPProxy(
+    val host: String,
+    val port: Int,
+) {
+    init {
+        require(host.isNotBlank()) { "proxy host is blank" }
+        require(port in 1..65_535) { "invalid proxy port: $port" }
+    }
+
+    internal fun asJavaProxy(): Proxy =
+        Proxy(Proxy.Type.HTTP, InetSocketAddress.createUnresolved(host, port))
+}
+
+object ExitIPRoutePolicy {
+    fun proxyForRuntime(
+        running: Boolean,
+        mixedPort: Int,
+    ): ExitIPProxy? =
+        if (running) ExitIPProxy(host = "127.0.0.1", port = mixedPort) else null
+
+    fun routeFor(proxy: ExitIPProxy?): ExitIPRoute =
+        if (proxy == null) ExitIPRoute.DIRECT else ExitIPRoute.MIXED_PROXY
+
+    fun routeForRuntime(running: Boolean): ExitIPRoute =
+        if (running) ExitIPRoute.MIXED_PROXY else ExitIPRoute.DIRECT
+}
 
 /**
  * Exit IP detection aligned with macOS endpoints and parsers.
@@ -46,13 +81,18 @@ object ExitIPDetector {
         automaticEndpoint: String = DEFAULT_ENDPOINT,
         timeoutMs: Int = 8000,
         enrich: Boolean = true,
+        proxy: ExitIPProxy? = null,
     ): Result<ExitIPInfo> {
         return try {
             val endpoint = endpointFor(mode, automaticEndpoint)
-            val raw = httpGet(endpoint, timeoutMs)
-            var info = parsePrimary(raw)
+            val raw = httpGet(endpoint, timeoutMs, proxy)
+            var info =
+                validateExpectedFamily(
+                    mode = mode,
+                    info = parsePrimary(raw).copy(route = ExitIPRoutePolicy.routeFor(proxy)),
+                )
             if (enrich) {
-                info = enrichWithGeo(info, timeoutMs) ?: info
+                info = enrichWithGeo(info, timeoutMs, proxy) ?: info
             }
             Result.success(info)
         } catch (error: Exception) {
@@ -91,10 +131,30 @@ object ExitIPDetector {
         return ExitIPInfo(ip = ip, family = addressFamily(ip))
     }
 
-    private fun enrichWithGeo(info: ExitIPInfo, timeoutMs: Int): ExitIPInfo? {
+    internal fun validateExpectedFamily(
+        mode: ExitIPDetectionMode,
+        info: ExitIPInfo,
+    ): ExitIPInfo {
+        val expected =
+            when (mode) {
+                ExitIPDetectionMode.AUTOMATIC -> null
+                ExitIPDetectionMode.IPV4 -> "IPv4"
+                ExitIPDetectionMode.IPV6 -> "IPv6"
+            }
+        if (expected != null && info.family != expected) {
+            throw IllegalArgumentException("出口 IP 服务未返回预期的 $expected 地址")
+        }
+        return info
+    }
+
+    private fun enrichWithGeo(
+        info: ExitIPInfo,
+        timeoutMs: Int,
+        proxy: ExitIPProxy?,
+    ): ExitIPInfo? {
         return try {
             val url = "$GEO_ENDPOINT/${info.ip}?lang=zh-CN"
-            val body = httpGet(url, timeoutMs)
+            val body = httpGet(url, timeoutMs, proxy)
             if (body.contains("\"success\":false")) return null
             val location =
                 listOfNotNull(
@@ -131,25 +191,40 @@ object ExitIPDetector {
         return stringField("{$block}", key)
     }
 
-    private fun httpGet(url: String, timeoutMs: Int): String {
-        val conn = (URL(url).openConnection() as HttpURLConnection)
-        conn.connectTimeout = timeoutMs
-        conn.readTimeout = timeoutMs
-        conn.requestMethod = "GET"
-        conn.setRequestProperty("User-Agent", "ViaSix-Android/0.1")
-        conn.setRequestProperty("Accept", "application/json,text/plain,*/*")
-        val code = conn.responseCode
-        val stream =
-            try {
-                conn.inputStream
-            } catch (_: Exception) {
-                conn.errorStream
-            } ?: throw IllegalStateException("empty body")
-        val body = stream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
-        if (code !in 200..299) {
-            throw IllegalStateException("HTTP $code")
+    private fun httpGet(
+        url: String,
+        timeoutMs: Int,
+        proxy: ExitIPProxy?,
+    ): String {
+        val connection =
+            if (proxy == null) {
+                URL(url).openConnection()
+            } else {
+                URL(url).openConnection(proxy.asJavaProxy())
+            }
+        val conn = connection as? HttpURLConnection
+            ?: throw IllegalArgumentException("unsupported URL protocol")
+        try {
+            conn.connectTimeout = timeoutMs
+            conn.readTimeout = timeoutMs
+            conn.requestMethod = "GET"
+            conn.setRequestProperty("User-Agent", "ViaSix-Android/0.1")
+            conn.setRequestProperty("Accept", "application/json,text/plain,*/*")
+            val code = conn.responseCode
+            val stream =
+                try {
+                    conn.inputStream
+                } catch (_: Exception) {
+                    conn.errorStream
+                } ?: throw IllegalStateException("empty body")
+            val body = stream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
+            if (code !in 200..299) {
+                throw IllegalStateException("HTTP $code")
+            }
+            return body
+        } finally {
+            conn.disconnect()
         }
-        return body
     }
 
     fun normalizeIp(raw: String): String {

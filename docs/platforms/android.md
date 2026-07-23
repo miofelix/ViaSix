@@ -56,6 +56,7 @@ Android 功能对齐以 **macOS** 为准。Windows 端仍在完善中，**不得
 - 本地数据保护：保持 `allowBackup=false`，并为 Android 12+ 数据提取与旧版 Auto Backup 显式排除全部私有域，防止配置 YAML、候选节点、控制器密钥和运行状态进入云备份或设备迁移
 - `ProfileSummaryParser` / `Ipv6Address` / `ByteRateFormatter` / `SpeedTestResultParser`：`:core` 可测纯逻辑
 - 会话偏好扩展：候选节点、出口检测端点与模式、测速 IP 源
+- 出口 IP 检测：VPN 会话运行时主查询与地理补全均显式通过 `127.0.0.1:mixedPort`，避免 ViaSix 自身防环路 UID 排除导致误报物理出口；停止时使用直连，并对显式 IPv4/IPv6 模式校验返回地址族及丢弃条件变化后的旧结果
 - 配置安全编辑：`profileDraft` 与已应用 `profileYaml` 分离持久化；应用前检查 `x-viasix` 并执行真实投影校验
 - CFST：`CfstInstaller` + `CfstRunner` + `IPSourceMode` / `SpeedTestParameters`（macOS 参数语义）+ `NodeResultSorting` + 当前节点测速
 - 全量隧道：`Tun2SocksEngine` — IPv4/IPv6 TCP→SOCKS5 CONNECT；通用 UDP→**每本地源端口** SOCKS5 UDP ASSOCIATE（正确并发 demux）；DNS 的 TCP/UDP 默认经 SOCKS，也可显式切换为 `protect` 直连并自定义数字 IPv4/IPv6 服务器，TCP 套接字在连接前完成保护

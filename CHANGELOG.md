@@ -64,6 +64,7 @@
 
 ### 修复
 
+- 修复 Android 运行中的出口 IP 检测因 ViaSix 自身 UID 绕过 VPN 而误报物理出口的问题；主查询与地理补全现显式通过本地 mixed HTTP 代理，并校验 IPv4/IPv6 结果地址族。
 - 修复 Android 在 VPN 运行或切换阶段仍可重置会话偏好、导致当前连接与后续 Sticky/Always-on 恢复配置分叉的问题。
 - 修复 Android Always-on VPN 通过无 ViaSix 参数的系统 Intent 启动时误用空配置的问题；系统启动现恢复最后保存的有效会话参数。
 - 修复 Android 日志时钟在应用运行期间切换系统区域设置后仍沿用旧 Locale 的问题。
