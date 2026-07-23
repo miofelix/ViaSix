@@ -65,6 +65,7 @@
 
 ### 修复
 
+- 修复 Android TCP 会话在代理连接完成后立即占用一个 I/O worker 等待客户端 ACK，并为每条连接永久保留独立上行 writer，导致 64 线程上限在半开或空闲连接下过早耗尽的问题；下行 reader 现仅在有效握手 ACK 后单飞启动，握手超时由共享维护线程回收，上行 writer 仅在队列/FIN 需要时启动并在空闲 1 秒后退出，退出竞态会检查待处理数据并安全重启。
 - 修复 Android SOCKS5 UDP framing 接受非零 RSV、零目标端口和越界 `length`，且可在构造超过单个 UDP 数据报上限的 frame 后才由 socket 报错的问题；编码现前置校验端口与 65,535 字节总长，解码严格拒绝保留字段、分片、零端口、截断和调用方越界长度。
 - 修复 Android 显式直连 DNS/UDP 使用未连接 socket、可能接受非目标来源数据报，忽略 `VpnService.protect` 失败，并用 4096 字节缓冲静默截断较大 EDNS 响应的问题；每查询 socket 现先保护再连接到指定上游，仅接受该地址/端口的回包，保护失败立即关闭，响应容量扩展到完整 UDP 数据报上限。
 - 修复 Android SOCKS5 UDP ASSOCIATE 的控制 TCP 被代理重启/关闭后，本地 UDP socket 仍显示可写、活跃流量持续续期失效 relay 并永久黑洞的问题；UDP 接收超时现探测控制连接 EOF 并立即淘汰代际，UDP socket 同时连接到代理报告的 relay 地址以仅接收可信端点回包，且严格校验 ASSOCIATE 保留字、域名与可解析地址。

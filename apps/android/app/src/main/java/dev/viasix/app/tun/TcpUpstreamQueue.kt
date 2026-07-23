@@ -15,6 +15,12 @@ class TcpUpstreamQueue(
         require(maxSegments > 0) { "maxSegments must be positive" }
     }
 
+    val hasPending: Boolean
+        get() =
+            synchronized(monitor) {
+                !cancelled && (queue.isNotEmpty() || inFlightSegments > 0)
+            }
+
     fun offer(payload: ByteArray): Boolean =
         synchronized(monitor) {
             if (cancelled || payload.isEmpty()) return@synchronized !cancelled

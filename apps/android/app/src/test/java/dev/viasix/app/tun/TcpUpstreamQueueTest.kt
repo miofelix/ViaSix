@@ -13,6 +13,7 @@ class TcpUpstreamQueueTest {
 
         assertTrue(queue.offer(byteArrayOf(1, 2)))
         assertTrue(queue.offer(byteArrayOf(3, 4)))
+        assertTrue(queue.hasPending)
         assertFalse(queue.offer(byteArrayOf(5)))
         assertArrayEquals(byteArrayOf(1, 2), queue.poll(timeoutMs = 0L))
         assertFalse(queue.offer(byteArrayOf(5)))
@@ -20,6 +21,7 @@ class TcpUpstreamQueueTest {
         assertArrayEquals(byteArrayOf(3, 4), queue.poll(timeoutMs = 0L))
         queue.complete(payloadLength = 2)
         assertTrue(queue.awaitEmpty(timeoutMs = 0L))
+        assertFalse(queue.hasPending)
         assertNull(queue.poll(timeoutMs = 0L))
     }
 

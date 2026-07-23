@@ -273,10 +273,17 @@ class Tun2SocksEngine(
         }
 
         if (!session.handshake.isComplete && tcp.flags and Packet.ACK != 0) {
-            session.handshake.acknowledge(
-                acknowledgement = tcp.ack,
-                expected = session.serverSeq,
-            )
+            if (
+                session.handshake.acknowledge(
+                    acknowledgement = tcp.ack,
+                    expected = session.serverSeq,
+                ) &&
+                    !ensureTcpDownstreamReader(key, session)
+            ) {
+                Log.w(TAG, "TCP downstream reader limit reached for $key")
+                rejectTcpSession(key, session)
+                return
+            }
         }
         if (session.handshake.isComplete && tcp.flags and Packet.ACK != 0) {
             if (
@@ -342,6 +349,11 @@ class Tun2SocksEngine(
                     enqueueAck(session)
                     return
                 }
+                if (!ensureTcpUpstreamWriter(key, session)) {
+                    Log.w(TAG, "TCP upstream writer limit reached for $key")
+                    rejectTcpSession(key, session)
+                    return
+                }
                 session.clientNextSeq =
                     TcpSequence.advance(tcp.seq, payloadLength = tcp.payloadLength)
                 enqueueAck(session)
@@ -352,6 +364,11 @@ class Tun2SocksEngine(
             val finSequence = TcpSequence.advance(tcp.seq, payloadLength = tcp.payloadLength)
             if (finSequence == session.clientNextSeq && session.closeState.markClientFin()) {
                 session.clientNextSeq = TcpSequence.advance(finSequence, fin = true)
+                if (!ensureTcpUpstreamWriter(key, session)) {
+                    Log.w(TAG, "TCP FIN writer limit reached for $key")
+                    rejectTcpSession(key, session)
+                    return
+                }
                 enqueueAck(session)
                 if (session.closeState.isFullyClosed) removeSession(key, session)
             } else {
@@ -389,9 +406,6 @@ class Tun2SocksEngine(
                 return
             }
             session.socket = socket
-            if (!ioWorkers.execute { writeTcpUpstream(key, session, socket) }) {
-                throw RejectedExecutionException("TCP upstream writer capacity reached")
-            }
             session.serverIsn = Random.nextInt().toLong() and 0xffffffffL
             session.serverSeq = TcpSequence.advance(session.serverIsn, syn = true)
             session.clientNextSeq = TcpSequence.advance(session.clientIsn, syn = true)
@@ -401,90 +415,7 @@ class Tun2SocksEngine(
                 removeSession(key, session)
                 return
             }
-
-            if (!ioWorkers.execute reader@{
-                if (!session.handshake.await(HANDSHAKE_TIMEOUT_MS)) {
-                    Log.w(TAG, "TCP handshake timed out for $key")
-                    removeSession(key, session)
-                    return@reader
-                }
-                val buf = ByteArray(16 * 1024)
-                try {
-                    val input = socket.getInputStream()
-                    while (running.get() && !socket.isClosed) {
-                        val allowance =
-                            session.sendWindow.awaitAllowance(
-                                maxBytes = buf.size,
-                                timeoutMs = WINDOW_WAIT_POLL_MS,
-                            )
-                        if (allowance <= 0) continue
-                        val n = input.read(buf, 0, allowance)
-                        if (n < 0) break
-                        if (n == 0) continue
-                        val chunk = buf.copyOf(n)
-                        val sequence = session.serverSeq
-                        val packet =
-                            buildTcpPacket(
-                                session = session,
-                                seq = sequence,
-                                ack = session.clientNextSeq,
-                                flags = Packet.PSH or Packet.ACK,
-                                payload = chunk,
-                            )
-                        val reservation =
-                            session.retransmissions.reserve(
-                                sequence = sequence,
-                                flags = Packet.PSH or Packet.ACK,
-                                payload = chunk,
-                            )
-                        if (reservation == null) {
-                            session.retransmissions.cancel()
-                            break
-                        }
-                        if (!session.sendWindow.recordSent(sequence, sequenceLength = n)) {
-                            session.retransmissions.discard(reservation)
-                            session.retransmissions.cancel()
-                            break
-                        }
-                        session.serverSeq = TcpSequence.advance(sequence, payloadLength = n)
-                        val queued =
-                            enqueuePacket(
-                                packet,
-                                lossless = true,
-                            )
-                        if (!queued) {
-                            session.retransmissions.cancel()
-                            break
-                        }
-                        session.retransmissions.markQueued(reservation, monotonicTimeMs())
-                    }
-                } catch (_: Exception) {
-                } finally {
-                    val current = running.get() && sessions[key] === session
-                    val upstreamDrained =
-                        current &&
-                            session.upstream.awaitEmpty(UPSTREAM_DRAIN_TIMEOUT_MS)
-                    val drained =
-                        upstreamDrained &&
-                            session.retransmissions.awaitEmpty(RETRANSMISSION_DRAIN_TIMEOUT_MS)
-                    val finAllowed =
-                        drained &&
-                            session.sendWindow.awaitAllowance(
-                                maxBytes = 1,
-                                timeoutMs = SERVER_FIN_WINDOW_TIMEOUT_MS,
-                            ) > 0
-                    val finRetained =
-                        finAllowed &&
-                            running.get() &&
-                            sessions[key] === session &&
-                            enqueueServerFin(session)
-                    if (!finRetained) {
-                        removeSession(key, session)
-                    }
-                }
-            }) {
-                throw RejectedExecutionException("TCP downstream reader capacity reached")
-            }
+            session.handshakeDeadlineMs = monotonicTimeMs() + HANDSHAKE_TIMEOUT_MS
         } catch (error: Exception) {
             val route = if (useProtectedDirect) "protected direct" else "SOCKS"
             Log.w(
@@ -502,6 +433,84 @@ class Tun2SocksEngine(
                 lossless = true,
             )
             removeSession(key, session)
+        }
+    }
+
+    private fun ensureTcpDownstreamReader(key: String, session: TcpSession): Boolean {
+        val socket = session.socket ?: return false
+        if (!session.downstreamReaderStarted.compareAndSet(false, true)) return true
+        if (ioWorkers.execute { readTcpDownstream(key, session, socket) }) return true
+        session.downstreamReaderStarted.set(false)
+        return false
+    }
+
+    private fun readTcpDownstream(key: String, session: TcpSession, socket: Socket) {
+        val buf = ByteArray(16 * 1024)
+        try {
+            val input = socket.getInputStream()
+            while (running.get() && sessions[key] === session && !socket.isClosed) {
+                val allowance =
+                    session.sendWindow.awaitAllowance(
+                        maxBytes = buf.size,
+                        timeoutMs = WINDOW_WAIT_POLL_MS,
+                    )
+                if (allowance <= 0) continue
+                val n = input.read(buf, 0, allowance)
+                if (n < 0) break
+                if (n == 0) continue
+                val chunk = buf.copyOf(n)
+                val sequence = session.serverSeq
+                val packet =
+                    buildTcpPacket(
+                        session = session,
+                        seq = sequence,
+                        ack = session.clientNextSeq,
+                        flags = Packet.PSH or Packet.ACK,
+                        payload = chunk,
+                    )
+                val reservation =
+                    session.retransmissions.reserve(
+                        sequence = sequence,
+                        flags = Packet.PSH or Packet.ACK,
+                        payload = chunk,
+                    )
+                if (reservation == null) {
+                    session.retransmissions.cancel()
+                    break
+                }
+                if (!session.sendWindow.recordSent(sequence, sequenceLength = n)) {
+                    session.retransmissions.discard(reservation)
+                    session.retransmissions.cancel()
+                    break
+                }
+                session.serverSeq = TcpSequence.advance(sequence, payloadLength = n)
+                val queued = enqueuePacket(packet, lossless = true)
+                if (!queued) {
+                    session.retransmissions.cancel()
+                    break
+                }
+                session.retransmissions.markQueued(reservation, monotonicTimeMs())
+            }
+        } catch (_: Exception) {
+        } finally {
+            val current = running.get() && sessions[key] === session
+            val upstreamDrained =
+                current && session.upstream.awaitEmpty(UPSTREAM_DRAIN_TIMEOUT_MS)
+            val drained =
+                upstreamDrained &&
+                    session.retransmissions.awaitEmpty(RETRANSMISSION_DRAIN_TIMEOUT_MS)
+            val finAllowed =
+                drained &&
+                    session.sendWindow.awaitAllowance(
+                        maxBytes = 1,
+                        timeoutMs = SERVER_FIN_WINDOW_TIMEOUT_MS,
+                    ) > 0
+            val finRetained =
+                finAllowed &&
+                    running.get() &&
+                    sessions[key] === session &&
+                    enqueueServerFin(session)
+            if (!finRetained) removeSession(key, session)
         }
     }
 
@@ -563,11 +572,20 @@ class Tun2SocksEngine(
             lossless = true,
         )
 
+    private fun ensureTcpUpstreamWriter(key: String, session: TcpSession): Boolean {
+        val socket = session.socket ?: return false
+        if (!session.upstreamWriterActive.compareAndSet(false, true)) return true
+        if (ioWorkers.execute { writeTcpUpstream(key, session, socket) }) return true
+        session.upstreamWriterActive.set(false)
+        return false
+    }
+
     private fun writeTcpUpstream(
         key: String,
         session: TcpSession,
         socket: Socket,
     ) {
+        var idleSinceMs = monotonicTimeMs()
         try {
             val output = socket.getOutputStream()
             while (running.get() && sessions[key] === session && !socket.isClosed) {
@@ -576,6 +594,7 @@ class Tun2SocksEngine(
                     output.write(payload)
                     output.flush()
                     session.upstream.complete(payload.size)
+                    idleSinceMs = monotonicTimeMs()
                     continue
                 }
                 if (
@@ -583,12 +602,28 @@ class Tun2SocksEngine(
                         session.outputShutdown.compareAndSet(false, true)
                 ) {
                     socket.shutdownOutput()
+                    return
                 }
+                if (monotonicTimeMs() - idleSinceMs >= UPSTREAM_WRITER_IDLE_MS) return
             }
         } catch (error: Exception) {
             if (running.get() && sessions[key] === session) {
                 Log.w(TAG, "tcp upstream write failed: ${error.message}")
                 removeSession(key, session)
+            }
+        } finally {
+            session.upstreamWriterActive.set(false)
+            val needsRestart =
+                running.get() &&
+                    sessions[key] === session &&
+                    !socket.isClosed &&
+                    (
+                        session.upstream.hasPending ||
+                            (session.closeState.hasClientFin && !session.outputShutdown.get())
+                    )
+            if (needsRestart && !ensureTcpUpstreamWriter(key, session)) {
+                Log.w(TAG, "TCP upstream writer restart limit reached for $key")
+                rejectTcpSession(key, session)
             }
         }
     }
@@ -940,6 +975,16 @@ class Tun2SocksEngine(
         if (!running.get()) return
         val nowMs = monotonicTimeMs()
         for ((key, session) in sessions.entries) {
+            if (
+                sessions[key] === session &&
+                    !session.handshake.isComplete &&
+                    session.handshakeDeadlineMs > 0L &&
+                    nowMs >= session.handshakeDeadlineMs
+            ) {
+                Log.w(TAG, "TCP handshake timed out for $key")
+                removeSession(key, session)
+                continue
+            }
             when (val due = session.retransmissions.pollDue(nowMs)) {
                 is TcpRetransmissionQueue.PollResult.Retransmit -> {
                     if (sessions[key] !== session) continue
@@ -1035,12 +1080,15 @@ class Tun2SocksEngine(
         @Volatile var serverIsn: Long = 0
         @Volatile var serverSeq: Long = 0
         @Volatile var clientNextSeq: Long = 0
+        @Volatile var handshakeDeadlineMs: Long = 0
         val handshake = TcpHandshakeGate()
         val sendWindow = TcpSendWindow()
         val retransmissions = TcpRetransmissionQueue()
         val closeState = TcpCloseState()
         val upstream = TcpUpstreamQueue()
         val outputShutdown = AtomicBoolean(false)
+        val downstreamReaderStarted = AtomicBoolean(false)
+        val upstreamWriterActive = AtomicBoolean(false)
 
         fun close() {
             handshake.cancel()
@@ -1125,6 +1173,7 @@ class Tun2SocksEngine(
         private const val SERVER_FIN_WINDOW_TIMEOUT_MS = 30_000L
         private const val SERVER_HALF_CLOSE_TIMEOUT_MS = 60_000L
         private const val UPSTREAM_POLL_MS = 200L
+        private const val UPSTREAM_WRITER_IDLE_MS = 1_000L
         private const val UPSTREAM_DRAIN_TIMEOUT_MS = 35_000L
         private const val UDP_IDLE_CLEANUP_INTERVAL_MS = 5_000L
         private const val UDP_RELAY_OPERATION_ATTEMPTS = 2
