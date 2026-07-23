@@ -37,6 +37,17 @@ enum class ConnectionPhase {
         }
 
     companion object {
+        /** Restore the visible phase before the first runtime poll after UI recreation. */
+        fun restore(
+            runtimeRunning: Boolean,
+            hasPendingStart: Boolean = false,
+        ): ConnectionPhase =
+            when {
+                runtimeRunning -> RUNNING
+                hasPendingStart -> STARTING
+                else -> STOPPED
+            }
+
         /**
          * Reconcile local intent with polled VPN runtime.
          * [runtimeRunning] comes from [ViaSixVpnService] prefs.

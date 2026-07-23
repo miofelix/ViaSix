@@ -8,6 +8,22 @@ import org.junit.Test
 /** Drives real [ConnectionPhase] reconcile used by MainActivity poll loop. */
 class ConnectionPhaseTest {
     @Test
+    fun restoreUsesRuntimeAndPendingConsentState() {
+        assertEquals(
+            ConnectionPhase.RUNNING,
+            ConnectionPhase.restore(runtimeRunning = true),
+        )
+        assertEquals(
+            ConnectionPhase.STARTING,
+            ConnectionPhase.restore(runtimeRunning = false, hasPendingStart = true),
+        )
+        assertEquals(
+            ConnectionPhase.STOPPED,
+            ConnectionPhase.restore(runtimeRunning = false),
+        )
+    }
+
+    @Test
     fun reconcile_runtimeRunningBecomesRunning() {
         assertEquals(
             ConnectionPhase.RUNNING,

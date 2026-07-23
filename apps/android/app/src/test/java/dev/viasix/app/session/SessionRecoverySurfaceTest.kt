@@ -1,0 +1,50 @@
+package dev.viasix.app.session
+
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.io.File
+
+class SessionRecoverySurfaceTest {
+    @Test
+    fun activityRestoresRuntimeNavigationPendingConsentAndWarmIntents() {
+        val activity =
+            resolve(
+                "src/main/java/dev/viasix/app/MainActivity.kt",
+                "app/src/main/java/dev/viasix/app/MainActivity.kt",
+            ).readText()
+        val tile =
+            resolve(
+                "src/main/java/dev/viasix/app/tile/ViaSixTileService.kt",
+                "app/src/main/java/dev/viasix/app/tile/ViaSixTileService.kt",
+            ).readText()
+        val service =
+            resolve(
+                "src/main/java/dev/viasix/app/vpn/ViaSixVpnService.kt",
+                "app/src/main/java/dev/viasix/app/vpn/ViaSixVpnService.kt",
+            ).readText()
+        val prefs =
+            resolve(
+                "src/main/java/dev/viasix/app/prefs/SessionPrefs.kt",
+                "app/src/main/java/dev/viasix/app/prefs/SessionPrefs.kt",
+            ).readText()
+
+        assertTrue(activity.contains("SessionRuntimeStore(this)"))
+        assertTrue(activity.contains("initialRuntime.toUiSnapshot()"))
+        assertTrue(activity.contains("AppSection.parse(initialPrefs.selectedSection)"))
+        assertTrue(activity.contains("override fun onSaveInstanceState"))
+        assertTrue(activity.contains("STATE_PENDING_VPN_START_REASON"))
+        assertTrue(activity.contains("STATE_PENDING_NOTIFICATION_START_REASON"))
+        assertTrue(activity.contains("override fun onNewIntent"))
+        assertTrue(activity.contains("onLaunchIntent?.invoke(intent)"))
+        assertTrue(tile.contains("Intent.FLAG_ACTIVITY_CLEAR_TOP"))
+        assertTrue(tile.contains("Intent.FLAG_ACTIVITY_SINGLE_TOP"))
+        assertTrue(service.contains("Intent.FLAG_ACTIVITY_CLEAR_TOP"))
+        assertTrue(service.contains("Intent.FLAG_ACTIVITY_SINGLE_TOP"))
+        assertTrue(prefs.contains(".put(\"selectedSection\", selectedSection)"))
+        assertTrue(prefs.contains("o.optString(\"selectedSection\", \"overview\")"))
+    }
+
+    private fun resolve(vararg paths: String): File =
+        paths.map { File(it) }.firstOrNull { it.isFile }
+            ?: error("file not found from cwd=${File(".").absolutePath}: ${paths.toList()}")
+}

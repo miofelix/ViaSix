@@ -77,8 +77,7 @@ class ViaSixTileService : TileService() {
             }
             is VpnSessionCommands.StartAction.Blocked -> {
                 val launch =
-                    Intent(this, MainActivity::class.java)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    buildAppLaunchIntent()
                         .putExtra(EXTRA_GATE_MESSAGE, action.gate.message)
                         .putExtra(EXTRA_GATE_SECTION, action.gate.sectionWire)
                 collapseAndLaunch(launch)
@@ -88,11 +87,18 @@ class ViaSixTileService : TileService() {
 
     private fun openAppForStart() {
         val launch =
-            Intent(this, MainActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            buildAppLaunchIntent()
                 .putExtra(VpnSessionCommands.EXTRA_REQUEST_START, true)
         collapseAndLaunch(launch)
     }
+
+    private fun buildAppLaunchIntent(): Intent =
+        Intent(this, MainActivity::class.java)
+            .addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP,
+            )
 
     @Suppress("DEPRECATION")
     @SuppressLint("StartActivityAndCollapseDeprecated")

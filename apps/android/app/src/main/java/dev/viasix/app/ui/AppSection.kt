@@ -14,33 +14,45 @@ import androidx.compose.ui.graphics.vector.ImageVector
  * or contextual sidebar according to the available window width.
  */
 enum class AppSection(
+    val wire: String,
     val title: String,
     val subtitle: String,
     val icon: ImageVector,
 ) {
     OVERVIEW(
+        wire = "overview",
         title = "首页",
         subtitle = "IPv6 链路状态与控制",
         icon = Icons.Outlined.Home,
     ),
     NODES(
+        wire = "nodes",
         title = "IPv6 优选",
         subtitle = "测速并选择 IPv6 地址",
         icon = Icons.Outlined.Hub,
     ),
     PROFILES(
+        wire = "profiles",
         title = "连接配置",
         subtitle = "管理 IPv6 代理入口配置",
         icon = Icons.Outlined.Inventory2,
     ),
     LOGS(
+        wire = "logs",
         title = "日志",
         subtitle = "查看代理与会话活动",
         icon = Icons.AutoMirrored.Outlined.Article,
     ),
     SETTINGS(
+        wire = "settings",
         title = "设置",
         subtitle = "网络接入与应用信息",
         icon = Icons.Outlined.Settings,
     ),
+    ;
+
+    companion object {
+        fun parse(wire: String?): AppSection =
+            entries.firstOrNull { it.wire == wire } ?: OVERVIEW
+    }
 }

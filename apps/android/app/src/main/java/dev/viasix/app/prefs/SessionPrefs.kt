@@ -14,6 +14,8 @@ data class SessionPrefs(
     val profileYaml: String = "",
     /** Nullable for migration: absent means the draft should start from [profileYaml]. */
     val profileDraft: String? = null,
+    /** Last primary destination, restored after rotation and process recreation. */
+    val selectedSection: String = "overview",
     /** Avoid automatically prompting for notifications on every connection after denial. */
     val notificationPermissionRequested: Boolean = false,
     val selectedAddress: String = "2001:db8::1",
@@ -30,6 +32,7 @@ data class SessionPrefs(
         JSONObject()
             .put("profileYaml", profileYaml)
             .put("profileDraft", profileDraft)
+            .put("selectedSection", selectedSection)
             .put("notificationPermissionRequested", notificationPermissionRequested)
             .put("selectedAddress", selectedAddress)
             .put("routingMode", routingMode)
@@ -92,6 +95,7 @@ data class SessionPrefs(
                         } else {
                             null
                         },
+                    selectedSection = o.optString("selectedSection", "overview"),
                     notificationPermissionRequested =
                         o.optBoolean("notificationPermissionRequested", false),
                     selectedAddress = o.optString("selectedAddress", "2001:db8::1"),

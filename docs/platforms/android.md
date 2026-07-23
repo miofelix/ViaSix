@@ -47,6 +47,7 @@ Android 功能对齐以 **macOS** 为准。Windows 端仍在完善中，**不得
 - `ViaSixVpnService`：重启栈（节点应用并重连）、环形事件日志、通知栏实时上下行（Clash 风格）
 - `ViaSixTileService`：API 34+ 通过 `PendingIntent` 展开应用，API 26–28 不访问 API 29 的磁贴字幕
 - 通知权限：Android 13+ 首次连接前按需请求；拒绝后会话降级运行且不自动重复询问，设置页提供再次请求/系统设置入口
+- 会话恢复：持久化当前主分区；Activity 旋转/进程重建时从 VPN runtime 快照同步恢复，授权中的连接动作通过 saved state 延续
 - `ProfileSummaryParser` / `Ipv6Address` / `ByteRateFormatter` / `SpeedTestResultParser`：`:core` 可测纯逻辑
 - 会话偏好扩展：候选节点、出口检测端点与模式、测速 IP 源
 - 配置安全编辑：`profileDraft` 与已应用 `profileYaml` 分离持久化；应用前检查 `x-viasix` 并执行真实投影校验
@@ -62,6 +63,7 @@ Android 功能对齐以 **macOS** 为准。Windows 端仍在完善中，**不得
 | 配置粘贴导入 | Profiles「粘贴剪贴板」识别 mihomo/Clash YAML（不自动拉订阅 URL） |
 | 通知实时流量与控制 | 前台 VPN 通知展示 ↑/↓ 紧凑速率与连接数，并提供“断开”动作；更新不重复提醒 |
 | 通知权限体验 | Android 13+ 仅在首次连接前询问；快捷磁贴会转入应用完成授权，拒绝不阻塞 VPN |
+| 会话恢复与回流 | 重建后立即恢复当前分区/运行态；磁贴和通知通过 `CLEAR_TOP + SINGLE_TOP` 回到既有 Activity 并处理新意图 |
 | 自适应应用壳 | `<600dp` 底部栏、`600–839dp` 导航轨、`≥840dp` 带连接状态和当前 IPv6 的侧栏 |
 | 跨端品牌图标 | 启动器复用 macOS IPv6 地址标记，支持 Adaptive Icon、圆形蒙版和 Android 13 主题图标；磁贴/通知使用高对比紧凑标记 |
 

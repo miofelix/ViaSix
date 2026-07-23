@@ -382,7 +382,10 @@ class ViaSixVpnService : VpnService() {
             PendingIntent.getActivity(
                 this,
                 REQUEST_OPEN_APP,
-                Intent(this, MainActivity::class.java),
+                Intent(this, MainActivity::class.java)
+                    .addFlags(
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP,
+                    ),
                 PendingIntent.FLAG_IMMUTABLE,
             )
         val disconnect =

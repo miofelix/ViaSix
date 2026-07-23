@@ -5,6 +5,13 @@ import org.junit.Test
 
 class AppNavigationLayoutTest {
     @Test
+    fun sectionWireRestoresSafely() {
+        assertEquals(AppSection.PROFILES, AppSection.parse("profiles"))
+        assertEquals(AppSection.OVERVIEW, AppSection.parse("unknown"))
+        assertEquals(AppSection.OVERVIEW, AppSection.parse(null))
+    }
+
+    @Test
     fun compactWidthsUseBottomNavigation() {
         assertEquals(AppNavigationLayout.BOTTOM_BAR, AppNavigationLayout.forWidthDp(360))
         assertEquals(AppNavigationLayout.BOTTOM_BAR, AppNavigationLayout.forWidthDp(599))

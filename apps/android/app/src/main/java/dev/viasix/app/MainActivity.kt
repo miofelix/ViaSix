@@ -35,12 +35,12 @@ import dev.viasix.app.session.NotificationPermissionState
 import dev.viasix.app.session.POST_NOTIFICATIONS_PERMISSION
 import dev.viasix.app.session.ProfileDraftGate
 import dev.viasix.app.session.ProfileImportText
+import dev.viasix.app.session.SessionRuntimeStore
 import dev.viasix.app.session.SessionStartGate
 import dev.viasix.app.session.VpnSessionCommands
 import dev.viasix.app.state.DelayTestState
 import dev.viasix.app.state.LogLevel
 import dev.viasix.app.state.LogSource
-import dev.viasix.app.state.RuntimeSnapshot
 import dev.viasix.app.state.SessionUiState
 import dev.viasix.app.state.appendLog
 import dev.viasix.app.state.rememberCandidate
@@ -62,9 +62,10 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 
 class MainActivity : ComponentActivity() {
-    private var pendingStart: Intent? = null
-    private var pendingNotificationStart: Intent? = null
+    private var pendingVpnStartReason: String? = null
+    private var pendingNotificationStartReason: String? = null
     private lateinit var prefsStore: SessionPrefsStore
+    private lateinit var runtimeStore: SessionRuntimeStore
     private val trafficSampler = TrafficSampler()
     private val cfstRunner = CfstRunner()
     private var lastImportedEventId: Long = 0L
@@ -72,29 +73,36 @@ class MainActivity : ComponentActivity() {
     /** Wall clock when STARTING began; used for start-timeout reconcile. */
     private var startingSinceMillis: Long = 0L
     private var onVpnPermissionResult: ((granted: Boolean) -> Unit)? = null
-    private var onNotificationPermissionResult: ((granted: Boolean, pendingStart: Intent?) -> Unit)? = null
+    private var onNotificationPermissionResult: ((granted: Boolean, pendingReason: String?) -> Unit)? = null
     private var onRefreshNotificationPermission: (() -> Unit)? = null
+    private var onLaunchIntent: ((Intent) -> Unit)? = null
 
     private val vpnPermission =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             val granted = result.resultCode == Activity.RESULT_OK
             if (granted) {
-                pendingStart?.let {
+                pendingVpnStartReason?.let { reason ->
                     trafficSampler.reset()
                     startingSinceMillis = System.currentTimeMillis()
-                    startForegroundService(it)
+                    startForegroundService(
+                        VpnSessionCommands.buildStartIntent(
+                            this,
+                            prefsStore.load(),
+                            reason,
+                        ),
+                    )
                 }
             } else {
                 startingSinceMillis = 0L
             }
-            pendingStart = null
+            pendingVpnStartReason = null
             onVpnPermissionResult?.invoke(granted)
         }
 
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            val pending = pendingNotificationStart
-            pendingNotificationStart = null
+            val pending = pendingNotificationStartReason
+            pendingNotificationStartReason = null
             onNotificationPermissionResult?.invoke(granted, pending)
         }
 
@@ -116,29 +124,56 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pendingVpnStartReason = savedInstanceState?.getString(STATE_PENDING_VPN_START_REASON)
+        pendingNotificationStartReason =
+            savedInstanceState?.getString(STATE_PENDING_NOTIFICATION_START_REASON)
+        startingSinceMillis = savedInstanceState?.getLong(STATE_STARTING_SINCE_MILLIS) ?: 0L
         prefsStore = SessionPrefsStore(this)
+        runtimeStore = SessionRuntimeStore(this)
         val initialPrefs = prefsStore.load()
+        val initialRuntime = runtimeStore.load()
+        wasRunning = initialRuntime.running
         val initial =
             SessionUiState.fromPrefs(initialPrefs).copy(
                 notificationPermission =
                     currentNotificationPermissionState(
                         wasRequested = initialPrefs.notificationPermissionRequested,
                     ),
+                runtime = initialRuntime.toUiSnapshot(),
+                connectionPhase =
+                    ConnectionPhase.restore(
+                        runtimeRunning = initialRuntime.running,
+                        hasPendingStart =
+                            pendingVpnStartReason != null ||
+                                pendingNotificationStartReason != null ||
+                                startingSinceMillis > 0L,
+                    ),
             )
 
         setContent {
             var state by remember { mutableStateOf(initial) }
-            var selectedSection by remember { mutableStateOf(AppSection.OVERVIEW) }
+            var selectedSection by remember {
+                mutableStateOf(AppSection.parse(initialPrefs.selectedSection))
+            }
             val scope = rememberCoroutineScope()
 
-            fun persist(next: SessionUiState) {
-                prefsStore.save(next.toPrefs())
+            fun persist(
+                next: SessionUiState,
+                section: AppSection = selectedSection,
+            ) {
+                prefsStore.save(next.toPrefs().copy(selectedSection = section.wire))
             }
 
             fun update(transform: (SessionUiState) -> SessionUiState) {
                 val next = transform(state)
                 state = next
                 persist(next)
+            }
+
+            fun selectSection(section: AppSection) {
+                if (selectedSection == section) return
+                selectedSection = section
+                persist(state, section)
             }
 
             fun logOnly(transform: (SessionUiState) -> SessionUiState) {
@@ -184,29 +219,8 @@ class MainActivity : ComponentActivity() {
 
             LaunchedEffect(Unit) {
                 while (true) {
-                    val runtimePrefs =
-                        getSharedPreferences(ViaSixVpnService.RUNTIME_PREFS, MODE_PRIVATE)
-                    val running = runtimePrefs.getBoolean(ViaSixVpnService.KEY_RUNNING, false)
-                    val health =
-                        runtimePrefs.getString(ViaSixVpnService.KEY_HEALTH, "—") ?: "—"
-                    val port =
-                        runtimePrefs.getInt(
-                            ViaSixVpnService.KEY_CONTROLLER_PORT,
-                            ViaSixVpnService.CONTROLLER_PORT,
-                        )
-                    val mixed =
-                        runtimePrefs.getInt(
-                            ViaSixVpnService.KEY_MIXED_PORT,
-                            ViaSixVpnService.MIXED_PORT,
-                        )
-                    val secret =
-                        runtimePrefs.getString(ViaSixVpnService.KEY_SECRET, "") ?: ""
-                    val version =
-                        runtimePrefs.getString(ViaSixVpnService.KEY_VERSION, "")
-                            ?.ifBlank { null }
-                    val startedAt =
-                        runtimePrefs.getLong(ViaSixVpnService.KEY_STARTED_AT, 0L)
-                            .takeIf { it > 0 }
+                    val runtimeStatus = runtimeStore.load()
+                    val running = runtimeStatus.running
 
                     if (!running && wasRunning) {
                         trafficSampler.reset()
@@ -214,19 +228,22 @@ class MainActivity : ComponentActivity() {
                     wasRunning = running
 
                     val traffic =
-                        if (running && secret.isNotBlank()) {
+                        if (running && runtimeStatus.secret.isNotBlank()) {
                             withContext(Dispatchers.IO) {
-                                trafficSampler.sample("127.0.0.1", port, secret)
+                                trafficSampler.sample(
+                                    "127.0.0.1",
+                                    runtimeStatus.controllerPort,
+                                    runtimeStatus.secret,
+                                )
                             }
                         } else {
                             TrafficSnapshot.Idle
                         }
 
                     // Merge VPN service events into UI logs (newest first, skip known).
-                    val eventsRaw = runtimePrefs.getString(ViaSixVpnService.KEY_EVENTS, "[]")
                     val imported = mutableListOf<Triple<Long, String, LogLevel>>()
                     try {
-                        val arr = JSONArray(eventsRaw)
+                        val arr = JSONArray(runtimeStatus.eventsJson)
                         for (i in 0 until arr.length()) {
                             val o = arr.getJSONObject(i)
                             val id = o.optLong("id", 0L)
@@ -269,17 +286,7 @@ class MainActivity : ComponentActivity() {
 
                         var next =
                             current.copy(
-                                runtime =
-                                    RuntimeSnapshot(
-                                        running = running,
-                                        health = health,
-                                        traffic = traffic,
-                                        controllerPort = port,
-                                        mixedPort = mixed,
-                                        mihomoVersion = version,
-                                        secretPresent = secret.isNotBlank(),
-                                        startedAtMillis = startedAt,
-                                    ),
+                                runtime = runtimeStatus.toUiSnapshot(traffic),
                                 connectionPhase = phase,
                             )
                         if (
@@ -311,28 +318,27 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            fun buildStartIntent(reason: String): Intent =
-                Intent(this@MainActivity, ViaSixVpnService::class.java)
-                    .putExtra(ViaSixVpnService.EXTRA_PROFILE, state.profileYaml)
-                    .putExtra(ViaSixVpnService.EXTRA_SELECTED_IP, state.selectedAddress)
-                    .putExtra(ViaSixVpnService.EXTRA_MODE, state.routingMode.wire)
-                    .putExtra(ViaSixVpnService.EXTRA_FULL_TUNNEL, state.fullTunnel)
-                    .putExtra(ViaSixVpnService.EXTRA_REASON, reason)
-
-            fun continueStartVpn(intent: Intent) {
+            fun continueStartVpn(reason: String) {
                 val prepare = VpnService.prepare(this@MainActivity)
                 if (prepare != null) {
-                    pendingStart = intent
+                    pendingVpnStartReason = reason
                     vpnPermission.launch(prepare)
                     update {
                         it.copy(connectionPhase = ConnectionPhase.STARTING)
                             .appendLog("请求 VPN 权限…", LogLevel.Info, LogSource.Network)
                     }
-                    startingSinceMillis = System.currentTimeMillis()
+                    // Start timeout begins only after consent, not while the system dialog is open.
+                    startingSinceMillis = 0L
                 } else {
                     trafficSampler.reset()
                     startingSinceMillis = System.currentTimeMillis()
-                    startForegroundService(intent)
+                    startForegroundService(
+                        VpnSessionCommands.buildStartIntent(
+                            this@MainActivity,
+                            state.toPrefs().copy(selectedSection = selectedSection.wire),
+                            reason,
+                        ),
+                    )
                     update {
                         it.copy(connectionPhase = ConnectionPhase.STARTING)
                             .appendLog("正在启动 VPN + mihomo…", LogLevel.Info, LogSource.Session)
@@ -340,7 +346,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            onNotificationPermissionResult = { granted, pending ->
+            onNotificationPermissionResult = { granted, pendingReason ->
                 val permissionState =
                     currentNotificationPermissionState(wasRequested = true)
                         .copy(granted = granted)
@@ -358,7 +364,7 @@ class MainActivity : ComponentActivity() {
                             noticeActionOpenSettings = !granted,
                         )
                 }
-                pending?.let(::continueStartVpn)
+                pendingReason?.let(::continueStartVpn)
             }
 
             fun startVpn(reason: String = "connect") {
@@ -392,21 +398,15 @@ class MainActivity : ComponentActivity() {
                                 asNotice = true,
                             )
                         }
-                        selectedSection =
-                            when (gate.sectionWire) {
-                                "profiles" -> AppSection.PROFILES
-                                "nodes" -> AppSection.NODES
-                                else -> selectedSection
-                            }
+                        selectSection(AppSection.parse(gate.sectionWire))
                         return
                     }
                     SessionStartGate.Result.Ok -> Unit
                 }
 
-                val intent = buildStartIntent(reason)
                 when (NotificationPermissionFlow.beforeStart(state.notificationPermission)) {
                     NotificationPermissionFlow.BeforeStart.REQUEST_PERMISSION -> {
-                        pendingNotificationStart = intent
+                        pendingNotificationStartReason = reason
                         notificationPermission.launch(POST_NOTIFICATIONS_PERMISSION)
                         update {
                             it.copy(connectionPhase = ConnectionPhase.STARTING)
@@ -432,7 +432,7 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                 }
-                continueStartVpn(intent)
+                continueStartVpn(reason)
             }
 
             fun importClipboardProfile() {
@@ -468,27 +468,39 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // Quick Settings tile / cold start: honor request-to-start extras once.
-            LaunchedEffect(Unit) {
+            fun handleLaunchIntent(launchIntent: Intent) {
                 val requestStart =
-                    intent?.getBooleanExtra(VpnSessionCommands.EXTRA_REQUEST_START, false) == true
-                val gateMessage = intent?.getStringExtra(ViaSixTileService.EXTRA_GATE_MESSAGE)
-                val gateSection = intent?.getStringExtra(ViaSixTileService.EXTRA_GATE_SECTION)
+                    launchIntent.getBooleanExtra(VpnSessionCommands.EXTRA_REQUEST_START, false)
+                val gateMessage =
+                    launchIntent.getStringExtra(ViaSixTileService.EXTRA_GATE_MESSAGE)
+                val gateSection =
+                    launchIntent.getStringExtra(ViaSixTileService.EXTRA_GATE_SECTION)
+                launchIntent.removeExtra(VpnSessionCommands.EXTRA_REQUEST_START)
+                launchIntent.removeExtra(ViaSixTileService.EXTRA_GATE_MESSAGE)
+                launchIntent.removeExtra(ViaSixTileService.EXTRA_GATE_SECTION)
+
                 if (!gateMessage.isNullOrBlank()) {
                     update {
                         it.appendLog(gateMessage, LogLevel.Error, LogSource.Session, asNotice = true)
                     }
-                    selectedSection =
+                    val target =
                         when (gateSection) {
                             "profiles" -> AppSection.PROFILES
                             "nodes" -> AppSection.NODES
-                            else -> selectedSection
+                            else -> null
                         }
+                    target?.let(::selectSection)
                 }
                 if (requestStart) {
-                    intent?.removeExtra(VpnSessionCommands.EXTRA_REQUEST_START)
                     startVpn(reason = "quick-settings")
                 }
+            }
+
+            onLaunchIntent = ::handleLaunchIntent
+
+            // Quick Settings tile / cold start: honor request-to-start extras once.
+            LaunchedEffect(Unit) {
+                intent?.let(::handleLaunchIntent)
             }
 
             fun stopVpn() {
@@ -1001,7 +1013,7 @@ class MainActivity : ComponentActivity() {
                 if (!permission.required || permission.granted) return
 
                 if (permission.canRequestInApp) {
-                    pendingNotificationStart = null
+                    pendingNotificationStartReason = null
                     notificationPermission.launch(POST_NOTIFICATIONS_PERMISSION)
                 } else {
                     openAppNotificationSettings()
@@ -1011,7 +1023,7 @@ class MainActivity : ComponentActivity() {
             ViaSixApp(
                 state = state,
                 selectedSection = selectedSection,
-                onSectionChange = { selectedSection = it },
+                onSectionChange = ::selectSection,
                 onProfileChange = { yaml ->
                     update { it.copy(profileDraft = yaml, configPreview = "") }
                 },
@@ -1117,6 +1129,8 @@ class MainActivity : ComponentActivity() {
                 onClearSessionData = {
                     prefsStore.clear()
                     val resetPrefs = prefsStore.load()
+                    val currentRuntime = runtimeStore.load()
+                    selectedSection = AppSection.OVERVIEW
                     state =
                         SessionUiState.fromPrefs(resetPrefs)
                             .copy(
@@ -1124,6 +1138,9 @@ class MainActivity : ComponentActivity() {
                                     currentNotificationPermissionState(
                                         wasRequested = resetPrefs.notificationPermissionRequested,
                                     ),
+                                runtime = currentRuntime.toUiSnapshot(),
+                                connectionPhase =
+                                    ConnectionPhase.restore(currentRuntime.running),
                             )
                             .appendLog("已重置会话偏好", LogLevel.Warning, LogSource.System)
                 },
@@ -1134,6 +1151,22 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         onRefreshNotificationPermission?.invoke()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        onLaunchIntent?.invoke(intent)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString(STATE_PENDING_VPN_START_REASON, pendingVpnStartReason)
+        outState.putString(
+            STATE_PENDING_NOTIFICATION_START_REASON,
+            pendingNotificationStartReason,
+        )
+        outState.putLong(STATE_STARTING_SINCE_MILLIS, startingSinceMillis)
+        super.onSaveInstanceState(outState)
     }
 
     private fun currentNotificationPermissionState(
@@ -1177,5 +1210,9 @@ class MainActivity : ComponentActivity() {
         /** Fail STARTING if VPN runtime never becomes ready. */
         private const val START_TIMEOUT_MS = 25_000L
         private const val PROFILE_VALIDATION_IPV6 = "2001:db8::1"
+        private const val STATE_PENDING_VPN_START_REASON = "pendingVpnStartReason"
+        private const val STATE_PENDING_NOTIFICATION_START_REASON =
+            "pendingNotificationStartReason"
+        private const val STATE_STARTING_SINCE_MILLIS = "startingSinceMillis"
     }
 }
