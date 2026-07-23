@@ -22,6 +22,7 @@ import dev.viasix.app.prefs.SessionPrefsStore
 import dev.viasix.app.session.RuntimeProcessIdentity
 import dev.viasix.app.session.RuntimeStackFailure
 import dev.viasix.app.session.RuntimeStackHealth
+import dev.viasix.app.session.VpnStartOrigin
 import dev.viasix.app.tile.ViaSixTileService
 import dev.viasix.app.tun.Tun2SocksEngine
 import dev.viasix.core.formatting.ByteRateFormatter
@@ -69,7 +70,13 @@ class ViaSixVpnService : VpnService() {
         }
         if (shuttingDown.get()) return START_NOT_STICKY
 
-        val restoredPrefs = if (intent == null) SessionPrefsStore(this).load() else null
+        val startOrigin =
+            VpnStartOrigin.detect(
+                intentPresent = intent != null,
+                action = intent?.action,
+            )
+        val restoredPrefs =
+            if (startOrigin.restoreSavedSession) SessionPrefsStore(this).load() else null
         val profile = intent?.getStringExtra(EXTRA_PROFILE) ?: restoredPrefs?.profileYaml.orEmpty()
         val selectedIp =
             intent?.getStringExtra(EXTRA_SELECTED_IP) ?: restoredPrefs?.selectedAddress
@@ -81,7 +88,7 @@ class ViaSixVpnService : VpnService() {
                 ?: true
         val reason =
             intent?.getStringExtra(EXTRA_REASON).orEmpty().ifBlank {
-                if (intent == null) "system-restart" else "start"
+                startOrigin.reason
             }
 
         startForeground(NOTIFICATION_ID, buildNotification("Starting ViaSix…"))

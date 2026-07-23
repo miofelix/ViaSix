@@ -36,6 +36,7 @@ object VpnSessionCommands {
         reason: String,
     ): Intent =
         Intent(context, ViaSixVpnService::class.java)
+            .setAction(VpnStartOrigin.ACTION_START)
             .putExtra(ViaSixVpnService.EXTRA_PROFILE, prefs.profileYaml)
             .putExtra(ViaSixVpnService.EXTRA_SELECTED_IP, prefs.selectedAddress)
             .putExtra(ViaSixVpnService.EXTRA_MODE, prefs.routingMode)

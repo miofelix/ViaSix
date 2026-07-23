@@ -27,6 +27,11 @@ class SessionRecoverySurfaceTest {
                 "src/main/java/dev/viasix/app/prefs/SessionPrefs.kt",
                 "app/src/main/java/dev/viasix/app/prefs/SessionPrefs.kt",
             ).readText()
+        val commands =
+            resolve(
+                "src/main/java/dev/viasix/app/session/VpnSessionCommands.kt",
+                "app/src/main/java/dev/viasix/app/session/VpnSessionCommands.kt",
+            ).readText()
 
         assertTrue(activity.contains("SessionRuntimeStore(this)"))
         assertTrue(activity.contains("initialRuntime.toUiSnapshot()"))
@@ -44,7 +49,9 @@ class SessionRecoverySurfaceTest {
         assertTrue(service.contains("Intent.FLAG_ACTIVITY_CLEAR_TOP"))
         assertTrue(service.contains("Intent.FLAG_ACTIVITY_SINGLE_TOP"))
         assertTrue(service.contains("SessionPrefsStore(this).load()"))
-        assertTrue(service.contains("\"system-restart\""))
+        assertTrue(service.contains("VpnStartOrigin.detect"))
+        assertTrue(service.contains("startOrigin.restoreSavedSession"))
+        assertTrue(commands.contains(".setAction(VpnStartOrigin.ACTION_START)"))
         assertTrue(service.contains("override fun onRevoke"))
         assertTrue(service.contains("RuntimeStackHealth.failure"))
         assertTrue(service.contains("RuntimeProcessIdentity.token"))
