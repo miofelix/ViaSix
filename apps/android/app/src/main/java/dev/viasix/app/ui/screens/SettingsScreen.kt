@@ -1,5 +1,6 @@
 package dev.viasix.app.ui.screens
 
+import android.os.Build
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -88,6 +89,7 @@ fun SettingsScreen(
     onDnsRoutingModeChange: (DnsRoutingMode) -> Unit = {},
     onDnsServerChange: (String) -> Unit = {},
     onVpnMtuChange: (String) -> Unit = {},
+    onVpnMeteredChange: (Boolean) -> Unit = {},
 ) {
     val colors = LocalViaSixColors.current
     val uriHandler = LocalUriHandler.current
@@ -177,6 +179,52 @@ fun SettingsScreen(
                         } else {
                             colors.warning
                         },
+                    modifier =
+                        Modifier.padding(
+                            start = VisualStyle.spacing16,
+                            end = VisualStyle.spacing16,
+                            bottom = VisualStyle.spacing12,
+                        ),
+                )
+                HorizontalDivider(color = colors.surfaceBorder)
+                SettingRow(
+                    title = "按流量计费 VPN",
+                    detail =
+                        when {
+                            Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ->
+                                "Android 10+ 可配置；当前系统由平台决定"
+                            state.vpnMetered -> "保持 Android 默认计费属性"
+                            else -> "标记为不计费，减少后台数据限制"
+                        },
+                    icon = Icons.Outlined.VpnKey,
+                ) {
+                    Switch(
+                        checked = state.vpnMetered,
+                        onCheckedChange = onVpnMeteredChange,
+                        enabled =
+                            !tunnelLocked &&
+                                Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q,
+                    )
+                }
+                Text(
+                    text =
+                        when {
+                            Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ->
+                                "此系统版本不支持设置 VPN 计费属性。"
+                            state.vpnMetered ->
+                                "系统可在节省流量模式下限制经 VPN 的后台数据；这是兼容当前行为的默认值。"
+                            else ->
+                                "仅改变 Android 对 VPN 的策略分类，不会改变蜂窝网络套餐或实际资费。"
+                        } +
+                            if (tunnelLocked) {
+                                " 运行中不可修改，请先断开。"
+                            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                " 变更在下次连接时生效。"
+                            } else {
+                                ""
+                            },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier =
                         Modifier.padding(
                             start = VisualStyle.spacing16,

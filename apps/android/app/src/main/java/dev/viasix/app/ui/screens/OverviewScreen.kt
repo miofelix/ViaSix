@@ -1,5 +1,6 @@
 package dev.viasix.app.ui.screens
 
+import android.os.Build
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -721,6 +722,16 @@ fun OverviewScreen(
                 )
                 HorizontalDivider(color = colors.surfaceBorder, modifier = Modifier.padding(start = 40.dp))
                 CompactInfoRow("VPN MTU", state.vpnMtu, Icons.Outlined.Speed)
+                HorizontalDivider(color = colors.surfaceBorder, modifier = Modifier.padding(start = 40.dp))
+                CompactInfoRow(
+                    "计费属性",
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        if (state.vpnMetered) "按流量计费" else "不计费"
+                    } else {
+                        "系统决定"
+                    },
+                    Icons.Outlined.VpnKey,
+                )
                 HorizontalDivider(color = colors.surfaceBorder, modifier = Modifier.padding(start = 40.dp))
                 CompactInfoRow(
                     "DNS",

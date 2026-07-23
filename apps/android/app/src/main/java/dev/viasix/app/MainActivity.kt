@@ -1290,6 +1290,11 @@ class MainActivity : ComponentActivity() {
                 update { it.copy(vpnMtu = mtu) }
             }
 
+            fun changeVpnMetered(metered: Boolean) {
+                if (state.connectionPhase.isActiveOrTransitioning) return
+                update { it.copy(vpnMetered = metered) }
+            }
+
             ViaSixApp(
                 state = state,
                 selectedSection = selectedSection,
@@ -1375,6 +1380,7 @@ class MainActivity : ComponentActivity() {
                 onDnsRoutingModeChange = ::changeDnsRoutingMode,
                 onDnsServerChange = ::changeDnsServer,
                 onVpnMtuChange = ::changeVpnMtu,
+                onVpnMeteredChange = ::changeVpnMetered,
                 onRoutingModeChange = ::patchRoutingMode,
                 onFullTunnelChange = { full ->
                     if (state.connectionPhase.isActiveOrTransitioning) {

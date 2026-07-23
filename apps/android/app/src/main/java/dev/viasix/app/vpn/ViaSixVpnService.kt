@@ -97,6 +97,10 @@ class ViaSixVpnService : VpnService() {
             intent?.getStringExtra(EXTRA_VPN_MTU)
                 ?: restoredPrefs?.vpnMtu
                 ?: VpnMtuPolicy.DEFAULT.toString()
+        val vpnMetered =
+            intent?.getBooleanExtra(EXTRA_VPN_METERED, restoredPrefs?.vpnMetered ?: true)
+                ?: restoredPrefs?.vpnMetered
+                ?: true
         val dnsRoutingMode =
             DnsRoutingMode.parse(
                 intent?.getStringExtra(EXTRA_DNS_ROUTING_MODE)
@@ -123,6 +127,7 @@ class ViaSixVpnService : VpnService() {
         startForeground(NOTIFICATION_ID, buildNotification("Starting ViaSix…"))
         appendEvent(
             "启动请求（$reason） mode=${mode.wire} fullTunnel=$fullTunnel mtu=$vpnMtuInput " +
+                "metered=$vpnMetered " +
                 "appRouting=${appRoutingMode.wire} apps=${selectedAppPackages.size}",
             "info",
         )
@@ -143,6 +148,7 @@ class ViaSixVpnService : VpnService() {
                     mode,
                     fullTunnel,
                     vpnMtuInput,
+                    vpnMetered,
                     dnsRoutingMode,
                     dnsServerInput,
                     appRoutingMode,
@@ -166,6 +172,7 @@ class ViaSixVpnService : VpnService() {
         mode: RoutingMode,
         fullTunnel: Boolean,
         vpnMtuInput: String,
+        vpnMetered: Boolean,
         dnsRoutingMode: DnsRoutingMode,
         dnsServerInput: String,
         appRoutingMode: AppRoutingMode,
@@ -232,6 +239,9 @@ class ViaSixVpnService : VpnService() {
                 .setSession("ViaSix")
                 .setMtu(vpnMtu)
                 .addAddress("10.10.0.2", 32)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            builder.setMetered(vpnMetered)
+        }
         applyAppRouting(builder, appRoutingMode, selectedAppPackages)
 
         if (fullTunnel) {
@@ -272,6 +282,12 @@ class ViaSixVpnService : VpnService() {
                 ?: throw IllegalStateException("VpnService.Builder.establish() returned null")
         tunnel = established
         appendEvent("VPN MTU：$vpnMtu", "info")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            appendEvent(
+                "VPN 计费属性：${if (vpnMetered) "按流量计费" else "不计费"}",
+                "info",
+            )
+        }
 
         if (fullTunnel) {
             val engine =
@@ -587,6 +603,7 @@ class ViaSixVpnService : VpnService() {
         const val EXTRA_MODE = "mode"
         const val EXTRA_FULL_TUNNEL = "full_tunnel"
         const val EXTRA_VPN_MTU = "vpn_mtu"
+        const val EXTRA_VPN_METERED = "vpn_metered"
         const val EXTRA_DNS_ROUTING_MODE = "dns_routing_mode"
         const val EXTRA_DNS_SERVER = "dns_server"
         const val EXTRA_APP_ROUTING_MODE = "app_routing_mode"
