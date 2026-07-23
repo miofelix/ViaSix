@@ -72,6 +72,9 @@ make android-assemble
 | 会话偏好持久化 | ✓ SharedPreferences（含候选/出口设置） |
 | mihomo 资产拉取脚本 | ✓ `scripts/fetch-mihomo.mjs` |
 | CloudflareSpeedTest 测速 | ✓（arm64；对齐 macOS：参数校验 / 参数面板 / IP 源 / 排序 / 首页测试节点 / 应用重连；`fetch-cfst.mjs`） |
+| 快捷设置磁贴启停 | ✓（Clash/NekoBox 风格；共用 SessionStartGate） |
+| 首页连接主控 + 通知实时速率 | ✓ |
+| 配置剪贴板 YAML 导入 | ✓（不自动拉取订阅 URL） |
 | native hev/tun2socks | 可选增强（当前用户态转发已覆盖典型 TCP/UDP 应用流量） |
 
 ## 契约
