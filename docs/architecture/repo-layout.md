@@ -35,9 +35,9 @@ packages/* → contracts；不得依赖 apps/*
 | --- | --- | --- | --- | --- |
 | 用户态 mihomo | ✓ | ✓ | ✓ | 规划 |
 | 系统代理 | ✓ | ✓ | 不适用 | 规划 |
-| 虚拟网卡 / VPN | XPC helper + utun | 进程内 Mihomo TUN + Wintun | VpnService + 转发 | 规划（TUN） |
+| 虚拟网卡 / VPN | XPC helper + utun | 进程内 Mihomo TUN + Wintun | VpnService + TCP/UDP IPv4/IPv6 | 规划（TUN） |
 | IPv6 优选 / 投影 | ✓ | ✓（共享 Rust crate） | ✓（Kotlin） | 规划（同桌面契约） |
-| 测速 | ✓ CFST | ✓ CFST | 可后续 | 规划 |
+| 测速 | ✓ CFST | ✓ CFST | ✓ CFST（arm64） | 规划 |
 | 流量展示 | ✓ | ✓ | ✓ 累计 | 规划 |
 
 实现进度与「完成」定义见 [COMPLETION.md](COMPLETION.md)；阶段划分见 [跨平台路线](roadmap.md)。

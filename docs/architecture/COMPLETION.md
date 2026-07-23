@@ -12,8 +12,8 @@
 | IPv6 投影 | ✓ | ✓（共享 Rust crate） | ✓（Kotlin） | 规划 |
 | 用户态 Mihomo | ✓ | ✓ | ✓ | 规划 |
 | 系统代理 | ✓ | ✓ | N/A | 规划 |
-| 虚拟网卡 / VPN | ✓ XPC+utun | ✓ Mihomo TUN+Wintun | ✓ VpnService+转发 | 规划 |
-| 测速 | ✓ CFST | ✓ CFST | —（可后续） | 规划 |
+| 虚拟网卡 / VPN | ✓ XPC+utun | ✓ Mihomo TUN+Wintun | ✓ VpnService + TCP/UDP IPv4/IPv6 | 规划 |
+| 测速 | ✓ CFST | ✓ CFST | ✓ CFST（arm64） | 规划 |
 | 流量展示 | ✓ | ✓ | ✓ 累计 | 规划 |
 | 会话偏好 | ✓ | ✓ | ✓ | 规划 |
 | 安装包/CI | ✓ app | ✓ NSIS workflow | ✓ assembleDebug | 未开工 |
@@ -25,7 +25,7 @@
 | Authenticode / Apple 公证 / Play 签名 | 需要证书与密钥，无法在开源仓内「完成」 |
 | 独立 Windows Service 特权隔离 | 可选安全增强；当前为进程内 Mihomo+Wintun |
 | Swift/Kotlin 共用 Rust FFI | 可选；三端 fixtures 已对齐 |
-| Android hev 生产级 tun2socks | 可选；当前用户态 TCP/DNS 转发为可用 MVP |
+| Android hev/native tun2socks | 可选性能增强；当前用户态 TCP/UDP（SOCKS5）已覆盖典型应用流量 |
 | **Linux 桌面 GUI** | **规划中 / 未开发**；技术倾向 **Tauri 复用 Windows 栈**，见 [roadmap 阶段 4](roadmap.md) 与 [platforms/linux.md](../platforms/linux.md) |
 
 ## 验证

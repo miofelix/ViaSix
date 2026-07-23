@@ -9,6 +9,8 @@
 - 文档：明确 ViaSix 为 **全平台** 产品（macOS / Windows / Android / Linux），而非仅 macOS；根 README 以平台状态矩阵为入口。
 - 文档：路线图增加 **阶段 4 — Linux 桌面**（Tauri，复用 Windows 栈；当前未开发），并新增 `docs/platforms/linux.md`。
 - 文档：同步更新 `PRIVACY` / `SECURITY` / `CONTRIBUTING`、架构完成边界与各平台说明中的定位表述。
+- 文档：Android 从 MVP 标记为 **生产可用**（五分区对齐 macOS；全量隧道 TCP/UDP IPv4/IPv6）；native hev 列为可选增强。
+- Android：全量隧道由「仅 IPv4 TCP + DNS/53」升级为 SOCKS5 CONNECT（TCP）+ UDP ASSOCIATE（通用 UDP，含 QUIC）及 IPv6 转发。
 
 ### 新增
 

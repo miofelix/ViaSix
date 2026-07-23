@@ -20,7 +20,7 @@ ViaSix 是一款 **全平台**、以 **IPv6 为核心** 的网络客户端：测
 | --- | --- | --- | --- |
 | **macOS** | 可用 | SwiftUI + SwiftPM + XPC TUN helper | [apps/macos](apps/macos/README.md) |
 | **Windows** | 可用（MVP 对齐） | Tauri 2 + Rust；Mihomo TUN + Wintun | [apps/windows](apps/windows/README.md) |
-| **Android** | 可用（MVP） | Kotlin + Compose + VpnService | [apps/android](apps/android/README.md) |
+| **Android** | 生产可用 | Kotlin + Compose + VpnService（TCP/UDP IPv4/IPv6） | [apps/android](apps/android/README.md) |
 | **Linux** | **规划中 / 未开发** | 桌面 GUI：Tauri（复用 Windows 栈） | [docs/platforms/linux.md](docs/platforms/linux.md) |
 
 能力矩阵与「完成」边界见 [docs/architecture/COMPLETION.md](docs/architecture/COMPLETION.md)。推进顺序见 [跨平台路线](docs/architecture/roadmap.md)。

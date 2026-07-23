@@ -4,7 +4,7 @@
 
 ViaSix **全平台**产品中的 Android 端（移动网络接入语义与桌面不同：无系统代理，以 VpnService 为主）。
 
-**状态**：MVP（投影 + VpnService 会话 + 对齐桌面的分区 UI）。
+**状态**：生产可用（对齐 macOS 五分区工作流 + 全量隧道 TCP/UDP IPv4/IPv6）。平台差异见下表；可选增强（native hev 等）见 [roadmap 阶段 2](../architecture/roadmap.md)。
 
 ## 技术选型
 
@@ -16,7 +16,7 @@ ViaSix **全平台**产品中的 Android 端（移动网络接入语义与桌面
 | 虚拟网卡 | `ViaSixVpnService`（`VpnService`） |
 | 代理内核 | 预编译 mihomo（assets `mihomo-arm64`，`fetch-mihomo.mjs`） |
 | 测速 | CloudflareSpeedTest arm64（assets `cfst-arm64`，`fetch-cfst.mjs`；linux_arm64 上游） |
-| 网络接入 | VpnService 全量路由 + 用户态 TCP/DNS 转发；可选仅 HTTP 代理 |
+| 网络接入 | VpnService 全量路由 + 用户态 TCP/UDP（SOCKS5 CONNECT / UDP ASSOCIATE）；可选仅 HTTP 代理 |
 | 系统代理 | 不支持 |
 
 ## 与 macOS 的对应关系（权威对齐目标）
@@ -38,6 +38,8 @@ Android 功能对齐以 **macOS** 为准。Windows 端仍在完善中，**不得
 | `ProfilesView` | 摘要解析、文件导入、YAML 编辑、投影预览 |
 | `LogsView` | 来源/级别过滤、搜索、排序 + VPN 事件合并 |
 | `VisualStyle` / `SurfaceCard` | `ui/theme/VisualStyle` + 组件 |
+| XPC helper + utun | `VpnService` + 用户态 `Tun2SocksEngine`（无独立特权 helper） |
+| 菜单栏 | 不适用 |
 
 ## 加固要点
 
@@ -46,13 +48,15 @@ Android 功能对齐以 **macOS** 为准。Windows 端仍在完善中，**不得
 - `ProfileSummaryParser` / `Ipv6Address` / `ByteRateFormatter` / `SpeedTestResultParser`：`:core` 可测纯逻辑
 - 会话偏好扩展：候选节点、出口检测端点与模式、测速 IP 源
 - CFST：`CfstInstaller` + `CfstRunner` + `IPSourceMode` / `SpeedTestParameters`（macOS 参数语义）+ `NodeResultSorting` + 当前节点测速
+- 全量隧道：`Tun2SocksEngine` — IPv4/IPv6 TCP→SOCKS5 CONNECT；通用 UDP→SOCKS5 UDP ASSOCIATE（含 DNS）；ASSOCIATE 失败时 DNS/53 回退 `protect` 直连
 
 ## 验证
 
 ```bash
 make android-test
 make android-skeleton
-cd apps/android && gradle :core:test
+make android-assemble   # 需 Android SDK
+cd apps/android && gradle :core:test :app:test
 ```
 
 配置与投影行为必须符合 [`contracts/`](../../contracts)。
