@@ -39,6 +39,7 @@ class Tun2SocksEngine(
     private val socksPort: Int,
     private val dnsRoutingMode: DnsRoutingMode = DnsRoutingMode.PROXY,
     private val dnsUpstream: InetAddress = InetAddress.getByName("1.1.1.1"),
+    private val mtu: Int = 1_500,
     private val maxSessions: Int = 256,
     private val maxUdpClients: Int = 256,
     maxDirectDnsQueries: Int = 32,
@@ -69,6 +70,10 @@ class Tun2SocksEngine(
     private val udpRelayReactor = UdpRelayReactor()
     private var inChannel: FileChannel? = null
     private var outStream: FileOutputStream? = null
+
+    init {
+        TcpSegmentSizer.maxPayloadBytes(mtu, ipv6 = true)
+    }
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
@@ -461,7 +466,7 @@ class Tun2SocksEngine(
     }
 
     private fun readTcpDownstream(key: String, session: TcpSession, socket: Socket) {
-        val buf = ByteArray(16 * 1024)
+        val buf = ByteArray(TcpSegmentSizer.maxPayloadBytes(mtu, session.ipv6))
         try {
             val input = socket.getInputStream()
             while (running.get() && sessions[key] === session && !socket.isClosed) {

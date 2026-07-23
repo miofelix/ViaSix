@@ -440,6 +440,7 @@ class ViaSixVpnService : VpnService() {
                     socksPort = MIXED_PORT,
                     dnsRoutingMode = dnsRoutingMode,
                     dnsUpstream = dnsAddress,
+                    mtu = vpnMtu,
                 )
             engine.start()
             tunEngine = engine

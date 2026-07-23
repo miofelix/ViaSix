@@ -1,5 +1,6 @@
 package dev.viasix.app.tun
 
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -20,6 +21,8 @@ class TcpBackpressureSurfaceTest {
         assertTrue(engine.contains("flags = Packet.FIN or Packet.ACK"))
         assertTrue(engine.contains("lossless = true"))
         assertTrue(engine.contains("timeoutMs: Long = if (lossless) LOSSLESS_ENQUEUE_TIMEOUT_MS else 0L"))
+        assertTrue(engine.contains("TcpSegmentSizer.maxPayloadBytes(mtu, session.ipv6)"))
+        assertFalse(engine.contains("ByteArray(16 * 1024)"))
     }
 
     private fun resolve(vararg paths: String): File =

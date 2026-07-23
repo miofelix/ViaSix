@@ -40,6 +40,7 @@ class VpnMtuSurfaceTest {
         assertTrue(prefs.contains("o.optString(\"vpnMtu\", \"1500\")"))
         assertTrue(service.contains("restoredPrefs?.vpnMtu"))
         assertTrue(service.contains(".setMtu(vpnMtu)"))
+        assertTrue(service.contains("mtu = vpnMtu"))
         assertFalse(service.contains(".setMtu(1500)"))
         assertTrue(settings.contains("VPN MTU"))
         assertTrue(settings.contains("VpnMtuPolicy.isValid"))
