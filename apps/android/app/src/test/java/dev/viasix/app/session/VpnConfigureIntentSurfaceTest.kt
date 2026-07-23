@@ -29,6 +29,15 @@ class VpnConfigureIntentSurfaceTest {
         assertTrue(activity.contains("selectSection(AppSection.parse(it))"))
         assertTrue(activity.contains("override fun onNewIntent"))
         assertTrue(activity.contains("intent?.let(::handleLaunchIntent)"))
+
+        val manifest =
+            resolve(
+                "src/main/AndroidManifest.xml",
+                "app/src/main/AndroidManifest.xml",
+            ).readText()
+        // Bare re-launches (and OEM redelivery) must route through onNewIntent.
+        assertTrue(manifest.contains("android:launchMode=\"singleTop\""))
+        assertTrue(manifest.contains("android:name=\".MainActivity\""))
     }
 
     private fun resolve(vararg paths: String): File =
