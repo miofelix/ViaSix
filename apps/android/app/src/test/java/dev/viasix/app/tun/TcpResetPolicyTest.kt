@@ -52,6 +52,10 @@ class TcpResetPolicyTest {
     @Test
     fun zeroWindowOnlyAcceptsExactReset() {
         assertEquals(
+            TcpResetPolicy.Action.CLOSE,
+            TcpResetPolicy.classify(sequence = 100L, nextExpected = 100L, receiveWindow = 0),
+        )
+        assertEquals(
             TcpResetPolicy.Action.DROP,
             TcpResetPolicy.classify(sequence = 101L, nextExpected = 100L, receiveWindow = 0),
         )

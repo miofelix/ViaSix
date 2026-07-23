@@ -20,7 +20,9 @@ class TcpReceiveWindowSurfaceTest {
         assertTrue(validation < acknowledgement)
         assertTrue(validation < payload)
         assertTrue(engine.contains("tcp.flags and Packet.ACK == 0"))
+        assertTrue(engine.contains("val receiveWindow = session.upstream.advertisedWindow()"))
         assertTrue(engine.contains("nextExpected = session.clientNextSeq"))
+        assertTrue(engine.substring(validation, acknowledgement).contains("receiveWindow = receiveWindow"))
         assertTrue(engine.contains("enqueueAck(session)\n            return"))
     }
 

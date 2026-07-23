@@ -30,6 +30,7 @@ class TcpReceiveWindowTest {
     fun zeroWindowOnlyAcceptsExactEmptySegment() {
         assertTrue(accepts(sequence = 100L, nextExpected = 100L, receiveWindow = 0))
         assertFalse(accepts(sequence = 101L, nextExpected = 100L, receiveWindow = 0))
+        assertFalse(accepts(sequence = 99L, payloadLength = 1, nextExpected = 100L, receiveWindow = 0))
         assertFalse(accepts(sequence = 100L, payloadLength = 1, nextExpected = 100L, receiveWindow = 0))
     }
 

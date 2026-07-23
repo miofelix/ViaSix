@@ -12,10 +12,16 @@ class TcpResetPolicySurfaceTest {
                 "src/main/java/dev/viasix/app/tun/Tun2SocksEngine.kt",
                 "app/src/main/java/dev/viasix/app/tun/Tun2SocksEngine.kt",
             ).readText()
+        val classification = engine.indexOf("TcpResetPolicy.classify(")
+        val actionDispatch = engine.indexOf("TcpResetPolicy.Action.CLOSE", classification)
 
-        assertTrue(engine.contains("TcpResetPolicy.classify("))
+        assertTrue(classification >= 0)
+        assertTrue(actionDispatch > classification)
         assertTrue(engine.contains("if (session.socket == null) return"))
         assertTrue(engine.contains("nextExpected = session.clientNextSeq"))
+        assertTrue(
+            engine.substring(classification, actionDispatch).contains("receiveWindow = receiveWindow"),
+        )
         assertTrue(engine.contains("TcpResetPolicy.Action.CLOSE -> removeSession(key, session)"))
         assertTrue(engine.contains("TcpResetPolicy.Action.CHALLENGE_ACK"))
         assertTrue(engine.contains("enqueueChallengeAck(session)"))

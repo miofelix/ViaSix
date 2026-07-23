@@ -335,6 +335,7 @@ class Tun2SocksEngine(
             enqueueClosedStateReset(tcp, clientIp, remoteIp, ipv6)
             return
         }
+        val receiveWindow = session.upstream.advertisedWindow()
 
         if (tcp.flags and Packet.RST != 0) {
             if (session.socket == null) return
@@ -342,6 +343,7 @@ class Tun2SocksEngine(
                 TcpResetPolicy.classify(
                     sequence = tcp.seq,
                     nextExpected = session.clientNextSeq,
+                    receiveWindow = receiveWindow,
                 )
             ) {
                 TcpResetPolicy.Action.CLOSE -> removeSession(key, session)
@@ -388,6 +390,7 @@ class Tun2SocksEngine(
                             payloadLength = tcp.payloadLength,
                             fin = tcp.flags and Packet.FIN != 0,
                             nextExpected = session.clientNextSeq,
+                            receiveWindow = receiveWindow,
                         )
                 )
         ) {
