@@ -61,7 +61,7 @@ make android-assemble
 | 全量隧道 IPv4/IPv6 TCP→SOCKS | ✓（ACK 驱动握手/重复 SYN；回绕安全序列与 FIN；客户端接收窗口流控；未确认段有界保留与退避重传；无损有界队列及背压） |
 | 全量隧道通用 UDP→SOCKS5 UDP ASSOCIATE | ✓（每本地源端口一条 ASSOCIATE；DNS 默认复用此路径） |
 | TUN 帧安全 | ✓（IPv4/IPv6 与 TCP/UDP 声明长度严格受实际帧边界约束；畸形帧隔离且读线程监督 fail-closed） |
-| DNS 路由 | ✓（TCP/UDP 默认经 mihomo/SOCKS，支持显式 protect 直连与自定义数字 IPv4/IPv6 服务器） |
+| DNS 路由 | ✓（TCP/UDP 默认经 mihomo/SOCKS，支持显式 protect 直连与自定义数字 IPv4/IPv6 服务器；UDP 直连查询有 32 个 in-flight 硬上限） |
 | VPN MTU | ✓（默认 1500；可在 macOS 同款安全范围 1280–9000 内调整） |
 | VPN 计费属性 | ✓（Android 10+；默认保持平台计费行为，可显式标记为不计费） |
 | 局域网绕过 | ✓（Android 13+ 原生路由排除；私网、链路本地、组播与广播） |

@@ -18,6 +18,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -42,6 +43,7 @@ class Tun2SocksEngine(
     private val dnsUpstream: InetAddress = InetAddress.getByName("1.1.1.1"),
     private val maxSessions: Int = 256,
     private val maxUdpClients: Int = 256,
+    maxDirectDnsQueries: Int = 32,
     private val associateFailBackoffMs: Long = 5_000L,
 ) {
     private val running = AtomicBoolean(false)
@@ -53,6 +55,7 @@ class Tun2SocksEngine(
     private val activeSessionCount = AtomicInteger(0)
     private val udpClients = UdpClientEndpointTable(maxEntries = maxUdpClients)
     private val udpRelays = ConcurrentHashMap<String, UdpClientRelay>()
+    private val directDnsGate = BoundedConcurrencyGate(maxDirectDnsQueries)
     private var readerThread: Thread? = null
     private var writerThread: Thread? = null
     private val outboundPackets = OutboundPacketQueue(capacity = 512)
@@ -555,8 +558,22 @@ class Tun2SocksEngine(
         // Explicit direct DNS keeps per-query protected sockets for concurrent demux.
         // Proxy DNS falls through to the per-client SOCKS5 UDP ASSOCIATE path below.
         if (DnsSettingsPolicy.shouldUseProtectedDirect(udp.destPort, dnsRoutingMode)) {
-            executor.execute {
-                forwardDnsDirect(clientIp, udp.sourcePort, remoteIp, payload, ipv6)
+            val permit = directDnsGate.tryAcquire()
+            if (permit == null) {
+                Log.w(TAG, "direct DNS query limit reached; drop")
+                return
+            }
+            try {
+                executor.execute {
+                    try {
+                        forwardDnsDirect(clientIp, udp.sourcePort, remoteIp, payload, ipv6)
+                    } finally {
+                        permit.close()
+                    }
+                }
+            } catch (error: RejectedExecutionException) {
+                permit.close()
+                Log.w(TAG, "direct DNS worker rejected: ${error.message}")
             }
             return
         }
