@@ -12,6 +12,7 @@ import android.os.ParcelFileDescriptor
 import android.service.quicksettings.TileService
 import android.util.Log
 import dev.viasix.app.MainActivity
+import dev.viasix.app.R
 import dev.viasix.app.mihomo.ControllerClient
 import dev.viasix.app.mihomo.MihomoInstaller
 import dev.viasix.app.mihomo.MihomoProcess
@@ -391,7 +392,8 @@ class ViaSixVpnService : VpnService() {
         return builder
             .setContentTitle("ViaSix")
             .setContentText(content)
-            .setSmallIcon(android.R.drawable.ic_lock_lock)
+            .setSmallIcon(R.drawable.ic_viasix_notification)
+            .setColor(0xFF007AFF.toInt())
             .setContentIntent(launch)
             .setOngoing(true)
             .build()

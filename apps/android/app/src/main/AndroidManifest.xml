@@ -8,8 +8,9 @@
 
     <application
         android:allowBackup="false"
-        android:icon="@android:drawable/sym_def_app_icon"
+        android:icon="@mipmap/ic_launcher"
         android:label="ViaSix"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.ViaSix">
 
@@ -41,7 +42,7 @@
         <service
             android:name=".tile.ViaSixTileService"
             android:exported="true"
-            android:icon="@android:drawable/ic_lock_lock"
+            android:icon="@drawable/ic_viasix_tile"
             android:label="ViaSix"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>

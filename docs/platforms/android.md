@@ -60,6 +60,7 @@ Android 功能对齐以 **macOS** 为准。Windows 端仍在完善中，**不得
 | 配置粘贴导入 | Profiles「粘贴剪贴板」识别 mihomo/Clash YAML（不自动拉订阅 URL） |
 | 通知实时流量 | 前台 VPN 通知展示 ↑/↓ 紧凑速率与连接数 |
 | 自适应应用壳 | `<600dp` 底部栏、`600–839dp` 导航轨、`≥840dp` 带连接状态和当前 IPv6 的侧栏 |
+| 跨端品牌图标 | 启动器复用 macOS IPv6 地址标记，支持 Adaptive Icon、圆形蒙版和 Android 13 主题图标；磁贴/通知使用高对比紧凑标记 |
 
 ## 验证
 

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- High-contrast compact mark for Quick Settings. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <path
+        android:pathData="M372,286H308C246,286 206,326 206,388V636C206,698 246,738 308,738H372M652,286H716C778,286 818,326 818,388V636C818,698 778,738 716,738H652"
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="62"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M438,430a38,38 0,1 0,76 0a38,38 0,1 0,-76 0M510,430a38,38 0,1 0,76 0a38,38 0,1 0,-76 0M438,594a38,38 0,1 0,76 0a38,38 0,1 0,-76 0M510,594a38,38 0,1 0,76 0a38,38 0,1 0,-76 0"
+        android:fillColor="#FFFFFFFF" />
+</vector>

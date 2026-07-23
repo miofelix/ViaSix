@@ -13,6 +13,7 @@
 - Android：全量隧道由「仅 IPv4 TCP + DNS/53」升级为 SOCKS5 CONNECT（TCP）+ UDP ASSOCIATE（通用 UDP，含 QUIC）及 IPv6 转发。
 - Android：参考 Clash Meta / NekoBox 增加快捷设置磁贴、首页连接主控、配置剪贴板导入、通知栏实时上下行速率（语义仍以 macOS 为准）。
 - Android：导航壳适配手机、横屏/折叠屏和平板窗口，按宽度在底部栏、导航轨与 macOS 风格上下文侧栏间切换。
+- Android：以 macOS IPv6 地址标记补齐自适应启动图标、圆形图标、Android 13 主题图标，以及专用磁贴/通知图标。
 
 ### 新增
 

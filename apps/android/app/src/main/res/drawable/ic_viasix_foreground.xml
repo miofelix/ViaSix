@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Vector adaptation of apps/macos/Packaging/AppIcon.svg. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <path
+        android:pathData="M174,720C300,720 320,650 398,650C458,650 454,510 512,510C570,510 598,370 846,300"
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FFA1A39D"
+        android:strokeWidth="16"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M156,720a18,18 0,1 0,36 0a18,18 0,1 0,-36 0"
+        android:fillColor="#FF242522" />
+    <path
+        android:pathData="M820,278L852,300L820,322"
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FF242522"
+        android:strokeWidth="16"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M372,326H316C280,326 254,352 254,388V636C254,672 280,698 316,698H372"
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FF242522"
+        android:strokeWidth="42"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M652,326H708C744,326 770,352 770,388V636C770,672 744,698 708,698H652"
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="#FF242522"
+        android:strokeWidth="42"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M452,438a24,24 0,1 0,48 0a24,24 0,1 0,-48 0M524,438a24,24 0,1 0,48 0a24,24 0,1 0,-48 0M452,586a24,24 0,1 0,48 0a24,24 0,1 0,-48 0M524,586a24,24 0,1 0,48 0a24,24 0,1 0,-48 0"
+        android:fillColor="#FF242522" />
+</vector>
