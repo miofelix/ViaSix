@@ -36,6 +36,27 @@ class PacketValidationTest {
     }
 
     @Test
+    fun rejectsMalformedTcpMssOptions() {
+        val packet =
+            Packet.buildIp4Tcp(
+                source = InetAddress.getByName("10.10.0.2"),
+                destination = InetAddress.getByName("1.1.1.1"),
+                sourcePort = 53_000,
+                destPort = 443,
+                seq = 1,
+                ack = 2,
+                flags = Packet.SYN,
+                payload = ByteArray(0),
+                maximumSegmentSize = 1_000,
+            )
+        packet[Packet.IP4_HEADER_SIZE + Packet.TCP_HEADER_SIZE + 1] = 3
+
+        val buffer = ByteBuffer.wrap(packet)
+        val ip = Packet.parseIp4(buffer)!!
+        assertNull(Packet.parseTcp(buffer, ip.payloadOffset, ip.totalLength - ip.headerLength))
+    }
+
+    @Test
     fun rejectsIpv4FragmentsThatRequireReassembly() {
         val base =
             Packet.buildIp4Udp(

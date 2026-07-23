@@ -52,6 +52,7 @@ internal object Packet {
         val window: Int,
         val payloadOffset: Int,
         val payloadLength: Int,
+        val maximumSegmentSize: Int? = null,
     )
 
     data class Udp(
@@ -192,6 +193,7 @@ internal object Packet {
         val ack = buffer.getInt(start + 8).toLong() and 0xffffffffL
         val dataOffset = ((buffer.get(start + 12).toInt() and 0xf0) ushr 4) * 4
         if (dataOffset < TCP_HEADER_SIZE || dataOffset > l4Length) return null
+        val options = parseTcpOptions(buffer, start + TCP_HEADER_SIZE, start + dataOffset) ?: return null
         val flags = buffer.get(start + 13).toInt() and 0xff
         val window = buffer.getShort(start + 14).toInt() and 0xffff
         val tcpPayloadOffset = start + dataOffset
@@ -206,7 +208,41 @@ internal object Packet {
             window,
             tcpPayloadOffset,
             payloadLength,
+            options.maximumSegmentSize,
         )
+    }
+
+    private data class TcpOptions(
+        val maximumSegmentSize: Int?,
+    )
+
+    private fun parseTcpOptions(buffer: ByteBuffer, start: Int, end: Int): TcpOptions? {
+        var offset = start
+        var maximumSegmentSize: Int? = null
+        while (offset < end) {
+            val kind = buffer.get(offset).toInt() and 0xff
+            when (kind) {
+                0 -> break // End of options list; remaining bytes are padding.
+                1 -> offset += 1 // No-op.
+                2 -> {
+                    if (offset > end - 2) return null
+                    val length = buffer.get(offset + 1).toInt() and 0xff
+                    if (length != 4 || offset > end - length) return null
+                    if (maximumSegmentSize != null) return null
+                    val value = buffer.getShort(offset + 2).toInt() and 0xffff
+                    if (value == 0) return null
+                    maximumSegmentSize = value
+                    offset += length
+                }
+                else -> {
+                    if (offset > end - 2) return null
+                    val length = buffer.get(offset + 1).toInt() and 0xff
+                    if (length < 2 || offset > end - length) return null
+                    offset += length
+                }
+            }
+        }
+        return TcpOptions(maximumSegmentSize)
     }
 
     fun parseTcp(buffer: ByteBuffer, ip: Ip4): Tcp? {
@@ -318,9 +354,20 @@ internal object Packet {
         ack: Long,
         flags: Int,
         payload: ByteArray,
+        maximumSegmentSize: Int? = null,
     ): ByteArray {
-        requireBuildFields(source, destination, 4, sourcePort, destPort, MAX_IP4_TCP_PAYLOAD, payload)
-        val total = IP4_HEADER_SIZE + TCP_HEADER_SIZE + payload.size
+        val options = tcpOptions(maximumSegmentSize, flags)
+        requireBuildFields(
+            source,
+            destination,
+            4,
+            sourcePort,
+            destPort,
+            MAX_IP4_TCP_PAYLOAD - options.size,
+            payload,
+        )
+        val tcpHeaderSize = TCP_HEADER_SIZE + options.size
+        val total = IP4_HEADER_SIZE + tcpHeaderSize + payload.size
         val buf = ByteBuffer.allocate(total).order(ByteOrder.BIG_ENDIAN)
         buf.put(0x45.toByte())
         buf.put(0)
@@ -336,11 +383,12 @@ internal object Packet {
         buf.putShort(destPort.toShort())
         buf.putInt(seq.toInt())
         buf.putInt(ack.toInt())
-        buf.put(((5 shl 4).toByte())) // data offset = 5
+        buf.put(((tcpHeaderSize / 4) shl 4).toByte())
         buf.put(flags.toByte())
         buf.putShort(0xffff.toShort()) // window
         buf.putShort(0) // checksum
         buf.putShort(0) // urgent
+        buf.put(options)
         if (payload.isNotEmpty()) buf.put(payload)
 
         val bytes = buf.array()
@@ -354,7 +402,7 @@ internal object Packet {
                 destination.address,
                 PROTO_TCP.toInt(),
                 IP4_HEADER_SIZE,
-                TCP_HEADER_SIZE + payload.size,
+                tcpHeaderSize + payload.size,
             ),
         )
         return bytes
@@ -412,9 +460,20 @@ internal object Packet {
         ack: Long,
         flags: Int,
         payload: ByteArray,
+        maximumSegmentSize: Int? = null,
     ): ByteArray {
-        requireBuildFields(source, destination, 16, sourcePort, destPort, MAX_IP6_TCP_PAYLOAD, payload)
-        val l4Len = TCP_HEADER_SIZE + payload.size
+        val options = tcpOptions(maximumSegmentSize, flags)
+        requireBuildFields(
+            source,
+            destination,
+            16,
+            sourcePort,
+            destPort,
+            MAX_IP6_TCP_PAYLOAD - options.size,
+            payload,
+        )
+        val tcpHeaderSize = TCP_HEADER_SIZE + options.size
+        val l4Len = tcpHeaderSize + payload.size
         val total = IP6_HEADER_SIZE + l4Len
         val buf = ByteBuffer.allocate(total).order(ByteOrder.BIG_ENDIAN)
         // version=6, traffic class=0, flow label=0
@@ -428,11 +487,12 @@ internal object Packet {
         buf.putShort(destPort.toShort())
         buf.putInt(seq.toInt())
         buf.putInt(ack.toInt())
-        buf.put(((5 shl 4).toByte()))
+        buf.put(((tcpHeaderSize / 4) shl 4).toByte())
         buf.put(flags.toByte())
         buf.putShort(0xffff.toShort())
         buf.putShort(0)
         buf.putShort(0)
+        buf.put(options)
         if (payload.isNotEmpty()) buf.put(payload)
         val bytes = buf.array()
         writeChecksum(
@@ -492,6 +552,20 @@ internal object Packet {
     private fun writeChecksum(bytes: ByteArray, offset: Int, value: Int) {
         bytes[offset] = ((value ushr 8) and 0xff).toByte()
         bytes[offset + 1] = (value and 0xff).toByte()
+    }
+
+    private fun tcpOptions(maximumSegmentSize: Int?, flags: Int): ByteArray {
+        if (maximumSegmentSize == null) return ByteArray(0)
+        require(flags and SYN != 0) { "TCP MSS option is valid only on SYN packets" }
+        require(maximumSegmentSize in 1..0xffff) {
+            "TCP MSS must be an unsigned non-zero 16-bit value"
+        }
+        return byteArrayOf(
+            2,
+            4,
+            (maximumSegmentSize ushr 8).toByte(),
+            maximumSegmentSize.toByte(),
+        )
     }
 
     private fun ipChecksum(buf: ByteArray, offset: Int, length: Int): Int {

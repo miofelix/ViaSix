@@ -275,6 +275,7 @@ class Tun2SocksEngine(
                     remoteIp = remoteIp,
                     remotePort = tcp.destPort,
                     clientIsn = tcp.seq,
+                    clientMaximumSegmentSize = tcp.maximumSegmentSize,
                     ipv6 = ipv6,
                 )
             sessions[key] = session
@@ -466,7 +467,14 @@ class Tun2SocksEngine(
     }
 
     private fun readTcpDownstream(key: String, session: TcpSession, socket: Socket) {
-        val buf = ByteArray(TcpSegmentSizer.maxPayloadBytes(mtu, session.ipv6))
+        val buf =
+            ByteArray(
+                TcpSegmentSizer.negotiatedPayloadBytes(
+                    mtu = mtu,
+                    ipv6 = session.ipv6,
+                    peerMss = session.clientMaximumSegmentSize,
+                ),
+            )
         try {
             val input = socket.getInputStream()
             while (running.get() && sessions[key] === session && !socket.isClosed) {
@@ -556,6 +564,7 @@ class Tun2SocksEngine(
         ack: Long,
         flags: Int,
         payload: ByteArray,
+        maximumSegmentSize: Int? = null,
     ): ByteArray =
         if (session.ipv6) {
             Packet.buildIp6Tcp(
@@ -567,6 +576,7 @@ class Tun2SocksEngine(
                 ack = ack,
                 flags = flags,
                 payload = payload,
+                maximumSegmentSize = maximumSegmentSize,
             )
         } else {
             Packet.buildIp4Tcp(
@@ -578,6 +588,7 @@ class Tun2SocksEngine(
                 ack = ack,
                 flags = flags,
                 payload = payload,
+                maximumSegmentSize = maximumSegmentSize,
             )
         }
 
@@ -589,6 +600,7 @@ class Tun2SocksEngine(
                 ack = session.clientNextSeq,
                 flags = Packet.SYN or Packet.ACK,
                 payload = ByteArray(0),
+                maximumSegmentSize = TcpSegmentSizer.maxPayloadBytes(mtu, session.ipv6),
             ),
             lossless = true,
         )
@@ -1095,6 +1107,7 @@ class Tun2SocksEngine(
         val remoteIp: InetAddress,
         val remotePort: Int,
         val clientIsn: Long,
+        val clientMaximumSegmentSize: Int? = null,
         val ipv6: Boolean = false,
     ) {
         @Volatile var socket: Socket? = null

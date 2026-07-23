@@ -58,4 +58,27 @@ class TcpSegmentSizerTest {
             )
         }
     }
+
+    @Test
+    fun capsPayloadToPeerMssAndUsesProtocolDefaultsWhenAbsent() {
+        assertEquals(
+            536,
+            TcpSegmentSizer.negotiatedPayloadBytes(mtu = 1_500, ipv6 = false, peerMss = null),
+        )
+        assertEquals(
+            1_220,
+            TcpSegmentSizer.negotiatedPayloadBytes(mtu = 1_500, ipv6 = true, peerMss = null),
+        )
+        assertEquals(
+            1_000,
+            TcpSegmentSizer.negotiatedPayloadBytes(mtu = 1_500, ipv6 = false, peerMss = 1_000),
+        )
+        assertEquals(
+            1_460,
+            TcpSegmentSizer.negotiatedPayloadBytes(mtu = 1_500, ipv6 = false, peerMss = 2_000),
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            TcpSegmentSizer.negotiatedPayloadBytes(mtu = 1_500, ipv6 = false, peerMss = 0)
+        }
+    }
 }

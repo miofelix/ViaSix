@@ -74,6 +74,47 @@ class PacketCodecTest {
     }
 
     @Test
+    fun tcpMssOption_roundTripsAndIsChecksummed() {
+        val bytes4 =
+            Packet.buildIp4Tcp(
+                source = remote4,
+                destination = client4,
+                sourcePort = 443,
+                destPort = 40_000,
+                seq = 1000L,
+                ack = 2001L,
+                flags = Packet.SYN or Packet.ACK,
+                payload = ByteArray(0),
+                maximumSegmentSize = 1_440,
+            )
+        val buffer4 = ByteBuffer.wrap(bytes4)
+        val ip4 = Packet.parseIp4(buffer4)!!
+        val tcp4 = Packet.parseTcp(buffer4, ip4)!!
+        val bytes6 =
+            Packet.buildIp6Tcp(
+                source = remote6,
+                destination = client6,
+                sourcePort = 443,
+                destPort = 40_000,
+                seq = 1000L,
+                ack = 2001L,
+                flags = Packet.SYN or Packet.ACK,
+                payload = ByteArray(0),
+                maximumSegmentSize = 1_420,
+            )
+        val buffer6 = ByteBuffer.wrap(bytes6)
+        val ip6 = Packet.parseIp6(buffer6)!!
+        val tcp6 = Packet.parseTcp(buffer6, ip6)!!
+
+        assertEquals(24, tcp4.dataOffset)
+        assertEquals(1_440, tcp4.maximumSegmentSize)
+        assertEquals(0, tcp4.payloadLength)
+        assertEquals(24, tcp6.dataOffset)
+        assertEquals(1_420, tcp6.maximumSegmentSize)
+        assertEquals(0, tcp6.payloadLength)
+    }
+
+    @Test
     fun ipv6Udp_roundTrip() {
         val payload = "quic".toByteArray()
         val bytes =

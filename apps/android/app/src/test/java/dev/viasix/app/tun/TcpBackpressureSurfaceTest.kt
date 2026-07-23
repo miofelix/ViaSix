@@ -22,6 +22,8 @@ class TcpBackpressureSurfaceTest {
         assertTrue(engine.contains("lossless = true"))
         assertTrue(engine.contains("timeoutMs: Long = if (lossless) LOSSLESS_ENQUEUE_TIMEOUT_MS else 0L"))
         assertTrue(engine.contains("TcpSegmentSizer.maxPayloadBytes(mtu, session.ipv6)"))
+        assertTrue(engine.contains("TcpSegmentSizer.negotiatedPayloadBytes"))
+        assertTrue(engine.contains("maximumSegmentSize = TcpSegmentSizer.maxPayloadBytes(mtu, session.ipv6)"))
         assertFalse(engine.contains("ByteArray(16 * 1024)"))
     }
 
