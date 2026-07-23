@@ -841,9 +841,9 @@ fun SettingsScreen(
                     }
                     Text(
                         text =
-                            "检查会区分缺失、损坏、错误架构和执行权限；修复会从 APK assets " +
-                                "原子替换对应 AArch64 ELF。mihomo 仅可在断开后修复，" +
-                                "CFST 仅可在测速停止后修复。",
+                            "检查会区分缺失、损坏、错误架构和执行权限；mihomo 可从 APK assets " +
+                                "原子替换，CFST 随 APK 安装到系统原生目录，按钮会恢复 IP 列表并复核二进制。" +
+                                "若 CFST 二进制缺失或损坏，需要重新安装应用。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -1061,11 +1061,18 @@ private fun runtimeComponentRepairLabel(
     repairing: RuntimeComponentId?,
 ): String {
     if (repairing == component) return "修复中…"
+    if (component == RuntimeComponentId.CFST) {
+        return if (info.condition == RuntimeComponentCondition.READY) {
+            "刷新 CFST"
+        } else {
+            "准备 CFST"
+        }
+    }
     val action =
         when (info.condition) {
             RuntimeComponentCondition.READY -> "重装"
             RuntimeComponentCondition.MISSING -> "安装"
             else -> "修复"
         }
-    return "$action ${if (component == RuntimeComponentId.MIHOMO) "mihomo" else "CFST"}"
+    return "$action mihomo"
 }

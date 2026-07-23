@@ -793,7 +793,7 @@ class MainActivity : ComponentActivity() {
                             },
                         detail =
                             if (installOk) {
-                                "AArch64 ELF 已安装并通过启动检查"
+                                "APK 原生目录内 AArch64 ELF 已通过启动检查"
                             } else {
                                 (result as? CfstRunOutcome.Failed)?.message ?: "CFST 安装失败"
                             },
@@ -1074,7 +1074,7 @@ class MainActivity : ComponentActivity() {
                         it.appendLog(
                             when (component) {
                                 RuntimeComponentId.MIHOMO -> "VPN 会话运行时不能替换 mihomo，请先断开"
-                                RuntimeComponentId.CFST -> "测速运行时不能替换 CFST，请先停止测速"
+                                RuntimeComponentId.CFST -> "测速运行时不能准备 CFST，请先停止测速"
                             },
                             LogLevel.Warning,
                             LogSource.System,

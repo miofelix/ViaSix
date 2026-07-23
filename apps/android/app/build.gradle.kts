@@ -37,6 +37,12 @@ android {
     }
 
     packaging {
+        jniLibs {
+            // Android 10+ forbids executing binaries copied into filesDir. CFST is
+            // packaged as a native library and must be extracted to nativeLibraryDir.
+            useLegacyPackaging = true
+            keepDebugSymbols += "**/libcfst.so"
+        }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }

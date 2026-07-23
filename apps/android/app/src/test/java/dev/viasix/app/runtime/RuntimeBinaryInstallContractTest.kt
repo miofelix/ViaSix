@@ -62,11 +62,11 @@ class RuntimeBinaryInstallContractTest {
         val candidates =
             listOf(
                 "src/main/assets/mihomo/mihomo-arm64",
-                "src/main/assets/cfst/cfst-arm64",
+                "src/main/jniLibs/arm64-v8a/libcfst.so",
                 "app/src/main/assets/mihomo/mihomo-arm64",
-                "app/src/main/assets/cfst/cfst-arm64",
+                "app/src/main/jniLibs/arm64-v8a/libcfst.so",
                 "apps/android/app/src/main/assets/mihomo/mihomo-arm64",
-                "apps/android/app/src/main/assets/cfst/cfst-arm64",
+                "apps/android/app/src/main/jniLibs/arm64-v8a/libcfst.so",
             ).map(::File).filter { it.isFile }
 
         candidates.forEach { file ->

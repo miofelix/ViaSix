@@ -10,17 +10,18 @@ import java.io.File
 import java.io.IOException
 
 /**
- * Installs the bundled CFST binary and default IPv6 list from assets into the
- * app private files directory (same pattern as [dev.viasix.app.mihomo.MihomoInstaller]).
+ * Resolves the bundled CFST executable from Android's native library directory
+ * and installs the default IPv6 list into the app private files directory.
  *
- * Ships arm64 only (`cfst/cfst-arm64` from `scripts/fetch-cfst.mjs`, linux_arm64
- * upstream, statically linked). Callers should surface a clear error on unsupported ABIs.
+ * Android 10+ denies exec from writable app directories such as filesDir, even
+ * when chmod reports an execute bit. Packaging CFST as `libcfst.so` makes the
+ * package manager extract it into the read-only, executable nativeLibraryDir.
+ * Ships arm64 only (linux_arm64 upstream, statically linked).
  */
 object CfstInstaller {
     private const val TAG = "CfstInstaller"
-    const val ASSET_BINARY_ARM64 = "cfst/cfst-arm64"
     const val ASSET_IPV6_LIST = "cfst/ipv6.txt"
-    const val BINARY_NAME = "cfst"
+    const val NATIVE_BINARY_NAME = "libcfst.so"
     const val IPV6_LIST_NAME = "ipv6.txt"
 
     data class InstallResult(
@@ -36,21 +37,18 @@ object CfstInstaller {
         if (!isArm64()) {
             throw IOException("设备 ABI 非 arm64，当前 APK 仅包含 arm64 CFST")
         }
+        val binary = packagedBinary(context)
+        val inspection = RuntimeBinaryInstall.inspectElfBinary(binary)
+        if (!inspection.ready) {
+            throw IOException(binaryDetail(inspection))
+        }
+
         val destDir = File(context.filesDir, "cfst")
         if (!destDir.exists() && !destDir.mkdirs()) {
             throw IOException("Cannot create cfst dir: ${destDir.absolutePath}")
         }
 
-        val binary = File(destDir, BINARY_NAME)
         val ipv6List = File(destDir, IPV6_LIST_NAME)
-        RuntimeBinaryInstall.installAssetBinary(
-            context = context,
-            assetPath = ASSET_BINARY_ARM64,
-            dest = binary,
-            missingHint =
-                "CFST asset missing ($ASSET_BINARY_ARM64). Rebuild after: node apps/android/scripts/fetch-cfst.mjs",
-            force = force,
-        )
         RuntimeBinaryInstall.installAssetFile(
             context = context,
             assetPath = ASSET_IPV6_LIST,
@@ -66,8 +64,8 @@ object CfstInstaller {
     }
 
     fun inspectInstalled(context: Context): RuntimeComponentInfo {
+        val binary = packagedBinary(context)
         val destDir = File(context.filesDir, "cfst")
-        val binary = File(destDir, BINARY_NAME)
         val ipv6List = File(destDir, IPV6_LIST_NAME)
         if (!isArm64()) {
             return RuntimeComponentInfo(
@@ -88,7 +86,7 @@ object CfstInstaller {
             }
         val detail =
             if (inspection.ready && listReady) {
-                "AArch64 ELF · ${inspection.sizeBytes / 1024} KB · 列表 ${ipv6List.length()} B"
+                "APK 原生目录 · AArch64 ELF · ${inspection.sizeBytes / 1024} KB · 列表 ${ipv6List.length()} B"
             } else {
                 buildList {
                     if (!inspection.ready) add(binaryDetail(inspection))
@@ -134,17 +132,21 @@ object CfstInstaller {
         return dir
     }
 
+    private fun packagedBinary(context: Context): File =
+        File(context.applicationInfo.nativeLibraryDir, NATIVE_BINARY_NAME)
+
     private fun binaryDetail(inspection: RuntimeBinaryInstall.BinaryInspection): String =
         when (inspection.condition) {
-            RuntimeBinaryInstall.BinaryCondition.MISSING -> "CFST 未安装"
-            RuntimeBinaryInstall.BinaryCondition.EMPTY -> "CFST 文件为空；需要重新安装"
+            RuntimeBinaryInstall.BinaryCondition.MISSING ->
+                "APK 未包含 CFST（$NATIVE_BINARY_NAME）；请运行 fetch-cfst.mjs 后重新构建并安装应用"
+            RuntimeBinaryInstall.BinaryCondition.EMPTY -> "APK 内 CFST 文件为空；需要重新构建并安装应用"
             RuntimeBinaryInstall.BinaryCondition.INVALID_FORMAT ->
-                "CFST 不是完整的 64-bit little-endian ELF"
+                "APK 内 CFST 不是完整的 64-bit little-endian ELF"
             RuntimeBinaryInstall.BinaryCondition.INCOMPATIBLE_ARCHITECTURE ->
-                "CFST 架构不兼容（machine=${inspection.machine ?: "?"}，需要 AArch64）"
+                "APK 内 CFST 架构不兼容（machine=${inspection.machine ?: "?"}，需要 AArch64）"
             RuntimeBinaryInstall.BinaryCondition.NOT_EXECUTABLE ->
-                "CFST 缺少执行权限；需要修复"
+                "系统未以可执行方式解包 CFST；请重新安装应用"
             RuntimeBinaryInstall.BinaryCondition.READY ->
-                "AArch64 ELF · ${inspection.sizeBytes / 1024} KB"
+                "APK 原生目录 · AArch64 ELF · ${inspection.sizeBytes / 1024} KB"
         }
 }

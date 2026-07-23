@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 /**
  * Download CloudflareSpeedTest (CFST) v2.3.5 linux arm64 binary into
- * app/src/main/assets/cfst/ for Android arm64 devices.
+ * app/src/main/jniLibs/arm64-v8a/libcfst.so for Android arm64 devices.
  *
  * Upstream does not publish an Android-specific build; the linux_arm64
- * artifact is the same ABI policy used for many Go tools on Android.
+ * artifact is the same ABI policy used for many Go tools on Android. The
+ * lib*.so name lets PackageManager extract it into the executable native lib
+ * directory; Android 10+ rejects exec from filesDir with EACCES.
  *
  * Usage:
  *   node scripts/fetch-cfst.mjs
@@ -20,12 +22,12 @@ import { Readable } from "node:stream";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(__dirname, "..");
-const outDir = path.join(appRoot, "app/src/main/assets/cfst");
+const outDir = path.join(appRoot, "app/src/main/jniLibs/arm64-v8a");
 const FORCE = process.argv.includes("--force") || process.argv.includes("-f");
 const VERSION = "v2.3.5";
 const ARCHIVE = `cfst_linux_arm64.tar.gz`;
 const url = `https://github.com/XIU2/CloudflareSpeedTest/releases/download/${VERSION}/${ARCHIVE}`;
-const plainPath = path.join(outDir, "cfst-arm64");
+const plainPath = path.join(outDir, "libcfst.so");
 
 async function exists(p) {
   try {
@@ -88,7 +90,7 @@ async function main() {
   await chmod(plainPath, 0o755);
   await rm(tmpDir, { recursive: true, force: true });
   console.log(`wrote ${plainPath}`);
-  console.log("Asset ready for CfstInstaller (arm64). Other ABIs are not shipped.");
+  console.log("Native executable ready for CfstInstaller (arm64). Other ABIs are not shipped.");
 }
 
 main().catch((err) => {

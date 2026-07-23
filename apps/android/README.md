@@ -25,7 +25,7 @@ gradle :core:test            # contracts + CFST 解析/参数
 gradle :app:test             # app 单元测试（CFST、隧道 framing/NAT/包编解码等）
 gradle :app:assembleDebug    # 生成 debug APK（需 Android SDK）
 node scripts/fetch-mihomo.mjs  # 可选：下载 arm64 mihomo 到 assets
-node scripts/fetch-cfst.mjs    # 可选：下载 arm64 CFST 到 assets（IPv6 优选）
+node scripts/fetch-cfst.mjs    # 可选：下载 arm64 CFST 到 jniLibs（IPv6 优选）
 ```
 
 仓库根：
@@ -79,13 +79,13 @@ make android-assemble
 | 日志过滤（来源·级别·搜索）+ VPN 事件 | ✓（默认正序并跟随最新，可暂停/恢复与切换顺序；清空需确认且持久化事件游标；环形事件使用严格递增 ID） |
 | 会话偏好与恢复 | ✓ SharedPreferences（含当前分区、候选/出口设置）；进程重建立即恢复 VPN 运行态与授权中的启动动作 |
 | mihomo 资产拉取脚本 | ✓ `scripts/fetch-mihomo.mjs` |
-| CloudflareSpeedTest 测速 | ✓（arm64；对齐 macOS：参数校验 / 参数面板 / IP 源 / 排序 / 首页测试节点 / 应用重连；runner 进程级单实例，停止不阻塞主线程且 Activity 销毁会收敛子进程；`fetch-cfst.mjs`） |
+| CloudflareSpeedTest 测速 | ✓（arm64；CFST 作为 `libcfst.so` 安装到系统可执行原生目录，兼容 Android 10+；对齐 macOS：参数校验 / 参数面板 / IP 源 / 排序 / 首页测试节点 / 应用重连；runner 进程级单实例，停止不阻塞主线程且 Activity 销毁会收敛子进程；`fetch-cfst.mjs`） |
 | 快捷设置磁贴启停 | ✓（Clash/NekoBox 风格；共用 SessionStartGate） |
 | Android 14+ 磁贴跳转兼容 | ✓（API 34+ 使用 `PendingIntent`，API 26–33 保留兼容路径） |
 | 首页连接主控 + 通知实时速率/断开 | ✓（低打扰持续通知，可直接结束会话） |
 | Android 13+ 通知授权 | ✓（首次连接按需请求；拒绝不阻塞 VPN，设置页可修复且不重复打扰） |
 | 后台运行稳定性 | ✓（显示电池优化状态并直达系统设置，不申请直接豁免权限） |
-| 运行组件诊断与修复 | ✓（区分缺失/损坏/错误架构/权限；mihomo 与 CFST 可独立原子修复；installer 进程内串行化，修复期间跨首页/节点页互锁 VPN 与测速启动） |
+| 运行组件诊断与修复 | ✓（区分缺失/损坏/错误架构/权限；CFST 二进制随 APK 原生库安装、IP 列表可独立修复；installer 进程内串行化，修复期间跨首页/节点页互锁 VPN 与测速启动） |
 | 本地数据备份保护 | ✓（禁用云备份与设备迁移；配置 YAML、候选节点、运行密钥/状态均不离开设备） |
 | 配置剪贴板 YAML 导入 | ✓（不自动拉取订阅 URL） |
 | 自适应导航壳 | ✓（底部栏 / 导航轨 / 上下文侧栏，按窗口宽度切换） |

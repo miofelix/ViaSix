@@ -120,8 +120,8 @@ android-test:
 android-assemble:
 	@test -s "$(ANDROID_DIR)/app/src/main/assets/mihomo/mihomo-arm64" || \
 		(echo "error: missing mihomo-arm64 — run: cd apps/android && node scripts/fetch-mihomo.mjs" >&2; exit 1)
-	@test -s "$(ANDROID_DIR)/app/src/main/assets/cfst/cfst-arm64" || \
-		(echo "error: missing cfst-arm64 — run: cd apps/android && node scripts/fetch-cfst.mjs" >&2; exit 1)
+	@test -s "$(ANDROID_DIR)/app/src/main/jniLibs/arm64-v8a/libcfst.so" || \
+		(echo "error: missing libcfst.so — run: cd apps/android && node scripts/fetch-cfst.mjs" >&2; exit 1)
 	cd "$(ANDROID_DIR)" && gradle :app:assembleDebug --no-daemon
 
 shared-test:

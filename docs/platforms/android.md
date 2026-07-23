@@ -15,7 +15,7 @@ ViaSix **全平台**产品中的 Android 端（移动网络接入语义与桌面
 | 投影 | `:core` JVM 库，contracts 对齐 |
 | 虚拟网卡 | `ViaSixVpnService`（`VpnService`） |
 | 代理内核 | 预编译 mihomo（assets `mihomo-arm64`，`fetch-mihomo.mjs`） |
-| 测速 | CloudflareSpeedTest arm64（assets `cfst-arm64`，`fetch-cfst.mjs`；linux_arm64 上游） |
+| 测速 | CloudflareSpeedTest arm64（`jniLibs/arm64-v8a/libcfst.so`，`fetch-cfst.mjs`；linux_arm64 上游） |
 | 网络接入 | VpnService 全量路由 + 用户态 TCP/UDP（SOCKS5 CONNECT / UDP ASSOCIATE）；可选仅 HTTP 代理 |
 | 系统代理 | 不支持 |
 
@@ -55,7 +55,7 @@ Android 功能对齐以 **macOS** 为准。Windows 端仍在完善中，**不得
 - 系统配置回流：`VpnService.Builder.setConfigureIntent` 注册不可变 `PendingIntent`；系统 VPN/Always-on 面板触发配置时，通过 `CLEAR_TOP + SINGLE_TOP` 在冷启动和 warm Activity 两条路径中定位到 ViaSix 设置分区
 - 后台稳定性：设置页读取系统电池优化状态并提供设置入口，帮助长期 VPN/Always-on 会话避免被 OEM 后台策略回收；不声明直接请求豁免的敏感权限
 - 数据重置安全：VPN 启动中、运行中或停止中均禁止清除会话偏好，避免当前连接与 Sticky/Always-on 后续恢复参数分叉
-- 组件完整性：本地 mihomo / CFST 检查 64-bit little-endian AArch64 ELF、架构与执行权限；设置页区分缺失/损坏并可独立原子修复；两个 installer 分别在进程内串行化，避免 Activity、VPN service 与修复流程争用同名临时文件，修复期间首页与节点页也会互锁对应的 VPN/测速启动入口
+- 组件完整性：本地 mihomo / CFST 检查 64-bit little-endian AArch64 ELF、架构与执行权限；CFST 作为 APK 原生库解包到 `nativeLibraryDir`，避免 Android 10+ 禁止执行 `filesDir` 文件造成 `EACCES`；设置页区分缺失/损坏，修复期间首页与节点页互锁对应的 VPN/测速启动入口
 - 本地数据保护：保持 `allowBackup=false`，并为 Android 12+ 数据提取与旧版 Auto Backup 显式排除全部私有域，防止配置 YAML、候选节点、控制器密钥和运行状态进入云备份或设备迁移
 - `ProfileSummaryParser` / `Ipv6Address` / `ByteRateFormatter` / `SpeedTestResultParser`：`:core` 可测纯逻辑
 - 会话偏好扩展：候选节点、出口检测端点与模式、测速 IP 源
