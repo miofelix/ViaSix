@@ -65,6 +65,7 @@
 
 ### 修复
 
+- 修复 Android 运行中代理模式切换可并发调用 `PATCH /configs`，快速连续点选时较早请求可能最后完成并把 mihomo 留在旧模式，同时连接启动/停止过渡期仍允许修改、异步任务还从可变 UI 状态读取 controller 端口的问题。代理模式控件现对齐 macOS 采用单飞交互：运行中请求完成前禁用再次切换，starting/stopping 阶段锁定控件并显示原因；请求从同一份 runtime 会话身份读取端口与 secret，返回后复核会话再写日志，会话变化或失败时保留已保存模式供下次连接生效。
 - 修复 Android Activity 中 controller 异步采样只按“是否运行”或检测路由判断结果归属的问题；旧会话的流量采样、出口 IP 检测或代理延迟测试若在重连后迟到返回，可能覆盖新会话状态并把前后两代速率历史混合。runtime 现提供仅供进程内比较的会话身份 key（进程、controller secret、启动时间与端口），流量采样在阻塞调用后重新读取 runtime 并只接纳同一身份的结果，身份变化会清空采样历史；出口检测与延迟测试也会在写回前复核会话，延迟测试同时复核当前代理节点，旧结果只记录为已忽略。
 - 修复 Android VPN 环形事件日志直接用 `System.currentTimeMillis()` 作为去重 ID；同一毫秒内的迟到事件或设备时钟回拨后产生的记录，可能不大于 Activity 已导入游标而被永久跳过。服务现持久化严格递增事件序列，并在升级时以现有事件最大 ID 和墙上时钟共同初始化；事件数组与序列游标在同一次偏好编辑中发布，确保会话时间线不会因校时或快速连续状态变化漏项。
 - 修复 Android runtime 只持久化 `running` 布尔值，重连拆栈期间仍暴露旧 `running=true`、controller secret 与启动时间的问题；Activity 轮询会把“连接中”错误改回“已连接”，冷启动无法恢复过渡态，快捷磁贴也不能区分连接、运行和断开。runtime 现对齐 macOS `ProxyCorePhase` 持久化 `stopped / starting / running / stopping`：重启在拆栈前清除旧凭据并发布 `starting`，整栈健康后才发布 `running`，关停先发布 `stopping` 再收敛为 `stopped`；Activity、进程恢复与磁贴共享同一权威 phase，旧版本布尔偏好仍可兼容读取，跨进程残留过渡态会被拒绝。

@@ -1260,33 +1260,80 @@ class MainActivity : ComponentActivity() {
             }
 
             fun patchRoutingMode(mode: RoutingMode) {
-                val was = state.routingMode
-                update { it.copy(routingMode = mode) }
-                if (state.runtime.running && was != mode) {
-                    scope.launch {
-                        val secret =
-                            getSharedPreferences(ViaSixVpnService.RUNTIME_PREFS, MODE_PRIVATE)
-                                .getString(ViaSixVpnService.KEY_SECRET, "")
-                                .orEmpty()
-                        val ok =
-                            withContext(Dispatchers.IO) {
-                                ControllerClient.patchMode(
-                                    "127.0.0.1",
-                                    state.runtime.controllerPort,
-                                    secret,
-                                    mode.wire,
-                                )
-                            }
-                        logOnly {
-                            it.appendLog(
-                                if (ok) {
-                                    "已切换运行中模式 → ${mode.wire}"
-                                } else {
-                                    "运行中模式切换失败，下次连接生效：${mode.wire}"
-                                },
-                                if (ok) LogLevel.Success else LogLevel.Warning,
+                if (
+                    state.routingMode == mode ||
+                    state.routingModeSyncing ||
+                    state.connectionPhase.isBusy
+                ) {
+                    return
+                }
+                val phase = state.connectionPhase
+                val runtime = runtimeStore.load()
+                val routingSessionKey = runtime.sessionKey()
+                val shouldPatch = phase == ConnectionPhase.RUNNING && routingSessionKey != null
+                update { current ->
+                    val next =
+                        current.copy(
+                            routingMode = mode,
+                            routingModeSyncing = shouldPatch,
+                        )
+                    when {
+                        shouldPatch ->
+                            next.appendLog(
+                                "正在同步运行中模式 → ${mode.wire}",
+                                LogLevel.Info,
                                 LogSource.Proxy,
                             )
+                        phase == ConnectionPhase.RUNNING ->
+                            next.appendLog(
+                                "会话正在变化，${mode.wire} 模式已保存，下次连接生效",
+                                LogLevel.Warning,
+                                LogSource.Proxy,
+                            )
+                        else -> next
+                    }
+                }
+                if (phase != ConnectionPhase.RUNNING || routingSessionKey == null) return
+
+                scope.launch {
+                    val ok =
+                        withContext(Dispatchers.IO) {
+                            ControllerClient.patchMode(
+                                host = "127.0.0.1",
+                                port = routingSessionKey.controllerPort,
+                                secret = routingSessionKey.secret,
+                                mode = mode.wire,
+                            )
+                        }
+                    val sessionStillCurrent =
+                        runtimeStore.load().sessionKey() == routingSessionKey
+                    logOnly { current ->
+                        val next = current.copy(routingModeSyncing = false)
+                        when {
+                            current.routingMode != mode ->
+                                next.appendLog(
+                                    "代理模式选择已变化，已忽略旧切换结果",
+                                    LogLevel.Warning,
+                                    LogSource.Proxy,
+                                )
+                            !sessionStillCurrent ->
+                                next.appendLog(
+                                    "会话已变化，${mode.wire} 模式已保存，下次连接生效",
+                                    LogLevel.Warning,
+                                    LogSource.Proxy,
+                                )
+                            ok ->
+                                next.appendLog(
+                                    "已切换运行中模式 → ${mode.wire}",
+                                    LogLevel.Success,
+                                    LogSource.Proxy,
+                                )
+                            else ->
+                                next.appendLog(
+                                    "运行中模式切换失败，下次连接生效：${mode.wire}",
+                                    LogLevel.Warning,
+                                    LogSource.Proxy,
+                                )
                         }
                     }
                 }

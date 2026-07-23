@@ -318,6 +318,8 @@ fun OverviewScreen(
                     modifier = Modifier.padding(VisualStyle.spacing16),
                     verticalArrangement = Arrangement.spacedBy(VisualStyle.spacing12),
                 ) {
+                    val routingModeEnabled =
+                        !state.routingModeSyncing && !state.connectionPhase.isBusy
                     Row(
                         modifier = Modifier.fillMaxWidth().selectableGroup(),
                         horizontalArrangement = Arrangement.spacedBy(VisualStyle.spacing8),
@@ -339,11 +341,20 @@ fun OverviewScreen(
                                         )
                                         .selectable(
                                             selected = selected,
+                                            enabled = routingModeEnabled,
                                             onClick = { onRoutingModeChange(mode) },
                                             role = Role.RadioButton,
                                         )
                                         .padding(vertical = 10.dp),
-                                color = if (selected) Color.White else MaterialTheme.colorScheme.onSurface,
+                                color =
+                                    when {
+                                        selected -> Color.White
+                                        routingModeEnabled -> MaterialTheme.colorScheme.onSurface
+                                        else ->
+                                            MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                                                alpha = 0.55f,
+                                            )
+                                    },
                                 style =
                                     MaterialTheme.typography.labelLarge.copy(
                                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
@@ -353,7 +364,12 @@ fun OverviewScreen(
                         }
                     }
                     Text(
-                        text = state.routingMode.description(),
+                        text =
+                            when {
+                                state.routingModeSyncing -> "正在同步运行中的代理模式…"
+                                state.connectionPhase.isBusy -> "连接状态切换期间暂不可修改代理模式"
+                                else -> state.routingMode.description()
+                            },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier =

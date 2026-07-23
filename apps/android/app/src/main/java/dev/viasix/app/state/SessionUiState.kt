@@ -133,6 +133,7 @@ data class SessionUiState(
     val selectedAddress: String = "2001:db8::1",
     val candidateAddresses: List<String> = emptyList(),
     val routingMode: RoutingMode = RoutingMode.RULE,
+    val routingModeSyncing: Boolean = false,
     val fullTunnel: Boolean = true,
     val vpnMtu: String = VpnMtuPolicy.DEFAULT.toString(),
     val vpnMetered: Boolean = true,
