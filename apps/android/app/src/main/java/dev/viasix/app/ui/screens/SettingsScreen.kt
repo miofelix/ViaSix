@@ -841,9 +841,9 @@ fun SettingsScreen(
                     }
                     Text(
                         text =
-                            "检查会区分缺失、损坏、错误架构和执行权限；mihomo 可从 APK assets " +
-                                "原子替换，CFST 随 APK 安装到系统原生目录，按钮会恢复 IP 列表并复核二进制。" +
-                                "若 CFST 二进制缺失或损坏，需要重新安装应用。",
+                            "检查会区分缺失、损坏、错误架构和执行权限；mihomo 与 CFST 均作为 APK 原生库 " +
+                                "（libmihomo.so / libcfst.so）解包到系统可执行目录（Android 10+ 禁止从 filesDir 执行）。" +
+                                "CFST 安装/重装会恢复 IPv6 列表并复核二进制；二进制本身缺失或损坏时需重新安装应用。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

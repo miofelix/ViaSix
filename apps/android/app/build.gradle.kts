@@ -41,7 +41,10 @@ android {
             // Android 10+ forbids executing binaries copied into filesDir. CFST is
             // packaged as a native library and must be extracted to nativeLibraryDir.
             useLegacyPackaging = true
+            // mihomo + CFST are plain Go ELF binaries named lib*.so so PackageManager
+            // extracts them to nativeLibraryDir (executable). Preserve symbols/size.
             keepDebugSymbols += "**/libcfst.so"
+            keepDebugSymbols += "**/libmihomo.so"
         }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"

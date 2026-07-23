@@ -14,7 +14,7 @@ ViaSix **全平台**产品中的 Android 端（移动网络接入语义与桌面
 | 导航 | 自适应五分区：手机底部栏、横屏/折叠屏导航轨、平板上下文侧栏，对应 macOS `AppSection` |
 | 投影 | `:core` JVM 库，contracts 对齐 |
 | 虚拟网卡 | `ViaSixVpnService`（`VpnService`） |
-| 代理内核 | 预编译 mihomo（assets `mihomo-arm64`，`fetch-mihomo.mjs`） |
+| 代理内核 | 预编译 mihomo（jniLibs `libmihomo.so`，`fetch-mihomo.mjs`；Android 10+ 可执行目录） |
 | 测速 | CloudflareSpeedTest arm64（`jniLibs/arm64-v8a/libcfst.so`，`fetch-cfst.mjs`；linux_arm64 上游） |
 | 网络接入 | VpnService 全量路由 + 用户态 TCP/UDP（SOCKS5 CONNECT / UDP ASSOCIATE）；可选仅 HTTP 代理 |
 | 系统代理 | 不支持 |

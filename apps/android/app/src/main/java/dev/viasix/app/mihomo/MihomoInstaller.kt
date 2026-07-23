@@ -10,36 +10,41 @@ import java.io.File
 import java.io.IOException
 
 /**
- * Installs the bundled mihomo binary from assets into the app private files dir.
- * Currently ships arm64-v8a asset name `mihomo/mihomo-arm64`.
+ * Resolves the bundled mihomo executable from Android's native library directory.
+ *
+ * Android 10+ denies exec from writable app directories such as filesDir, even when
+ * chmod reports an execute bit (ProcessBuilder → EACCES / error=13). Packaging
+ * mihomo as `libmihomo.so` makes PackageManager extract it into the read-only,
+ * executable nativeLibraryDir — the same approach used for CFST (`libcfst.so`).
+ * Ships arm64 only (android-arm64-v8 upstream).
  */
 object MihomoInstaller {
     private const val TAG = "MihomoInstaller"
-    const val ASSET_ARM64 = "mihomo/mihomo-arm64"
-    const val BINARY_NAME = "mihomo"
+    const val NATIVE_BINARY_NAME = "libmihomo.so"
 
     @Synchronized
     fun installIfNeeded(
         context: Context,
         force: Boolean = false,
     ): File {
+        // force is retained for API parity with CFST / settings repair; the binary
+        // is read-only under nativeLibraryDir and can only be replaced by reinstalling
+        // the APK (fetch-mihomo.mjs → rebuild).
+        @Suppress("UNUSED_PARAMETER")
+        val ignored = force
         if (!isArm64()) {
             throw IOException("设备 ABI 非 arm64，当前 APK 仅包含 arm64-v8a mihomo")
         }
-        val destDir = File(context.filesDir, "mihomo")
-        val dest = File(destDir, BINARY_NAME)
-        return RuntimeBinaryInstall.installAssetBinary(
-            context = context,
-            assetPath = ASSET_ARM64,
-            dest = dest,
-            missingHint =
-                "Mihomo asset missing ($ASSET_ARM64). Rebuild after: node apps/android/scripts/fetch-mihomo.mjs",
-            force = force,
-        )
+        val binary = packagedBinary(context)
+        val inspection = RuntimeBinaryInstall.inspectElfBinary(binary)
+        if (!inspection.ready) {
+            throw IOException(binaryDetail(inspection))
+        }
+        return binary
     }
 
     fun inspectInstalled(context: Context): RuntimeComponentInfo {
-        val file = File(File(context.filesDir, "mihomo"), BINARY_NAME)
+        val file = packagedBinary(context)
         if (!isArm64()) {
             return RuntimeComponentInfo(
                 condition = RuntimeComponentCondition.UNSUPPORTED,
@@ -86,16 +91,22 @@ object MihomoInstaller {
         return abis.any { it.contains("arm64") || it == "aarch64" }
     }
 
+    private fun packagedBinary(context: Context): File =
+        File(context.applicationInfo.nativeLibraryDir, NATIVE_BINARY_NAME)
+
     private fun binaryDetail(inspection: RuntimeBinaryInstall.BinaryInspection): String =
         when (inspection.condition) {
-            RuntimeBinaryInstall.BinaryCondition.MISSING -> "未安装；可从 APK 内置资产修复"
-            RuntimeBinaryInstall.BinaryCondition.EMPTY -> "文件为空；需要重新安装"
+            RuntimeBinaryInstall.BinaryCondition.MISSING ->
+                "APK 未包含 mihomo（$NATIVE_BINARY_NAME）；请运行 fetch-mihomo.mjs 后重新构建并安装应用"
+            RuntimeBinaryInstall.BinaryCondition.EMPTY ->
+                "APK 内 mihomo 文件为空；需要重新构建并安装应用"
             RuntimeBinaryInstall.BinaryCondition.INVALID_FORMAT ->
-                "文件不是完整的 64-bit little-endian ELF"
+                "APK 内 mihomo 不是完整的 64-bit little-endian ELF"
             RuntimeBinaryInstall.BinaryCondition.INCOMPATIBLE_ARCHITECTURE ->
-                "ELF 架构不兼容（machine=${inspection.machine ?: "?"}，需要 AArch64）"
-            RuntimeBinaryInstall.BinaryCondition.NOT_EXECUTABLE -> "ELF 缺少执行权限；需要修复"
+                "APK 内 mihomo 架构不兼容（machine=${inspection.machine ?: "?"}，需要 AArch64）"
+            RuntimeBinaryInstall.BinaryCondition.NOT_EXECUTABLE ->
+                "系统未以可执行方式解包 mihomo；请重新安装应用"
             RuntimeBinaryInstall.BinaryCondition.READY ->
-                "AArch64 ELF · ${inspection.sizeBytes / 1024} KB"
+                "APK 原生目录 · AArch64 ELF · ${inspection.sizeBytes / 1024} KB"
         }
 }

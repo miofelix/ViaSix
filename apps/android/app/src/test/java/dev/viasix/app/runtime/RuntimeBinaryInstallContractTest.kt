@@ -61,11 +61,11 @@ class RuntimeBinaryInstallContractTest {
     fun bundledSidecarsAreValidAarch64ElfWhenPresent() {
         val candidates =
             listOf(
-                "src/main/assets/mihomo/mihomo-arm64",
+                "src/main/jniLibs/arm64-v8a/libmihomo.so",
                 "src/main/jniLibs/arm64-v8a/libcfst.so",
-                "app/src/main/assets/mihomo/mihomo-arm64",
+                "app/src/main/jniLibs/arm64-v8a/libmihomo.so",
                 "app/src/main/jniLibs/arm64-v8a/libcfst.so",
-                "apps/android/app/src/main/assets/mihomo/mihomo-arm64",
+                "apps/android/app/src/main/jniLibs/arm64-v8a/libmihomo.so",
                 "apps/android/app/src/main/jniLibs/arm64-v8a/libcfst.so",
             ).map(::File).filter { it.isFile }
 
