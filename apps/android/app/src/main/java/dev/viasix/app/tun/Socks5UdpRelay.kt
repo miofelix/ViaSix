@@ -29,10 +29,16 @@ internal class Socks5UdpRelay private constructor(
         get() = udp
 
     fun send(remote: InetAddress, remotePort: Int, payload: ByteArray) {
-        if (!isOpen) throw IOException("UDP relay closed")
         val framed = Socks5UdpFraming.wrap(remote, remotePort, payload)
+        if (!sendNow(framed)) throw IOException("SOCKS5 UDP relay send would block")
+    }
+
+    internal fun sendNow(framed: ByteArray): Boolean {
+        if (!isOpen) throw IOException("UDP relay closed")
         val sent = udp.write(ByteBuffer.wrap(framed))
-        if (sent != framed.size) throw IOException("SOCKS5 UDP relay send would block")
+        if (sent == 0) return false
+        if (sent != framed.size) throw IOException("SOCKS5 UDP relay sent a partial datagram")
+        return true
     }
 
     /**

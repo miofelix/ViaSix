@@ -817,8 +817,14 @@ class Tun2SocksEngine(
             if (relay != null) {
                 if (relay.isOpen) {
                     try {
-                        relay.send(remoteIp, remotePort, payload)
-                        return
+                        when (udpRelayReactor.send(relay, remoteIp, remotePort, payload)) {
+                            UdpRelayReactor.SendResult.QUEUED -> return
+                            UdpRelayReactor.SendResult.QUEUE_FULL -> {
+                                Log.w(TAG, "UDP relay send queue full; drop")
+                                return
+                            }
+                            UdpRelayReactor.SendResult.UNAVAILABLE -> Unit
+                        }
                     } catch (error: Exception) {
                         Log.w(TAG, "UDP via SOCKS failed: ${error.message}")
                     }
@@ -879,11 +885,19 @@ class Tun2SocksEngine(
             // Drain datagrams queued during open.
             while (true) {
                 val pending = clientRelay.pollPending() ?: break
-                try {
-                    relay.send(pending.remote, pending.port, pending.payload)
-                } catch (error: Exception) {
-                    Log.w(TAG, "UDP pending send failed: ${error.message}")
-                    throw error
+                when (
+                    udpRelayReactor.send(
+                        relay,
+                        pending.remote,
+                        pending.port,
+                        pending.payload,
+                    )
+                ) {
+                    UdpRelayReactor.SendResult.QUEUED -> Unit
+                    UdpRelayReactor.SendResult.QUEUE_FULL ->
+                        Log.w(TAG, "UDP relay send queue full; drop pending datagram")
+                    UdpRelayReactor.SendResult.UNAVAILABLE ->
+                        throw RejectedExecutionException("UDP relay reactor unavailable")
                 }
             }
             Log.i(

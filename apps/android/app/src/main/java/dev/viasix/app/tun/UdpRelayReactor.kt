@@ -1,7 +1,9 @@
 package dev.viasix.app.tun
 
+import java.net.InetAddress
 import java.nio.channels.SelectionKey
 import java.nio.channels.Selector
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -9,21 +11,77 @@ import java.util.concurrent.atomic.AtomicBoolean
 internal class UdpRelayReactor(
     private val threadName: String = "viasix-udp-relay-reactor",
     private val controlProbeIntervalMs: Long = CONTROL_PROBE_INTERVAL_MS,
+    private val maxQueuedDatagrams: Int = MAX_QUEUED_DATAGRAMS,
+    private val maxQueuedBytes: Int = MAX_QUEUED_BYTES,
 ) : AutoCloseable {
     init {
         require(controlProbeIntervalMs > 0L) { "controlProbeIntervalMs must be positive" }
+        require(maxQueuedDatagrams > 0) { "maxQueuedDatagrams must be positive" }
+        require(maxQueuedBytes > 0) { "maxQueuedBytes must be positive" }
+    }
+
+    enum class SendResult {
+        QUEUED,
+        QUEUE_FULL,
+        UNAVAILABLE,
     }
 
     private class Registration(
         val relay: Socks5UdpRelay,
         val onDatagram: (Socks5UdpFraming.Datagram) -> Unit,
         val onClosed: () -> Unit,
+        private val maxQueuedDatagrams: Int,
+        private val maxQueuedBytes: Int,
     ) {
         val closedNotified = AtomicBoolean(false)
+        val writeScheduled = AtomicBoolean(false)
+        @Volatile var key: SelectionKey? = null
+        private val active = AtomicBoolean(true)
+        private val outbound = ArrayDeque<ByteArray>()
+        private var outboundBytes = 0
+
+        val isActive: Boolean
+            get() = active.get()
+
+        fun offer(frame: ByteArray): Boolean =
+            synchronized(outbound) {
+                if (
+                    !active.get() ||
+                    outbound.size >= maxQueuedDatagrams ||
+                    outboundBytes + frame.size > maxQueuedBytes
+                ) {
+                    return@synchronized false
+                }
+                outbound.addLast(frame)
+                outboundBytes += frame.size
+                true
+            }
+
+        fun peek(): ByteArray? = synchronized(outbound) { outbound.firstOrNull() }
+
+        fun remove(frame: ByteArray): Boolean =
+            synchronized(outbound) {
+                if (outbound.firstOrNull() !== frame) return@synchronized false
+                outbound.removeFirst()
+                outboundBytes -= frame.size
+                true
+            }
+
+        fun hasOutbound(): Boolean = synchronized(outbound) { outbound.isNotEmpty() }
+
+        fun deactivate() {
+            if (!active.compareAndSet(true, false)) return
+            synchronized(outbound) {
+                outbound.clear()
+                outboundBytes = 0
+            }
+        }
     }
 
     private val selector = Selector.open()
     private val pending = ConcurrentLinkedQueue<Registration>()
+    private val pendingWrites = ConcurrentLinkedQueue<Registration>()
+    private val registrations = ConcurrentHashMap<Socks5UdpRelay, Registration>()
     private val running = AtomicBoolean(false)
     private val closed = AtomicBoolean(false)
     private val lifecycleLock = Any()
@@ -48,10 +106,35 @@ internal class UdpRelayReactor(
     ): Boolean {
         synchronized(lifecycleLock) {
             if (closed.get() || !running.get() || !relay.isOpen) return false
-            pending.add(Registration(relay, onDatagram, onClosed))
+            val registration =
+                Registration(
+                    relay = relay,
+                    onDatagram = onDatagram,
+                    onClosed = onClosed,
+                    maxQueuedDatagrams = maxQueuedDatagrams,
+                    maxQueuedBytes = maxQueuedBytes,
+                )
+            if (registrations.putIfAbsent(relay, registration) != null) return false
+            pending.add(registration)
             selector.wakeup()
             return true
         }
+    }
+
+    fun send(
+        relay: Socks5UdpRelay,
+        remote: InetAddress,
+        remotePort: Int,
+        payload: ByteArray,
+    ): SendResult {
+        if (closed.get() || !running.get() || !relay.isOpen) return SendResult.UNAVAILABLE
+        val registration = registrations[relay] ?: return SendResult.UNAVAILABLE
+        val frame = Socks5UdpFraming.wrap(remote, remotePort, payload)
+        if (!registration.offer(frame)) {
+            return if (registration.isActive) SendResult.QUEUE_FULL else SendResult.UNAVAILABLE
+        }
+        scheduleWrite(registration)
+        return SendResult.QUEUED
     }
 
     private fun runLoop() {
@@ -59,6 +142,7 @@ internal class UdpRelayReactor(
         try {
             while (running.get()) {
                 registerPending()
+                flushScheduledWrites()
                 val selectTimeoutMs =
                     (nextControlProbeMs - monotonicTimeMs()).coerceIn(1L, SELECT_TIMEOUT_MS)
                 selector.select(selectTimeoutMs)
@@ -67,14 +151,13 @@ internal class UdpRelayReactor(
                     val key = selected.next()
                     selected.remove()
                     val registration = key.attachment() as? Registration ?: continue
-                    if (!key.isValid || !key.isReadable) continue
+                    if (!key.isValid) {
+                        fail(key, registration)
+                        continue
+                    }
                     try {
-                        var drained = 0
-                        while (drained < MAX_DATAGRAMS_PER_TURN) {
-                            val datagram = registration.relay.receiveNow() ?: break
-                            registration.onDatagram(datagram)
-                            drained += 1
-                        }
+                        if (key.isReadable) receiveDatagrams(registration)
+                        if (key.isValid && key.isWritable) flushWrites(key, registration)
                     } catch (_: Exception) {
                         fail(key, registration)
                     }
@@ -101,19 +184,88 @@ internal class UdpRelayReactor(
             val registration = pending.poll() ?: return
             try {
                 if (!registration.relay.isOpen) {
+                    retire(registration)
+                    registration.relay.close()
                     notifyClosed(registration)
                     continue
                 }
-                registration.relay.selectableChannel.register(
-                    selector,
-                    SelectionKey.OP_READ,
-                    registration,
-                )
+                val key =
+                    registration.relay.selectableChannel.register(
+                        selector,
+                        SelectionKey.OP_READ,
+                        registration,
+                    )
+                registration.key = key
             } catch (_: Exception) {
+                retire(registration)
                 registration.relay.close()
                 notifyClosed(registration)
             }
         }
+    }
+
+    private fun receiveDatagrams(registration: Registration) {
+        var drained = 0
+        while (drained < MAX_DATAGRAMS_PER_TURN) {
+            val datagram = registration.relay.receiveNow() ?: break
+            registration.onDatagram(datagram)
+            drained += 1
+        }
+    }
+
+    private fun scheduleWrite(registration: Registration) {
+        if (!registration.isActive) return
+        if (!registration.writeScheduled.compareAndSet(false, true)) return
+        pendingWrites.add(registration)
+        selector.wakeup()
+    }
+
+    private fun flushScheduledWrites() {
+        while (true) {
+            val registration = pendingWrites.poll() ?: return
+            registration.writeScheduled.set(false)
+            if (!registration.isActive) continue
+            val key = registration.key
+            if (key == null) {
+                scheduleWrite(registration)
+                return
+            }
+            if (!key.isValid) {
+                fail(key, registration)
+                continue
+            }
+            try {
+                flushWrites(key, registration)
+            } catch (_: Exception) {
+                fail(key, registration)
+            }
+        }
+    }
+
+    private fun flushWrites(key: SelectionKey, registration: Registration) {
+        var drained = 0
+        while (drained < MAX_DATAGRAMS_PER_TURN) {
+            val frame = registration.peek() ?: break
+            if (!registration.relay.sendNow(frame)) {
+                setWriteInterest(key, enabled = true)
+                return
+            }
+            if (!registration.remove(frame)) return
+            drained += 1
+        }
+        setWriteInterest(key, enabled = registration.hasOutbound())
+    }
+
+    private fun setWriteInterest(key: SelectionKey, enabled: Boolean) {
+        if (!key.isValid) return
+        val current = key.interestOps()
+        val updated =
+            if (enabled) {
+                current or SelectionKey.OP_WRITE
+            } else {
+                current and SelectionKey.OP_WRITE.inv()
+            }
+        if (updated != current) key.interestOps(updated)
     }
 
     private fun probeControls() {
@@ -136,8 +288,15 @@ internal class UdpRelayReactor(
             key.cancel()
         } catch (_: Exception) {
         }
+        retire(registration)
         registration.relay.close()
         notifyClosed(registration)
+    }
+
+    private fun retire(registration: Registration) {
+        registrations.remove(registration.relay, registration)
+        registration.key = null
+        registration.deactivate()
     }
 
     private fun notifyClosed(registration: Registration) {
@@ -161,9 +320,16 @@ internal class UdpRelayReactor(
         }
         while (true) {
             val registration = pending.poll() ?: break
+            retire(registration)
             registration.relay.close()
             notifyClosed(registration)
         }
+        for (registration in registrations.values.toList()) {
+            retire(registration)
+            registration.relay.close()
+            notifyClosed(registration)
+        }
+        pendingWrites.clear()
     }
 
     override fun close() {
@@ -197,6 +363,8 @@ internal class UdpRelayReactor(
         const val SELECT_TIMEOUT_MS = 200L
         const val CONTROL_PROBE_INTERVAL_MS = 5_000L
         const val MAX_DATAGRAMS_PER_TURN = 32
+        const val MAX_QUEUED_DATAGRAMS = 64
+        const val MAX_QUEUED_BYTES = 512 * 1024
         const val CLOSE_JOIN_TIMEOUT_MS = 2_000L
 
         fun monotonicTimeMs(): Long = System.nanoTime() / 1_000_000L

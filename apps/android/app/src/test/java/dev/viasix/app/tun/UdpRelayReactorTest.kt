@@ -46,15 +46,23 @@ class UdpRelayReactorTest {
                     )
                 }
 
-                first.send(
-                    remote = InetAddress.getByName("192.0.2.10"),
-                    remotePort = 443,
-                    payload = "first".toByteArray(),
+                assertEquals(
+                    UdpRelayReactor.SendResult.QUEUED,
+                    reactor.send(
+                        relay = first,
+                        remote = InetAddress.getByName("192.0.2.10"),
+                        remotePort = 443,
+                        payload = "first".toByteArray(),
+                    ),
                 )
-                second.send(
-                    remote = InetAddress.getByName("2001:db8::20"),
-                    remotePort = 53,
-                    payload = "second".toByteArray(),
+                assertEquals(
+                    UdpRelayReactor.SendResult.QUEUED,
+                    reactor.send(
+                        relay = second,
+                        remote = InetAddress.getByName("2001:db8::20"),
+                        remotePort = 53,
+                        payload = "second".toByteArray(),
+                    ),
                 )
 
                 assertTrue("UDP callbacks timed out", callbacks.await(2, TimeUnit.SECONDS))
@@ -65,6 +73,57 @@ class UdpRelayReactorTest {
                 reactor.close()
                 first.close()
                 second.close()
+            }
+        }
+    }
+
+    @Test
+    fun boundsQueuedWritesWithoutClosingRelay() {
+        FakeSocks5UdpServer(expectedAssociations = 1).use { proxy ->
+            val relay = proxy.openRelay()
+            val reactor =
+                UdpRelayReactor(
+                    controlProbeIntervalMs = 25L,
+                    maxQueuedDatagrams = 2,
+                    maxQueuedBytes = 1_024,
+                )
+            val callbackEntered = CountDownLatch(1)
+            val releaseCallback = CountDownLatch(1)
+            try {
+                reactor.start()
+                assertTrue(
+                    reactor.register(
+                        relay = relay,
+                        onDatagram = {
+                            callbackEntered.countDown()
+                            releaseCallback.await(2, TimeUnit.SECONDS)
+                        },
+                        onClosed = {},
+                    ),
+                )
+                assertEquals(
+                    UdpRelayReactor.SendResult.QUEUED,
+                    reactor.send(relay, InetAddress.getByName("192.0.2.1"), 443, byteArrayOf(1)),
+                )
+                assertTrue("reactor callback did not block", callbackEntered.await(2, TimeUnit.SECONDS))
+
+                assertEquals(
+                    UdpRelayReactor.SendResult.QUEUED,
+                    reactor.send(relay, InetAddress.getByName("192.0.2.2"), 443, byteArrayOf(2)),
+                )
+                assertEquals(
+                    UdpRelayReactor.SendResult.QUEUED,
+                    reactor.send(relay, InetAddress.getByName("192.0.2.3"), 443, byteArrayOf(3)),
+                )
+                assertEquals(
+                    UdpRelayReactor.SendResult.QUEUE_FULL,
+                    reactor.send(relay, InetAddress.getByName("192.0.2.4"), 443, byteArrayOf(4)),
+                )
+                assertTrue(relay.isOpen)
+            } finally {
+                releaseCallback.countDown()
+                reactor.close()
+                relay.close()
             }
         }
     }
