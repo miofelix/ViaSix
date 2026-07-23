@@ -681,7 +681,11 @@ fun OverviewScreen(
                     Text(
                         text =
                             state.exitIP.info?.let { info ->
-                                "${info.ip} · ${info.route.label}"
+                                buildString {
+                                    append(info.ip)
+                                    if (info.family.isNotBlank()) append(" · ${info.family}")
+                                    append(" · ${info.route.label}")
+                                }
                             } ?: (state.exitIP.errorMessage ?: "尚未检测"),
                         style =
                             MaterialTheme.typography.bodyLarge.copy(
@@ -691,6 +695,13 @@ fun OverviewScreen(
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    if (state.exitIP.mode == ExitIPDetectionMode.AUTOMATIC) {
+                        Text(
+                            "自动模式优先检测 IPv6（ViaSix 节点为 IPv6 入口）；失败时再回退 dual-stack / IPv4。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     val loc = state.exitIP.info?.location.orEmpty()
                     val details = state.exitIP.info?.details.orEmpty()
                     if (loc.isNotBlank() || details.isNotBlank()) {

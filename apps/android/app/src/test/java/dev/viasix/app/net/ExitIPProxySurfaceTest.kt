@@ -31,6 +31,8 @@ class ExitIPProxySurfaceTest {
         assertTrue(detector.contains("URL(url).openConnection(proxy.asJavaProxy())"))
         assertTrue(detector.contains("enrichWithGeo(info, timeoutMs, proxy)"))
         assertTrue(detector.contains("validateExpectedFamily"))
+        assertTrue(detector.contains("detectionAttemptModes"))
+        assertTrue(detector.contains("ExitIPDetectionMode.IPV6"))
         assertTrue(activity.contains("ExitIPRoutePolicy.proxyForRuntime"))
         assertTrue(activity.contains("running = state.runtime.running"))
         assertTrue(activity.contains("mixedPort = state.runtime.mixedPort"))

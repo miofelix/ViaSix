@@ -7,6 +7,7 @@ import java.net.URL
 import java.nio.charset.StandardCharsets
 
 enum class ExitIPDetectionMode(val wire: String, val label: String) {
+    /** Prefer IPv6 (ViaSix product default), then dual-stack / IPv4 fallbacks. */
     AUTOMATIC("automatic", "自动"),
     IPV4("ipv4", "IPv4"),
     IPV6("ipv6", "IPv6");
@@ -76,6 +77,26 @@ object ExitIPDetector {
             ExitIPDetectionMode.IPV6 -> IPV6_ENDPOINT
         }
 
+    /**
+     * Detection order for a user-selected mode.
+     *
+     * **Automatic** tries IPv6 first: ViaSix sessions inject an IPv6 primary server, and
+     * dual-stack endpoints (e.g. myip.la) commonly answer over IPv4 when the HTTP client
+     * prefers A records — which made “自动” look like “only IPv4” after connect.
+     */
+    fun detectionAttemptModes(mode: ExitIPDetectionMode): List<ExitIPDetectionMode> =
+        when (mode) {
+            ExitIPDetectionMode.AUTOMATIC ->
+                listOf(
+                    ExitIPDetectionMode.IPV6,
+                    ExitIPDetectionMode.AUTOMATIC,
+                    ExitIPDetectionMode.IPV4,
+                )
+            ExitIPDetectionMode.IPV4,
+            ExitIPDetectionMode.IPV6,
+            -> listOf(mode)
+        }
+
     fun detect(
         mode: ExitIPDetectionMode = ExitIPDetectionMode.AUTOMATIC,
         automaticEndpoint: String = DEFAULT_ENDPOINT,
@@ -83,21 +104,29 @@ object ExitIPDetector {
         enrich: Boolean = true,
         proxy: ExitIPProxy? = null,
     ): Result<ExitIPInfo> {
-        return try {
-            val endpoint = endpointFor(mode, automaticEndpoint)
-            val raw = httpGet(endpoint, timeoutMs, proxy)
-            var info =
-                validateExpectedFamily(
-                    mode = mode,
-                    info = parsePrimary(raw).copy(route = ExitIPRoutePolicy.routeFor(proxy)),
-                )
-            if (enrich) {
-                info = enrichWithGeo(info, timeoutMs, proxy) ?: info
+        var lastError: Exception? = null
+        for (attempt in detectionAttemptModes(mode)) {
+            try {
+                val endpoint = endpointFor(attempt, automaticEndpoint)
+                val raw = httpGet(endpoint, timeoutMs, proxy)
+                var info =
+                    validateExpectedFamily(
+                        mode = attempt,
+                        info = parsePrimary(raw).copy(route = ExitIPRoutePolicy.routeFor(proxy)),
+                    )
+                // Dual-stack “automatic” endpoints can still return IPv4; if the user chose
+                // automatic and we are on that fallback step, accept either family.
+                if (enrich) {
+                    info = enrichWithGeo(info, timeoutMs, proxy) ?: info
+                }
+                return Result.success(info)
+            } catch (error: Exception) {
+                lastError = error
             }
-            Result.success(info)
-        } catch (error: Exception) {
-            Result.failure(error)
         }
+        return Result.failure(
+            lastError ?: IllegalStateException("出口 IP 检测失败"),
+        )
     }
 
     fun parsePrimary(body: String): ExitIPInfo {

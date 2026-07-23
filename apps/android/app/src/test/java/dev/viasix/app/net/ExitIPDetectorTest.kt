@@ -38,6 +38,30 @@ class ExitIPDetectorTest {
             "https://custom",
             ExitIPDetector.endpointFor(ExitIPDetectionMode.AUTOMATIC, "https://custom"),
         )
+        assertEquals(
+            ExitIPDetector.IPV6_ENDPOINT,
+            ExitIPDetector.endpointFor(ExitIPDetectionMode.IPV6, "https://example"),
+        )
+    }
+
+    @Test
+    fun automaticDetectionPrefersIpv6ThenDualStackThenIpv4() {
+        assertEquals(
+            listOf(
+                ExitIPDetectionMode.IPV6,
+                ExitIPDetectionMode.AUTOMATIC,
+                ExitIPDetectionMode.IPV4,
+            ),
+            ExitIPDetector.detectionAttemptModes(ExitIPDetectionMode.AUTOMATIC),
+        )
+        assertEquals(
+            listOf(ExitIPDetectionMode.IPV4),
+            ExitIPDetector.detectionAttemptModes(ExitIPDetectionMode.IPV4),
+        )
+        assertEquals(
+            listOf(ExitIPDetectionMode.IPV6),
+            ExitIPDetector.detectionAttemptModes(ExitIPDetectionMode.IPV6),
+        )
     }
 
     @Test
