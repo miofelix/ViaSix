@@ -26,9 +26,9 @@ import kotlin.random.Random
 
 /**
  * Userspace IPv4/IPv6 forwarder for full-tunnel mode:
- * - TCP → SOCKS5 CONNECT (mihomo mixed port)
+ * - TCP → SOCKS5 CONNECT (mihomo mixed port), except explicit protected-direct DNS/TCP
  * - UDP general → SOCKS5 UDP ASSOCIATE **per local client endpoint** (correct demux)
- * - UDP/53 (DNS) → SOCKS5 by default, or protected per-query direct sockets when requested
+ * - TCP/UDP port 53 → SOCKS5 by default, or protected direct sockets when requested
  *
  * ASSOCIATE open runs on the worker pool (never blocks the TUN reader). Failures are
  * negative-cached so retries do not stall packet processing.
@@ -270,14 +270,28 @@ class Tun2SocksEngine(
     }
 
     private fun openTcpSession(key: String, session: TcpSession) {
+        val useProtectedDirect =
+            DnsSettingsPolicy.shouldUseProtectedDirect(
+                destinationPort = session.remotePort,
+                mode = dnsRoutingMode,
+            )
+        val outboundHost = if (useProtectedDirect) dnsUpstream else session.remoteIp
         try {
             val socket =
-                Socks5Client.connect(
-                    socksHost,
-                    socksPort,
-                    session.remoteIp,
-                    session.remotePort,
-                )
+                if (useProtectedDirect) {
+                    ProtectedSocketConnector.connect(
+                        targetHost = dnsUpstream,
+                        targetPort = session.remotePort,
+                        protect = { socket -> vpnService.protect(socket) },
+                    )
+                } else {
+                    Socks5Client.connect(
+                        socksHost,
+                        socksPort,
+                        session.remoteIp,
+                        session.remotePort,
+                    )
+                }
             if (!running.get()) {
                 socket.close()
                 removeSession(key, session)
@@ -325,7 +339,11 @@ class Tun2SocksEngine(
                 }
             }
         } catch (error: Exception) {
-            Log.w(TAG, "SOCKS connect ${session.remoteIp.hostAddress}:${session.remotePort}: ${error.message}")
+            val route = if (useProtectedDirect) "protected direct" else "SOCKS"
+            Log.w(
+                TAG,
+                "$route connect ${outboundHost.hostAddress}:${session.remotePort}: ${error.message}",
+            )
             enqueuePacket(
                 buildTcpPacket(
                     session = session,

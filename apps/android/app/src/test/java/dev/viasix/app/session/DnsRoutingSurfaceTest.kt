@@ -37,6 +37,8 @@ class DnsRoutingSurfaceTest {
         assertTrue(service.contains("dnsRoutingMode = dnsRoutingMode"))
         assertTrue(engine.contains("DnsRoutingMode.PROXY"))
         assertTrue(engine.contains("DnsSettingsPolicy.shouldUseProtectedDirect"))
+        assertTrue(engine.contains("ProtectedSocketConnector.connect"))
+        assertTrue(engine.contains("targetHost = dnsUpstream"))
         assertFalse(engine.contains("if (udp.destPort == 53)"))
         assertTrue(settings.contains("DNS 路由"))
         assertTrue(settings.contains("DNS 服务器（数字 IP）"))
