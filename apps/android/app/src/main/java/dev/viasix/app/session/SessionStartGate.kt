@@ -28,6 +28,7 @@ object SessionStartGate {
         selectedAppPackages: Collection<String> = emptyList(),
         dnsServer: String = DnsSettingsPolicy.DEFAULT_SERVER,
         fullTunnel: Boolean = true,
+        vpnMtu: String = VpnMtuPolicy.DEFAULT.toString(),
     ): Result {
         val summary = ProfileSummaryParser.parse(profileYaml)
         return evaluate(
@@ -38,6 +39,7 @@ object SessionStartGate {
             selectedAppPackages,
             dnsServer,
             fullTunnel,
+            vpnMtu,
         )
     }
 
@@ -49,7 +51,14 @@ object SessionStartGate {
         selectedAppPackages: Collection<String> = emptyList(),
         dnsServer: String = DnsSettingsPolicy.DEFAULT_SERVER,
         fullTunnel: Boolean = true,
+        vpnMtu: String = VpnMtuPolicy.DEFAULT.toString(),
     ): Result {
+        if (!VpnMtuPolicy.isValid(vpnMtu)) {
+            return Result.Blocked(
+                message = "无法连接：VPN MTU 必须在 ${VpnMtuPolicy.MIN}–${VpnMtuPolicy.MAX} 之间",
+                sectionWire = "settings",
+            )
+        }
         if (fullTunnel && !DnsSettingsPolicy.isValidServer(dnsServer)) {
             return Result.Blocked(
                 message = "无法连接：请输入合法的 IPv4 或 IPv6 DNS 地址",

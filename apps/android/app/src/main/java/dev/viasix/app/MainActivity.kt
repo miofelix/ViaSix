@@ -459,6 +459,7 @@ class MainActivity : ComponentActivity() {
                             state.appRouting.selectedPackages,
                             state.dnsSettings.server,
                             state.fullTunnel,
+                            state.vpnMtu,
                         )
                 ) {
                     is SessionStartGate.Result.Blocked -> {
@@ -1284,6 +1285,11 @@ class MainActivity : ComponentActivity() {
                 update { it.copy(dnsSettings = it.dnsSettings.copy(server = server)) }
             }
 
+            fun changeVpnMtu(mtu: String) {
+                if (state.connectionPhase.isActiveOrTransitioning) return
+                update { it.copy(vpnMtu = mtu) }
+            }
+
             ViaSixApp(
                 state = state,
                 selectedSection = selectedSection,
@@ -1368,6 +1374,7 @@ class MainActivity : ComponentActivity() {
                 onRefreshInstalledApps = ::refreshInstalledApps,
                 onDnsRoutingModeChange = ::changeDnsRoutingMode,
                 onDnsServerChange = ::changeDnsServer,
+                onVpnMtuChange = ::changeVpnMtu,
                 onRoutingModeChange = ::patchRoutingMode,
                 onFullTunnelChange = { full ->
                     if (state.connectionPhase.isActiveOrTransitioning) {

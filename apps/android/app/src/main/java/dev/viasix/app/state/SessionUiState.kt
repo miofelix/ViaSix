@@ -16,6 +16,7 @@ import dev.viasix.app.session.DnsSettingsPolicy
 import dev.viasix.app.session.DnsSettingsState
 import dev.viasix.app.session.NotificationPermissionState
 import dev.viasix.app.session.ProfileDraftGate
+import dev.viasix.app.session.VpnMtuPolicy
 import dev.viasix.app.session.VpnPermissionState
 import dev.viasix.core.net.Ipv6Address
 import dev.viasix.core.profile.ProfileSummary
@@ -131,6 +132,7 @@ data class SessionUiState(
     val candidateAddresses: List<String> = emptyList(),
     val routingMode: RoutingMode = RoutingMode.RULE,
     val fullTunnel: Boolean = true,
+    val vpnMtu: String = VpnMtuPolicy.DEFAULT.toString(),
     val dnsSettings: DnsSettingsState = DnsSettingsState(),
     val appRouting: AppRoutingState = AppRoutingState(),
     val notificationPermission: NotificationPermissionState = NotificationPermissionState(),
@@ -181,6 +183,7 @@ data class SessionUiState(
             selectedAddress = selectedAddress,
             routingMode = routingMode.wire,
             fullTunnel = fullTunnel,
+            vpnMtu = vpnMtu.trim(),
             dnsRoutingMode = dnsSettings.mode.wire,
             dnsServer = dnsSettings.server.trim(),
             appRoutingMode = appRouting.mode.wire,
@@ -226,6 +229,7 @@ data class SessionUiState(
                 candidateAddresses = candidates,
                 routingMode = RoutingMode.parse(prefs.routingMode) ?: RoutingMode.RULE,
                 fullTunnel = prefs.fullTunnel,
+                vpnMtu = prefs.vpnMtu.trim(),
                 dnsSettings =
                     DnsSettingsState(
                         mode = DnsRoutingMode.parse(prefs.dnsRoutingMode),

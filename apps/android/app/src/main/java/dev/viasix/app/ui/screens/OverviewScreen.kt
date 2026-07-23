@@ -381,9 +381,10 @@ fun OverviewScreen(
                     title = "全量隧道",
                     detail =
                         if (state.fullTunnel) {
-                            "默认路由 + TCP/UDP IPv4/IPv6→SOCKS；DNS protect"
+                            "默认路由 + TCP/UDP IPv4/IPv6→SOCKS；" +
+                                "DNS ${state.dnsSettings.mode.label} · MTU ${state.vpnMtu}"
                         } else {
-                            "仅 setHttpProxy，无默认路由"
+                            "仅 setHttpProxy，无默认路由 · MTU ${state.vpnMtu}"
                         },
                     icon = Icons.Outlined.VpnKey,
                 ) {
@@ -718,6 +719,8 @@ fun OverviewScreen(
                     },
                     Icons.Outlined.Apps,
                 )
+                HorizontalDivider(color = colors.surfaceBorder, modifier = Modifier.padding(start = 40.dp))
+                CompactInfoRow("VPN MTU", state.vpnMtu, Icons.Outlined.Speed)
                 HorizontalDivider(color = colors.surfaceBorder, modifier = Modifier.padding(start = 40.dp))
                 CompactInfoRow(
                     "DNS",

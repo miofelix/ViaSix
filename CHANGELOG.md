@@ -25,6 +25,7 @@
 - Android：设置页增加电池优化状态与系统入口，为长期连接和 Always-on VPN 提供后台稳定性指引，且不申请直接豁免权限。
 - Android：增加 Clash/NekoBox 风格分应用路由，支持所有应用、绕过所选和仅代理所选三种模式，可搜索启动器应用或手动添加后台型应用包名；无需广泛包可见权限。
 - Android：全量隧道 DNS 默认改为经 mihomo/SOCKS 转发，避免固定 UDP/53 直连；设置页支持显式直连模式及自定义数字 IPv4/IPv6 DNS 服务器。
+- Android：增加可配置 VPN MTU，采用与 macOS 一致的 1280–9000 安全范围，贯通普通启动、快捷磁贴与 Sticky/Always-on 恢复。
 
 ### 新增
 

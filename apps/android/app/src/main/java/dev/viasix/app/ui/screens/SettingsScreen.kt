@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -42,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import dev.viasix.app.BuildConfig
 import dev.viasix.app.net.ExitIPDetectionMode
@@ -53,6 +55,7 @@ import dev.viasix.app.session.AppRoutingMode
 import dev.viasix.app.session.AppRoutingPolicy
 import dev.viasix.app.session.DnsRoutingMode
 import dev.viasix.app.session.DnsSettingsPolicy
+import dev.viasix.app.session.VpnMtuPolicy
 import dev.viasix.app.state.SessionUiState
 import dev.viasix.app.ui.AppSection
 import dev.viasix.app.ui.displayName
@@ -84,6 +87,7 @@ fun SettingsScreen(
     onRefreshInstalledApps: () -> Unit = {},
     onDnsRoutingModeChange: (DnsRoutingMode) -> Unit = {},
     onDnsServerChange: (String) -> Unit = {},
+    onVpnMtuChange: (String) -> Unit = {},
 ) {
     val colors = LocalViaSixColors.current
     val uriHandler = LocalUriHandler.current
@@ -134,6 +138,45 @@ fun SettingsScreen(
                             },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier =
+                        Modifier.padding(
+                            start = VisualStyle.spacing16,
+                            end = VisualStyle.spacing16,
+                            bottom = VisualStyle.spacing12,
+                        ),
+                )
+                HorizontalDivider(color = colors.surfaceBorder)
+                OutlinedTextField(
+                    value = state.vpnMtu,
+                    onValueChange = onVpnMtuChange,
+                    label = { Text("VPN MTU") },
+                    isError = !VpnMtuPolicy.isValid(state.vpnMtu),
+                    enabled = !tunnelLocked,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(
+                                start = VisualStyle.spacing16,
+                                end = VisualStyle.spacing16,
+                                top = VisualStyle.spacing12,
+                            ),
+                )
+                Text(
+                    text =
+                        if (VpnMtuPolicy.isValid(state.vpnMtu)) {
+                            "允许 ${VpnMtuPolicy.MIN}–${VpnMtuPolicy.MAX}，默认 ${VpnMtuPolicy.DEFAULT}；变更在下次连接时生效。"
+                        } else {
+                            "请输入 ${VpnMtuPolicy.MIN}–${VpnMtuPolicy.MAX} 之间的整数。"
+                        },
+                    style = MaterialTheme.typography.bodySmall,
+                    color =
+                        if (VpnMtuPolicy.isValid(state.vpnMtu)) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            colors.warning
+                        },
                     modifier =
                         Modifier.padding(
                             start = VisualStyle.spacing16,

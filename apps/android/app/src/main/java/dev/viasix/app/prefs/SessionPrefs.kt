@@ -21,6 +21,7 @@ data class SessionPrefs(
     val selectedAddress: String = "2001:db8::1",
     val routingMode: String = "rule",
     val fullTunnel: Boolean = true,
+    val vpnMtu: String = "1500",
     val dnsRoutingMode: String = "proxy",
     val dnsServer: String = "1.1.1.1",
     val appRoutingMode: String = "all",
@@ -41,6 +42,7 @@ data class SessionPrefs(
             .put("selectedAddress", selectedAddress)
             .put("routingMode", routingMode)
             .put("fullTunnel", fullTunnel)
+            .put("vpnMtu", vpnMtu)
             .put("dnsRoutingMode", dnsRoutingMode)
             .put("dnsServer", dnsServer)
             .put("appRoutingMode", appRoutingMode)
@@ -122,6 +124,7 @@ data class SessionPrefs(
                     selectedAddress = o.optString("selectedAddress", "2001:db8::1"),
                     routingMode = o.optString("routingMode", "rule"),
                     fullTunnel = o.optBoolean("fullTunnel", true),
+                    vpnMtu = o.optString("vpnMtu", "1500"),
                     dnsRoutingMode = o.optString("dnsRoutingMode", "proxy"),
                     dnsServer = o.optString("dnsServer", "1.1.1.1"),
                     appRoutingMode = o.optString("appRoutingMode", "all"),

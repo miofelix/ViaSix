@@ -27,6 +27,7 @@ import dev.viasix.app.session.RuntimeProcessIdentity
 import dev.viasix.app.session.RuntimeStackFailure
 import dev.viasix.app.session.RuntimeStackHealth
 import dev.viasix.app.session.VpnStartOrigin
+import dev.viasix.app.session.VpnMtuPolicy
 import dev.viasix.app.tile.ViaSixTileService
 import dev.viasix.app.tun.Tun2SocksEngine
 import dev.viasix.core.formatting.ByteRateFormatter
@@ -92,6 +93,10 @@ class ViaSixVpnService : VpnService() {
             intent?.getBooleanExtra(EXTRA_FULL_TUNNEL, restoredPrefs?.fullTunnel ?: true)
                 ?: restoredPrefs?.fullTunnel
                 ?: true
+        val vpnMtuInput =
+            intent?.getStringExtra(EXTRA_VPN_MTU)
+                ?: restoredPrefs?.vpnMtu
+                ?: VpnMtuPolicy.DEFAULT.toString()
         val dnsRoutingMode =
             DnsRoutingMode.parse(
                 intent?.getStringExtra(EXTRA_DNS_ROUTING_MODE)
@@ -117,7 +122,7 @@ class ViaSixVpnService : VpnService() {
 
         startForeground(NOTIFICATION_ID, buildNotification("Starting ViaSix…"))
         appendEvent(
-            "启动请求（$reason） mode=${mode.wire} fullTunnel=$fullTunnel " +
+            "启动请求（$reason） mode=${mode.wire} fullTunnel=$fullTunnel mtu=$vpnMtuInput " +
                 "appRouting=${appRoutingMode.wire} apps=${selectedAppPackages.size}",
             "info",
         )
@@ -137,6 +142,7 @@ class ViaSixVpnService : VpnService() {
                     selectedIp,
                     mode,
                     fullTunnel,
+                    vpnMtuInput,
                     dnsRoutingMode,
                     dnsServerInput,
                     appRoutingMode,
@@ -159,11 +165,17 @@ class ViaSixVpnService : VpnService() {
         selectedIp: String?,
         mode: RoutingMode,
         fullTunnel: Boolean,
+        vpnMtuInput: String,
         dnsRoutingMode: DnsRoutingMode,
         dnsServerInput: String,
         appRoutingMode: AppRoutingMode,
         selectedAppPackages: List<String>,
     ) {
+        val vpnMtu =
+            VpnMtuPolicy.normalize(vpnMtuInput)
+                ?: throw IllegalArgumentException(
+                    "VPN MTU must be ${VpnMtuPolicy.MIN}..${VpnMtuPolicy.MAX}: $vpnMtuInput",
+                )
         val normalizedDnsServer = DnsSettingsPolicy.normalizeServer(dnsServerInput)
         if (fullTunnel && normalizedDnsServer == null) {
             throw IllegalArgumentException("invalid DNS server: $dnsServerInput")
@@ -218,7 +230,7 @@ class ViaSixVpnService : VpnService() {
         val builder =
             Builder()
                 .setSession("ViaSix")
-                .setMtu(1500)
+                .setMtu(vpnMtu)
                 .addAddress("10.10.0.2", 32)
         applyAppRouting(builder, appRoutingMode, selectedAppPackages)
 
@@ -259,6 +271,7 @@ class ViaSixVpnService : VpnService() {
             builder.establish()
                 ?: throw IllegalStateException("VpnService.Builder.establish() returned null")
         tunnel = established
+        appendEvent("VPN MTU：$vpnMtu", "info")
 
         if (fullTunnel) {
             val engine =
@@ -573,6 +586,7 @@ class ViaSixVpnService : VpnService() {
         const val EXTRA_SELECTED_IP = "selected_ip"
         const val EXTRA_MODE = "mode"
         const val EXTRA_FULL_TUNNEL = "full_tunnel"
+        const val EXTRA_VPN_MTU = "vpn_mtu"
         const val EXTRA_DNS_ROUTING_MODE = "dns_routing_mode"
         const val EXTRA_DNS_SERVER = "dns_server"
         const val EXTRA_APP_ROUTING_MODE = "app_routing_mode"

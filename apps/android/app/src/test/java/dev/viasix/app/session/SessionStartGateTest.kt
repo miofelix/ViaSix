@@ -104,6 +104,24 @@ class SessionStartGateTest {
     }
 
     @Test
+    fun invalidVpnMtuIsBlockedInSettingsForEveryVpnMode() {
+        for (fullTunnel in listOf(true, false)) {
+            val result =
+                SessionStartGate.evaluate(
+                    RoutingMode.DIRECT,
+                    selectedAddress = goodNode,
+                    summary = managedSummary,
+                    fullTunnel = fullTunnel,
+                    vpnMtu = "1279",
+                )
+
+            assertTrue(result is SessionStartGate.Result.Blocked)
+            assertEquals("settings", (result as SessionStartGate.Result.Blocked).sectionWire)
+            assertTrue(result.message.contains("MTU"))
+        }
+    }
+
+    @Test
     fun ruleModeBlocksWithoutIpv6() {
         val result =
             SessionStartGate.evaluate(RoutingMode.RULE, "invalid", managedSummary)
