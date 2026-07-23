@@ -24,6 +24,7 @@ class BrandIconSurfaceTest {
                 "src/main/res/drawable/ic_viasix_foreground.xml",
                 "app/src/main/res/drawable/ic_viasix_foreground.xml",
             )
+        val lintConfig = resolve("lint.xml", "app/lint.xml")
 
         val manifestText = manifest.readText()
         assertTrue(manifestText.contains("@mipmap/ic_launcher"))
@@ -34,6 +35,7 @@ class BrandIconSurfaceTest {
         assertTrue(vpn.readText().contains("R.drawable.ic_viasix_notification"))
         assertTrue(launcher.readText().contains("<monochrome"))
         assertTrue(foreground.readText().contains("apps/macos/Packaging/AppIcon.svg"))
+        assertTrue(lintConfig.readText().contains("src/main/res/mipmap-anydpi-v26"))
     }
 
     private fun resolve(vararg paths: String): File =

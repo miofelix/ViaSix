@@ -234,10 +234,9 @@ data class AppNotice(
 )
 
 object LogClock {
-    private val format = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
     private var nextId = 1L
 
-    fun now(): String = format.format(Date())
+    fun now(): String = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
 
     fun nextId(): Long = nextId++
 }

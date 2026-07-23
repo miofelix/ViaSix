@@ -343,7 +343,7 @@ class ViaSixVpnService : VpnService() {
                 }
             val entry =
                 JSONObject()
-                    .put("ts", TIME_FORMAT.format(Date()))
+                    .put("ts", formatEventTime())
                     .put("level", level)
                     .put("message", message)
                     .put("id", System.currentTimeMillis())
@@ -359,6 +359,9 @@ class ViaSixVpnService : VpnService() {
             Log.w(TAG, "appendEvent failed: ${error.message}")
         }
     }
+
+    private fun formatEventTime(): String =
+        SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
 
     private fun updateNotification(content: String) {
         val manager = getSystemService(NotificationManager::class.java)
@@ -434,7 +437,6 @@ class ViaSixVpnService : VpnService() {
         const val KEY_STARTED_AT = "startedAt"
         const val KEY_EVENTS = "events"
 
-        private val TIME_FORMAT = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
         private const val CHANNEL_ID = "viasix_vpn"
         private const val NOTIFICATION_ID = 42
         private const val REQUEST_OPEN_APP = 43

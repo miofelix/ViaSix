@@ -278,8 +278,8 @@ fun CompactInfoRow(
 fun MetricTile(
     title: String,
     value: String,
-    tone: AppTone = AppTone.Accent,
     modifier: Modifier = Modifier,
+    tone: AppTone = AppTone.Accent,
 ) {
     val colors = LocalViaSixColors.current
     val toneColor = tone.color(colors)
